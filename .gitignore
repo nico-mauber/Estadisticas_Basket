@@ -3,3 +3,4 @@ backend/*.pyc
 backend/basketball.db
 *.db
 .env
+CLAUDE.md
