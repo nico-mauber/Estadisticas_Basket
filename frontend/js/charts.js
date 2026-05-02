@@ -9,6 +9,10 @@ function _destroy(id) {
   if (_instances[id]) { _instances[id].destroy(); delete _instances[id]; }
 }
 
+export function resetZoom(canvasId) {
+  if (_instances[canvasId]) _instances[canvasId].resetZoom();
+}
+
 // ── Colour palette ──────────────────────────────────────────────────────────
 const C = {
   accent:  "rgba(249,115,22,1)",
@@ -296,7 +300,17 @@ export function drawLeagueScatter(canvasId, teams) {
             },
           },
         },
-        // Quadrant lines via annotation not available without plugin — use afterDraw
+        zoom: {
+          zoom: {
+            wheel: { enabled: true },
+            pinch: { enabled: true },
+            mode: "xy",
+          },
+          pan: {
+            enabled: true,
+            mode: "xy",
+          },
+        },
       },
       scales: {
         x: {

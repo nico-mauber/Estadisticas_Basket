@@ -1,5 +1,5 @@
 import { api } from "./api.js";
-import { drawRadar, drawEvolution, drawPlayerEvolution, drawLeagueScatter } from "./charts.js";
+import { drawRadar, drawEvolution, drawPlayerEvolution, drawLeagueScatter, resetZoom } from "./charts.js";
 
 // ── Toast ──────────────────────────────────────────────────────────────────
 function toast(msg, type = "ok") {
@@ -13,7 +13,6 @@ function toast(msg, type = "ok") {
 // ── Stat helpers ───────────────────────────────────────────────────────────
 const PCT  = v => v != null ? (v * 100).toFixed(1) + "%" : "—";
 const DEC2 = v => v != null ? Number(v).toFixed(2) : "—";
-const INT  = v => v != null ? Math.round(v) : "—";
 
 function statClass(value, avg, higherIsBetter = true) {
   if (value == null || avg == null) return "neutral";
@@ -25,14 +24,16 @@ function statBox(label, value, display, leagueKey, league, higherIsBetter = true
   const avg   = lg?.avg;
   const best  = lg?.best;
   const cls   = statClass(value, avg, higherIsBetter);
+  const isPct = leagueKey.includes("pct") || leagueKey.includes("or_") || leagueKey.includes("dr_") || leagueKey.includes("to_") || leagueKey.includes("as_");
+  const fmt   = v => v != null ? (isPct ? PCT(v) : DEC2(v)) : "—";
   return `
     <div class="stat-box">
       <div class="stat-label">${label}</div>
       <div class="stat-value ${cls}">${display}</div>
       <div class="stat-context">
-        <span class="avg">Ø ${avg != null ? (leagueKey.includes("pct") || leagueKey.includes("or_") || leagueKey.includes("dr_") || leagueKey.includes("to_") || leagueKey.includes("as_") ? PCT(avg) : DEC2(avg)) : "—"}</span>
+        <span class="avg">Ø ${fmt(avg)}</span>
         &nbsp;
-        <span class="best">↑ ${best != null ? (leagueKey.includes("pct") || leagueKey.includes("or_") || leagueKey.includes("dr_") || leagueKey.includes("to_") || leagueKey.includes("as_") ? PCT(best) : DEC2(best)) : "—"}</span>
+        <span class="best">↑ ${fmt(best)}</span>
       </div>
     </div>`;
 }
@@ -64,7 +65,6 @@ let importPage = 0;
 
 function _fmtDate(d) {
   if (!d) return "—";
-  // d is YYYY-MM-DD → DD/MM/YYYY
   const parts = d.split("-");
   if (parts.length === 3) return `${parts[2]}/${parts[1]}/${parts[0]}`;
   return d;
@@ -76,10 +76,10 @@ function _gamesTable(games, page) {
   const slice = games.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE);
 
   const pagination = totalPages > 1 ? `
-    <div style="display:flex;align-items:center;gap:12px;margin-top:12px;justify-content:flex-end">
-      <button class="btn btn-ghost" id="pg-prev" ${page === 0 ? "disabled" : ""} style="padding:6px 14px">← Ant.</button>
-      <span style="color:var(--muted);font-size:13px">Página ${page + 1} / ${totalPages}</span>
-      <button class="btn btn-ghost" id="pg-next" ${page >= totalPages - 1 ? "disabled" : ""} style="padding:6px 14px">Sig. →</button>
+    <div class="pagination">
+      <button class="btn btn-ghost btn-sm" id="pg-prev" ${page === 0 ? "disabled" : ""}>← Ant.</button>
+      <span class="pagination-label">Página ${page + 1} / ${totalPages}</span>
+      <button class="btn btn-ghost btn-sm" id="pg-next" ${page >= totalPages - 1 ? "disabled" : ""}>Sig. →</button>
     </div>` : "";
 
   return `
@@ -91,11 +91,11 @@ function _gamesTable(games, page) {
         <tbody>
           ${slice.map(g => `
             <tr>
-              <td>${_fmtDate(g.date)}</td>
+              <td class="td-muted">${_fmtDate(g.date)}</td>
               <td class="td-team">${g.home_team || "—"}</td>
-              <td style="font-weight:600">${g.home_score ?? "—"} – ${g.away_score ?? "—"}</td>
+              <td class="td-result">${g.home_score ?? "—"} – ${g.away_score ?? "—"}</td>
               <td class="td-team">${g.away_team || "—"}</td>
-              <td style="color:var(--muted);font-size:12px">${g.competition || "—"}</td>
+              <td class="td-comp">${g.competition || "—"}</td>
             </tr>`).join("")}
         </tbody>
       </table>
@@ -114,9 +114,7 @@ async function renderImport(allGames) {
         <input id="url-input" type="text" placeholder="https://fibalivestats.dcd.shared.geniussports.com/u/FUBB/2741550/bs.html" />
         <button class="btn" id="btn-import">Importar</button>
       </div>
-      <p style="color:var(--muted);margin-top:10px;font-size:12px;">
-        El sistema captura los datos automáticamente desde la URL.
-      </p>
+      <p class="import-hint">El sistema captura los datos automáticamente desde la URL de FIBA LiveStats.</p>
     </div>
     <div class="card">
       <div class="card-title">Partidos importados (${games.length})</div>
@@ -143,7 +141,6 @@ async function renderImport(allGames) {
       btn.textContent = "Importar";
     }
   });
-
 }
 
 // ── League section ─────────────────────────────────────────────────────────
@@ -158,7 +155,7 @@ async function renderLeague() {
       <div class="card">
         <div class="card-title">Ranking de equipos — Liga</div>
         <div class="table-wrap">
-          <table id="league-table">
+          <table id="league-table" class="table-sticky">
             <thead><tr>
               <th>#</th>
               <th>Equipo</th>
@@ -177,7 +174,7 @@ async function renderLeague() {
             <tbody>
               ${teams.map((t, i) => `
                 <tr style="cursor:pointer" data-code="${t.team_code}">
-                  <td style="color:var(--muted)">${i + 1}</td>
+                  <td class="td-muted">${i + 1}</td>
                   <td class="td-team">${t.team_name}</td>
                   <td>${t.games}</td>
                   <td>${DEC2(t.oer)}</td>
@@ -196,20 +193,24 @@ async function renderLeague() {
         </div>
       </div>`;
 
-    // Scatter map (only if 2+ teams)
     if (teams.length >= 2) {
       sec.insertAdjacentHTML("beforeend", `
         <div class="card">
           <div class="card-title">Mapa ofensivo / defensivo</div>
-          <p style="color:var(--muted);font-size:11px;margin-bottom:12px">
+          <p class="chart-hint">
             Derecha = mejor ataque (OER alto) &nbsp;|&nbsp; Abajo = mejor defensa (DER bajo) &nbsp;|&nbsp; Abajo-derecha = elite
+            &nbsp;&nbsp;·&nbsp;&nbsp;
+            <span style="color:var(--muted)">🖱 rueda = zoom &nbsp;·&nbsp; arrastrar = mover &nbsp;·&nbsp; pellizcar = zoom táctil</span>
           </p>
-          <canvas id="chart-scatter" height="320"></canvas>
+          <canvas id="chart-scatter"></canvas>
+          <div style="text-align:right;margin-top:8px">
+            <button class="btn btn-ghost btn-sm" id="btn-reset-scatter">↺ Resetear zoom</button>
+          </div>
         </div>`);
       drawLeagueScatter("chart-scatter", teams);
+      document.getElementById("btn-reset-scatter").addEventListener("click", () => resetZoom("chart-scatter"));
     }
 
-    // Click row → team view
     sec.querySelectorAll("tbody tr").forEach(tr => {
       tr.addEventListener("click", () => {
         document.getElementById("team-select").value = tr.dataset.code;
@@ -218,18 +219,17 @@ async function renderLeague() {
       });
     });
   } catch (e) {
-    sec.innerHTML = `<p class="empty" style="color:var(--red)">${e.message}</p>`;
+    sec.innerHTML = `<p class="empty below-avg">${e.message}</p>`;
   }
 }
 
 // ── Team section ───────────────────────────────────────────────────────────
-async function renderTeam(teamName) {
-  const sec = document.getElementById("sec-team");
+async function renderTeam(teamCode) {
   const main = document.getElementById("team-main");
   main.innerHTML = '<p class="empty"><span class="spinner"></span>Cargando...</p>';
 
   try {
-    const data = await api.team(teamName);
+    const data = await api.team(teamCode);
     const av   = data.averages;
     const lg   = data.league;
 
@@ -273,10 +273,10 @@ async function renderTeam(teamName) {
             <tbody>
               ${data.game_log.map(g => `
                 <tr>
-                  <td>${g.date || "—"}</td>
+                  <td class="td-muted">${g.date || "—"}</td>
                   <td>${g.opponent}</td>
-                  <td style="color:var(--muted)">${g.home_away}</td>
-                  <td><b>${g.pts}</b></td>
+                  <td class="td-muted">${g.home_away}</td>
+                  <td class="td-result">${g.pts}</td>
                   <td>${DEC2(g.oer)}</td>
                   <td>${DEC2(g.der)}</td>
                   <td>${PCT(g.efg_pct)}</td>
@@ -290,14 +290,12 @@ async function renderTeam(teamName) {
         </div>
       </div>`;
 
-    // ── Charts (only render if multiple games for meaningful visuals) ──
     if (data.game_log.length >= 1) {
-      // Two-column chart row
       main.insertAdjacentHTML("afterbegin", `
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+        <div class="chart-grid">
           <div class="card">
             <div class="card-title">Perfil de equipo</div>
-            <div style="max-width:380px;margin:0 auto">
+            <div class="radar-wrap">
               <canvas id="chart-radar"></canvas>
             </div>
           </div>
@@ -310,24 +308,22 @@ async function renderTeam(teamName) {
       drawEvolution("chart-evo", data.game_log, lg?.oer?.avg);
     }
 
-    // Populate player selector
-    const players = await api.players(teamName);
+    const players = await api.players(teamCode);
     const pSel = document.getElementById("player-select");
     pSel.innerHTML = '<option value="">— Seleccionar jugador —</option>' +
       players.map(p => `<option value="${p}">${p}</option>`).join("");
   } catch (e) {
-    main.innerHTML = `<p class="empty" style="color:var(--red)">${e.message}</p>`;
+    main.innerHTML = `<p class="empty below-avg">${e.message}</p>`;
   }
 }
 
 // ── Player section ─────────────────────────────────────────────────────────
-async function renderPlayer(teamName, playerName) {
-  const sec = document.getElementById("sec-player");
+async function renderPlayer(teamCode, playerName) {
   const main = document.getElementById("player-main");
   main.innerHTML = '<p class="empty"><span class="spinner"></span>Cargando...</p>';
 
   try {
-    const data = await api.player(teamName, playerName);
+    const data = await api.player(teamCode, playerName);
     const av   = data.averages;
     const lg   = data.league;
 
@@ -351,10 +347,10 @@ async function renderPlayer(teamName, playerName) {
           ${statBox("AS%", av.as_pct, PCT(av.as_pct), "as_pct", lg)}
         </div>
       </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+      <div class="chart-grid">
         <div class="card">
           <div class="card-title">Perfil de jugador</div>
-          <div style="max-width:380px;margin:0 auto">
+          <div class="radar-wrap">
             <canvas id="chart-player-radar"></canvas>
           </div>
         </div>
@@ -376,9 +372,9 @@ async function renderPlayer(teamName, playerName) {
             <tbody>
               ${data.game_log.map(g => `
                 <tr>
-                  <td>${g.date || "—"}</td>
+                  <td class="td-muted">${g.date || "—"}</td>
                   <td>${g.opponent}</td>
-                  <td><b>${g.pts}</b></td>
+                  <td class="td-result">${g.pts}</td>
                   <td>${g.fgm}/${g.fga}</td>
                   <td>${g.fgm3}/${g.fga3}</td>
                   <td>${g.ftm}/${g.fta}</td>
@@ -397,47 +393,51 @@ async function renderPlayer(teamName, playerName) {
     drawRadar("chart-player-radar", av, lg, playerName);
     drawPlayerEvolution("chart-player-evo", data.game_log);
   } catch (e) {
-    main.innerHTML = `<p class="empty" style="color:var(--red)">${e.message}</p>`;
+    main.innerHTML = `<p class="empty below-avg">${e.message}</p>`;
   }
 }
 
 // ── Bootstrap ──────────────────────────────────────────────────────────────
+const NAV_ITEMS = {
+  import: { icon: "📥", label: "Importar" },
+  league: { icon: "🏆", label: "Liga" },
+  team:   { icon: "📊", label: "Equipo" },
+  player: { icon: "👤", label: "Jugador" },
+};
+
 async function boot() {
-  // Build shell
   document.getElementById("app").innerHTML = `
     <header>
-      <h1>🏀 CourtIQ</h1>
-      <span>Basketball Advanced Analytics</span>
+      <span class="header-logo">🏀 CourtIQ</span>
+      <span class="header-sub">Basketball Advanced Analytics</span>
     </header>
     <nav>
-      ${sections.map(s => `<button data-section="${s}">${
-        { import: "Importar", league: "Liga", team: "Equipo", player: "Jugador" }[s]
-      }</button>`).join("")}
+      ${sections.map(s => `
+        <button data-section="${s}">
+          <span class="nav-icon">${NAV_ITEMS[s].icon}</span>
+          ${NAV_ITEMS[s].label}
+        </button>`).join("")}
     </nav>
     <main>
-      <!-- Import -->
       <div class="section" id="sec-import"></div>
-
-      <!-- League -->
       <div class="section" id="sec-league"></div>
 
-      <!-- Team -->
       <div class="section" id="sec-team">
-        <div class="card" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
-          <select id="team-select"><option value="">— Seleccionar equipo —</option></select>
-          <select id="player-select"><option value="">— Seleccionar jugador —</option></select>
-          <button class="btn btn-ghost" id="btn-show-player">Ver jugador</button>
+        <div class="card">
+          <div class="team-controls">
+            <select id="team-select"><option value="">— Seleccionar equipo —</option></select>
+            <select id="player-select"><option value="">— Seleccionar jugador —</option></select>
+            <button class="btn btn-ghost" id="btn-show-player">Ver jugador</button>
+          </div>
         </div>
         <div id="team-main"></div>
       </div>
 
-      <!-- Player -->
       <div class="section" id="sec-player">
         <div id="player-main"><p class="empty">Selecciona un jugador desde la vista de equipo.</p></div>
       </div>
     </main>`;
 
-  // Nav clicks
   document.querySelectorAll("nav button").forEach(btn => {
     btn.addEventListener("click", () => {
       setSection(btn.dataset.section);
@@ -447,7 +447,6 @@ async function boot() {
     });
   });
 
-  // Team selector — value = team_code, display = team_name
   const teamSel = document.getElementById("team-select");
   teamSel.addEventListener("change", () => {
     if (teamSel.value) renderTeam(teamSel.value);
@@ -461,7 +460,6 @@ async function boot() {
     renderPlayer(team, player);
   });
 
-  // Pagination for import section — registered once here
   document.getElementById("sec-import").addEventListener("click", async e => {
     if (e.target.id === "pg-prev" && importPage > 0) importPage--;
     else if (e.target.id === "pg-next") importPage++;
@@ -470,7 +468,6 @@ async function boot() {
     document.getElementById("games-table").innerHTML = _gamesTable(games, importPage);
   });
 
-  // PWA
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("/sw.js").catch(() => {});
   }
