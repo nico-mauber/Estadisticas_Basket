@@ -1,8 +1,16 @@
 import sqlite3
 import os
 
-DB_PATH = os.environ.get("DB_PATH", os.path.join(os.path.dirname(__file__), "basketball.db"))
-os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+_default_db = os.path.join(os.path.dirname(__file__), "basketball.db")
+DB_PATH = os.environ.get("DB_PATH", _default_db)
+
+# Ensure parent dir exists; fall back to app dir if mount point not available
+_db_dir = os.path.dirname(os.path.abspath(DB_PATH))
+if not os.path.exists(_db_dir):
+    try:
+        os.makedirs(_db_dir, exist_ok=True)
+    except (PermissionError, OSError):
+        DB_PATH = _default_db
 
 
 def get_conn():
