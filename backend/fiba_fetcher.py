@@ -11,7 +11,11 @@ import re
 import json
 import urllib.request
 import urllib.error
-from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
+try:
+    from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
+    _PLAYWRIGHT_AVAILABLE = True
+except ImportError:
+    _PLAYWRIGHT_AVAILABLE = False
 
 
 _HEADERS = {
@@ -123,6 +127,8 @@ def fetch_game_data(url: str) -> dict:
         pass
 
     if raw is None:
+        if not _PLAYWRIGHT_AVAILABLE:
+            raise RuntimeError("No se pudo obtener datos de FIBA LiveStats (urllib falló y Playwright no está disponible).")
         raw = _fetch_playwright(data_url)
 
     game = _parse_fiba_json(raw, url)
