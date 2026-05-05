@@ -464,3 +464,55 @@ select:focus { border-color: var(--accent); }
 
 /* ── Canvas ──────────────────────────────────────────── */
 canvas { display: block; width: 100% !important; }
+
+/* ── Filter pills ────────────────────────────────────── */
+.filter-pills {
+  display: flex;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-3);
+  flex-wrap: wrap;
+}
+.filter-pill {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  color: var(--muted);
+  padding: 5px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all .15s;
+  -webkit-tap-highlight-color: transparent;
+}
+.filter-pill.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #000;
+}
+
+/* ── Sortable table headers ──────────────────────────── */
+thead th.sort-asc::after  { content: " ↑"; color: var(--accent); }
+thead th.sort-desc::after { content: " ↓"; color: var(--accent); }
+thead th[data-key]        { cursor: pointer; user-select: none; }
+thead th[data-key]:hover  { color: var(--text); }
+
+/* ── Compare section ─────────────────────────────────── */
+.compare-controls {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+@media (min-width: 600px) {
+  .compare-controls {
+    flex-direction: row;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .compare-controls select { flex: 1; min-width: 180px; }
+  .compare-controls .btn   { width: auto; }
+}
+
+.compare-table { margin-top: var(--sp-3); }
+.compare-table td { min-width: 80px; }
+.compare-table .winner { color: var(--green); font-weight: 700; }
+.compare-table .loser  { color: var(--muted); }

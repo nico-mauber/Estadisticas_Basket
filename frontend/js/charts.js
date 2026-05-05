@@ -123,6 +123,61 @@ export function drawRadar(canvasId, averages, league, label = "Equipo") {
   });
 }
 
+// ── Radar — two-team comparison ────────────────────────────────────────────
+export function drawCompareRadar(canvasId, avgA, avgB, league, labelA, labelB) {
+  _applyDefaults();
+  _destroy(canvasId);
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+
+  const dims = [
+    { key: "oer",     label: "Ataque",       hib: true  },
+    { key: "der",     label: "Defensa",      hib: false },
+    { key: "efg_pct", label: "eFG%",         hib: true  },
+    { key: "ts_pct",  label: "TS%",          hib: true  },
+    { key: "or_pct",  label: "Reb. Of.",     hib: true  },
+    { key: "dr_pct",  label: "Reb. Def.",    hib: true  },
+    { key: "to_pct",  label: "Cuida pelota", hib: false },
+    { key: "as_pct",  label: "Asistencias",  hib: true  },
+  ];
+
+  _instances[canvasId] = new Chart(canvas, {
+    type: "radar",
+    data: {
+      labels: dims.map(d => d.label),
+      datasets: [
+        {
+          label: labelA,
+          data: dims.map(d => _norm(avgA[d.key], d.key, league, d.hib)),
+          borderColor: C.accent, backgroundColor: C.accentA,
+          borderWidth: 2, pointBackgroundColor: C.accent, pointRadius: 3,
+        },
+        {
+          label: labelB,
+          data: dims.map(d => _norm(avgB[d.key], d.key, league, d.hib)),
+          borderColor: C.blue, backgroundColor: C.blueA,
+          borderWidth: 2, pointBackgroundColor: C.blue, pointRadius: 3,
+        },
+      ],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: true,
+      scales: {
+        r: {
+          min: 0, max: 100,
+          ticks: { display: false, stepSize: 25 },
+          grid: { color: C.grid }, angleLines: { color: C.grid },
+          pointLabels: { color: C.text, font: { size: 11 } },
+        },
+      },
+      plugins: {
+        legend: { position: "bottom", labels: { boxWidth: 12, padding: 16 } },
+        tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: ${ctx.raw.toFixed(0)}/100` } },
+      },
+    },
+  });
+}
+
 // ── Line — evolution per game ───────────────────────────────────────────────
 export function drawEvolution(canvasId, gameLog, leagueOerAvg) {
   _applyDefaults();

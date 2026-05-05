@@ -1,5 +1,5 @@
 import { api } from "./api.js";
-import { drawRadar, drawEvolution, drawPlayerEvolution, drawLeagueScatter, resetZoom } from "./charts.js";
+import { drawRadar, drawEvolution, drawPlayerEvolution, drawLeagueScatter, drawCompareRadar, resetZoom } from "./charts.js";
 
 // ── Toast ──────────────────────────────────────────────────────────────────
 function toast(msg, type = "ok") {
@@ -38,6 +38,25 @@ function statBox(label, value, display, leagueKey, league, higherIsBetter = true
     </div>`;
 }
 
+// ── Compute averages from a game_log array (for last-N filter) ─────────────
+function _computeAvg(gameLog) {
+  const n = gameLog.length;
+  if (!n) return {};
+  const keys = [
+    "oer","der","efg_pct","ts_pct","fg2_pct","fg3_pct",
+    "or_pct","dr_pct","to_pct","as_pct","pace","pts",
+    "fgm","fga","fgm2","fga2","fgm3","fga3","ftm","fta",
+    "orb","drb","ast","tov","stl","blk","possessions",
+  ];
+  const result = {};
+  for (const k of keys) {
+    const vals = gameLog.map(g => g[k]).filter(v => v != null && !isNaN(v));
+    result[k] = vals.length ? Math.round((vals.reduce((s, v) => s + v, 0) / vals.length) * 10000) / 10000 : 0;
+  }
+  result.net_rating = (result.oer || 0) - (result.der || 0);
+  return result;
+}
+
 // ── Team selector (module-level so renderImport can call it) ───────────────
 async function refreshTeamSelector() {
   const teamSel = document.getElementById("team-select");
@@ -49,8 +68,18 @@ async function refreshTeamSelector() {
   if (current) teamSel.value = current;
 }
 
+async function refreshCompareSelectors() {
+  const teams = await api.teams().catch(() => []);
+  const opts = '<option value="">— Equipo —</option>' +
+    teams.map(t => `<option value="${t.code}">${t.name}</option>`).join("");
+  ["compare-a", "compare-b"].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = opts;
+  });
+}
+
 // ── Nav ────────────────────────────────────────────────────────────────────
-const sections = ["import", "league", "team", "player"];
+const sections = ["import", "league", "team", "compare", "player"];
 let activeSection = "import";
 
 function setSection(id) {
@@ -134,6 +163,7 @@ async function renderImport(allGames) {
       importPage = 0;
       renderImport();
       refreshTeamSelector();
+      refreshCompareSelectors();
     } catch (e) {
       toast(e.message, "err");
     } finally {
@@ -143,57 +173,116 @@ async function renderImport(allGames) {
   });
 }
 
-// ── League section ─────────────────────────────────────────────────────────
+// ── League section — sortable table ───────────────────────────────────────
+let _leagueTeams    = [];
+let _leagueSortKey  = "oer";
+let _leagueSortDir  = -1; // -1 desc, 1 asc
+
+const LEAGUE_COLS = [
+  { key: null,           label: "#" },
+  { key: "team_name",    label: "Equipo" },
+  { key: "games",        label: "PJ",    title: "Partidos" },
+  { key: "oer",          label: "OER",   title: "Eficiencia Ofensiva" },
+  { key: "der",          label: "DER",   title: "Eficiencia Defensiva" },
+  { key: "net_rating",   label: "NRtg",  title: "Rating Neto" },
+  { key: "efg_pct",      label: "eFG%",  title: "Effective FG%" },
+  { key: "ts_pct",       label: "TS%",   title: "True Shooting%" },
+  { key: "or_pct",       label: "OR%",   title: "Rebote Ofensivo%" },
+  { key: "dr_pct",       label: "DR%",   title: "Rebote Defensivo%" },
+  { key: "to_pct",       label: "TO%",   title: "Turnover%" },
+  { key: "pace",         label: "Pace",  title: "Pace" },
+  { key: "pts",          label: "Pts",   title: "Puntos por partido" },
+];
+
+function _sortedLeague() {
+  return [..._leagueTeams].sort((a, b) => {
+    const va = a[_leagueSortKey], vb = b[_leagueSortKey];
+    if (va == null) return 1;
+    if (vb == null) return -1;
+    return typeof va === "string"
+      ? va.localeCompare(vb) * _leagueSortDir
+      : (va - vb) * _leagueSortDir;
+  });
+}
+
+function _leagueTableHTML(teams) {
+  const sorted = teams;
+  const headers = LEAGUE_COLS.map(c => {
+    const cls = c.key === _leagueSortKey
+      ? (_leagueSortDir === -1 ? "sort-desc" : "sort-asc")
+      : "";
+    const attrs = c.key ? `data-key="${c.key}"` : "";
+    return `<th class="${cls}" ${attrs} title="${c.title || ""}">${c.label}</th>`;
+  }).join("");
+
+  const rows = sorted.map((t, i) => `
+    <tr style="cursor:pointer" data-code="${t.team_code}">
+      <td class="td-muted">${i + 1}</td>
+      <td class="td-team">${t.team_name}</td>
+      <td>${t.games}</td>
+      <td>${DEC2(t.oer)}</td>
+      <td>${DEC2(t.der)}</td>
+      <td class="${t.net_rating >= 0 ? 'above-avg' : 'below-avg'}">${DEC2(t.net_rating)}</td>
+      <td>${PCT(t.efg_pct)}</td>
+      <td>${PCT(t.ts_pct)}</td>
+      <td>${PCT(t.or_pct)}</td>
+      <td>${PCT(t.dr_pct)}</td>
+      <td>${PCT(t.to_pct)}</td>
+      <td>${DEC2(t.pace)}</td>
+      <td>${DEC2(t.pts)}</td>
+    </tr>`).join("");
+
+  return `<thead><tr>${headers}</tr></thead><tbody>${rows}</tbody>`;
+}
+
+function _bindLeagueTableEvents(tableEl) {
+  tableEl.querySelectorAll("th[data-key]").forEach(th => {
+    th.addEventListener("click", () => {
+      const key = th.dataset.key;
+      if (_leagueSortKey === key) {
+        _leagueSortDir *= -1;
+      } else {
+        _leagueSortKey = key;
+        _leagueSortDir = key === "team_name" ? 1 : -1;
+      }
+      tableEl.innerHTML = _leagueTableHTML(_sortedLeague());
+      _bindLeagueTableEvents(tableEl);
+      _bindLeagueRowClicks(tableEl);
+    });
+  });
+}
+
+function _bindLeagueRowClicks(tableEl) {
+  tableEl.querySelectorAll("tbody tr").forEach(tr => {
+    tr.addEventListener("click", () => {
+      document.getElementById("team-select").value = tr.dataset.code;
+      setSection("team");
+      renderTeam(tr.dataset.code);
+    });
+  });
+}
+
 async function renderLeague() {
   const sec = document.getElementById("sec-league");
   sec.innerHTML = '<p class="empty"><span class="spinner"></span>Cargando...</p>';
   try {
-    const teams = await api.league();
-    if (!teams.length) { sec.innerHTML = '<p class="empty">Sin datos. Importa partidos primero.</p>'; return; }
+    _leagueTeams = await api.league();
+    if (!_leagueTeams.length) { sec.innerHTML = '<p class="empty">Sin datos. Importa partidos primero.</p>'; return; }
 
     sec.innerHTML = `
       <div class="card">
-        <div class="card-title">Ranking de equipos — Liga</div>
+        <div class="card-title">Ranking de equipos — Liga <span style="color:var(--muted);font-size:10px;font-weight:400;margin-left:8px">Click en columna para ordenar</span></div>
         <div class="table-wrap">
-          <table id="league-table" class="table-sticky">
-            <thead><tr>
-              <th>#</th>
-              <th>Equipo</th>
-              <th title="Partidos">PJ</th>
-              <th title="Eficiencia Ofensiva">OER</th>
-              <th title="Eficiencia Defensiva">DER</th>
-              <th title="Rating Neto">NRtg</th>
-              <th title="Effective FG%">eFG%</th>
-              <th title="True Shooting%">TS%</th>
-              <th title="Rebote Ofensivo%">OR%</th>
-              <th title="Rebote Defensivo%">DR%</th>
-              <th title="Turnover%">TO%</th>
-              <th title="Pace">Pace</th>
-              <th title="Puntos por partido">Pts</th>
-            </tr></thead>
-            <tbody>
-              ${teams.map((t, i) => `
-                <tr style="cursor:pointer" data-code="${t.team_code}">
-                  <td class="td-muted">${i + 1}</td>
-                  <td class="td-team">${t.team_name}</td>
-                  <td>${t.games}</td>
-                  <td>${DEC2(t.oer)}</td>
-                  <td>${DEC2(t.der)}</td>
-                  <td class="${t.net_rating >= 0 ? 'above-avg' : 'below-avg'}">${DEC2(t.net_rating)}</td>
-                  <td>${PCT(t.efg_pct)}</td>
-                  <td>${PCT(t.ts_pct)}</td>
-                  <td>${PCT(t.or_pct)}</td>
-                  <td>${PCT(t.dr_pct)}</td>
-                  <td>${PCT(t.to_pct)}</td>
-                  <td>${DEC2(t.pace)}</td>
-                  <td>${DEC2(t.pts)}</td>
-                </tr>`).join("")}
-            </tbody>
-          </table>
+          <table id="league-table" class="table-sticky"></table>
         </div>
       </div>`;
 
-    if (teams.length >= 2) {
+    const tableEl = document.getElementById("league-table");
+    tableEl.innerHTML = _leagueTableHTML(_sortedLeague());
+    _bindLeagueTableEvents(tableEl);
+    _bindLeagueRowClicks(tableEl);
+
+    if (_leagueTeams.length >= 2) {
       sec.insertAdjacentHTML("beforeend", `
         <div class="card">
           <div class="card-title">Mapa ofensivo / defensivo</div>
@@ -207,106 +296,120 @@ async function renderLeague() {
             <button class="btn btn-ghost btn-sm" id="btn-reset-scatter">↺ Resetear zoom</button>
           </div>
         </div>`);
-      drawLeagueScatter("chart-scatter", teams);
+      drawLeagueScatter("chart-scatter", _leagueTeams);
       document.getElementById("btn-reset-scatter").addEventListener("click", () => resetZoom("chart-scatter"));
     }
-
-    sec.querySelectorAll("tbody tr").forEach(tr => {
-      tr.addEventListener("click", () => {
-        document.getElementById("team-select").value = tr.dataset.code;
-        setSection("team");
-        renderTeam(tr.dataset.code);
-      });
-    });
   } catch (e) {
     sec.innerHTML = `<p class="empty below-avg">${e.message}</p>`;
   }
 }
 
-// ── Team section ───────────────────────────────────────────────────────────
+// ── Team section — with last-N filter ─────────────────────────────────────
+let _teamData  = null;
+let _teamLastN = 0; // 0 = all
+
+function _filteredLog(gameLog, n) {
+  if (!n) return gameLog;
+  const sorted = [...gameLog].sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+  return sorted.slice(0, n);
+}
+
+function _renderTeamContent(main, data, n) {
+  const filtered = _filteredLog(data.game_log, n);
+  const av = n ? _computeAvg(filtered) : data.averages;
+  const lg = data.league;
+
+  main.innerHTML = `
+    <div class="card">
+      <div class="card-title">Eficiencia</div>
+      <div class="stat-grid">
+        ${statBox("OER", av.oer, DEC2(av.oer), "oer", lg)}
+        ${statBox("DER", av.der, DEC2(av.der), "der", lg, false)}
+        ${statBox("Net Rating", av.net_rating, DEC2(av.net_rating), "net_rating", lg)}
+        ${statBox("Pace", av.pace, DEC2(av.pace), "pace", lg)}
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">Tiro</div>
+      <div class="stat-grid">
+        ${statBox("eFG%", av.efg_pct, PCT(av.efg_pct), "efg_pct", lg)}
+        ${statBox("TS%", av.ts_pct, PCT(av.ts_pct), "ts_pct", lg)}
+        ${statBox("FG2%", av.fg2_pct, PCT(av.fg2_pct), "fg2_pct", lg)}
+        ${statBox("FG3%", av.fg3_pct, PCT(av.fg3_pct), "fg3_pct", lg)}
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">Rebotes & Misc</div>
+      <div class="stat-grid">
+        ${statBox("OR%", av.or_pct, PCT(av.or_pct), "or_pct", lg)}
+        ${statBox("DR%", av.dr_pct, PCT(av.dr_pct), "dr_pct", lg)}
+        ${statBox("TO%", av.to_pct, PCT(av.to_pct), "to_pct", lg, false)}
+        ${statBox("AS%", av.as_pct, PCT(av.as_pct), "as_pct", lg)}
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">Game log</div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>Fecha</th><th>Rival</th><th>L/V</th>
+            <th>Pts</th><th>OER</th><th>DER</th><th>eFG%</th><th>TS%</th>
+            <th>OR%</th><th>DR%</th><th>TO%</th>
+          </tr></thead>
+          <tbody>
+            ${filtered.map(g => `
+              <tr>
+                <td class="td-muted">${_fmtDate(g.date)}</td>
+                <td>${g.opponent}</td>
+                <td class="td-muted">${g.home_away}</td>
+                <td class="td-result">${g.pts}</td>
+                <td>${DEC2(g.oer)}</td>
+                <td>${DEC2(g.der)}</td>
+                <td>${PCT(g.efg_pct)}</td>
+                <td>${PCT(g.ts_pct)}</td>
+                <td>${PCT(g.or_pct)}</td>
+                <td>${PCT(g.dr_pct)}</td>
+                <td>${PCT(g.to_pct)}</td>
+              </tr>`).join("")}
+          </tbody>
+        </table>
+      </div>
+    </div>`;
+
+  if (filtered.length >= 1) {
+    main.insertAdjacentHTML("afterbegin", `
+      <div class="chart-grid">
+        <div class="card">
+          <div class="card-title">Perfil de equipo</div>
+          <div class="radar-wrap">
+            <canvas id="chart-radar"></canvas>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title">Evolución por partido</div>
+          <canvas id="chart-evo" height="200"></canvas>
+        </div>
+      </div>`);
+    drawRadar("chart-radar", av, lg, data.team_name);
+    drawEvolution("chart-evo", filtered, lg?.oer?.avg);
+  }
+}
+
 async function renderTeam(teamCode) {
   const main = document.getElementById("team-main");
   main.innerHTML = '<p class="empty"><span class="spinner"></span>Cargando...</p>';
+  _teamLastN = 0;
 
   try {
-    const data = await api.team(teamCode);
-    const av   = data.averages;
-    const lg   = data.league;
+    _teamData = await api.team(teamCode);
 
-    main.innerHTML = `
-      <div class="card">
-        <div class="card-title">Eficiencia</div>
-        <div class="stat-grid">
-          ${statBox("OER", av.oer, DEC2(av.oer), "oer", lg)}
-          ${statBox("DER", av.der, DEC2(av.der), "der", lg, false)}
-          ${statBox("Net Rating", av.net_rating, DEC2(av.net_rating), "net_rating", lg)}
-          ${statBox("Pace", av.pace, DEC2(av.pace), "pace", lg)}
-        </div>
-      </div>
-      <div class="card">
-        <div class="card-title">Tiro</div>
-        <div class="stat-grid">
-          ${statBox("eFG%", av.efg_pct, PCT(av.efg_pct), "efg_pct", lg)}
-          ${statBox("TS%", av.ts_pct, PCT(av.ts_pct), "ts_pct", lg)}
-          ${statBox("FG2%", av.fg2_pct, PCT(av.fg2_pct), "fg2_pct", lg)}
-          ${statBox("FG3%", av.fg3_pct, PCT(av.fg3_pct), "fg3_pct", lg)}
-        </div>
-      </div>
-      <div class="card">
-        <div class="card-title">Rebotes & Misc</div>
-        <div class="stat-grid">
-          ${statBox("OR%", av.or_pct, PCT(av.or_pct), "or_pct", lg)}
-          ${statBox("DR%", av.dr_pct, PCT(av.dr_pct), "dr_pct", lg)}
-          ${statBox("TO%", av.to_pct, PCT(av.to_pct), "to_pct", lg, false)}
-          ${statBox("AS%", av.as_pct, PCT(av.as_pct), "as_pct", lg)}
-        </div>
-      </div>
-      <div class="card">
-        <div class="card-title">Game log</div>
-        <div class="table-wrap">
-          <table>
-            <thead><tr>
-              <th>Fecha</th><th>Rival</th><th>L/V</th>
-              <th>Pts</th><th>OER</th><th>DER</th><th>eFG%</th><th>TS%</th>
-              <th>OR%</th><th>DR%</th><th>TO%</th>
-            </tr></thead>
-            <tbody>
-              ${data.game_log.map(g => `
-                <tr>
-                  <td class="td-muted">${g.date || "—"}</td>
-                  <td>${g.opponent}</td>
-                  <td class="td-muted">${g.home_away}</td>
-                  <td class="td-result">${g.pts}</td>
-                  <td>${DEC2(g.oer)}</td>
-                  <td>${DEC2(g.der)}</td>
-                  <td>${PCT(g.efg_pct)}</td>
-                  <td>${PCT(g.ts_pct)}</td>
-                  <td>${PCT(g.or_pct)}</td>
-                  <td>${PCT(g.dr_pct)}</td>
-                  <td>${PCT(g.to_pct)}</td>
-                </tr>`).join("")}
-            </tbody>
-          </table>
-        </div>
-      </div>`;
-
-    if (data.game_log.length >= 1) {
-      main.insertAdjacentHTML("afterbegin", `
-        <div class="chart-grid">
-          <div class="card">
-            <div class="card-title">Perfil de equipo</div>
-            <div class="radar-wrap">
-              <canvas id="chart-radar"></canvas>
-            </div>
-          </div>
-          <div class="card">
-            <div class="card-title">Evolución por partido</div>
-            <canvas id="chart-evo" height="200"></canvas>
-          </div>
-        </div>`);
-      drawRadar("chart-radar", av, lg, data.team_name);
-      drawEvolution("chart-evo", data.game_log, lg?.oer?.avg);
+    // Filter pills
+    const filterWrap = document.getElementById("team-filter-pills");
+    if (filterWrap) {
+      filterWrap.style.display = _teamData.games > 3 ? "" : "none";
     }
+
+    _renderTeamContent(main, _teamData, 0);
 
     const players = await api.players(teamCode);
     const pSel = document.getElementById("player-select");
@@ -315,6 +418,89 @@ async function renderTeam(teamCode) {
   } catch (e) {
     main.innerHTML = `<p class="empty below-avg">${e.message}</p>`;
   }
+}
+
+// ── Compare section ────────────────────────────────────────────────────────
+async function renderCompare() {
+  const sec = document.getElementById("sec-compare");
+  await refreshCompareSelectors();
+
+  const btnCompare = document.getElementById("btn-compare");
+  if (btnCompare._bound) return;
+  btnCompare._bound = true;
+
+  btnCompare.addEventListener("click", async () => {
+    const codeA = document.getElementById("compare-a").value;
+    const codeB = document.getElementById("compare-b").value;
+    if (!codeA || !codeB) return toast("Selecciona dos equipos", "err");
+    if (codeA === codeB) return toast("Selecciona equipos distintos", "err");
+
+    btnCompare.disabled = true;
+    btnCompare.innerHTML = '<span class="spinner"></span>Comparando...';
+
+    try {
+      const [dataA, dataB] = await Promise.all([api.team(codeA), api.team(codeB)]);
+      const avA = dataA.averages, avB = dataB.averages;
+      const lg  = dataA.league;
+
+      const METRICS = [
+        { key: "oer",       label: "OER",        hib: true,  fmt: DEC2 },
+        { key: "der",       label: "DER",        hib: false, fmt: DEC2 },
+        { key: "net_rating",label: "Net Rating",  hib: true,  fmt: DEC2 },
+        { key: "efg_pct",   label: "eFG%",       hib: true,  fmt: PCT  },
+        { key: "ts_pct",    label: "TS%",        hib: true,  fmt: PCT  },
+        { key: "fg2_pct",   label: "FG2%",       hib: true,  fmt: PCT  },
+        { key: "fg3_pct",   label: "FG3%",       hib: true,  fmt: PCT  },
+        { key: "or_pct",    label: "OR%",        hib: true,  fmt: PCT  },
+        { key: "dr_pct",    label: "DR%",        hib: true,  fmt: PCT  },
+        { key: "to_pct",    label: "TO%",        hib: false, fmt: PCT  },
+        { key: "as_pct",    label: "AS%",        hib: true,  fmt: PCT  },
+        { key: "pace",      label: "Pace",       hib: true,  fmt: DEC2 },
+        { key: "pts",       label: "Pts/partido",hib: true,  fmt: DEC2 },
+      ];
+
+      const rows = METRICS.map(m => {
+        const va = avA[m.key], vb = avB[m.key];
+        const aWins = va != null && vb != null && (m.hib ? va > vb : va < vb);
+        const bWins = va != null && vb != null && (m.hib ? vb > va : vb < va);
+        return `<tr>
+          <td class="td-muted" style="font-weight:600">${m.label}</td>
+          <td class="${aWins ? 'winner' : bWins ? 'loser' : ''}" style="text-align:right">${m.fmt(va)}</td>
+          <td class="${bWins ? 'winner' : aWins ? 'loser' : ''}" style="text-align:right">${m.fmt(vb)}</td>
+        </tr>`;
+      }).join("");
+
+      document.getElementById("compare-result").innerHTML = `
+        <div class="chart-grid">
+          <div class="card">
+            <div class="card-title">Radar comparativo</div>
+            <div class="radar-wrap">
+              <canvas id="chart-compare-radar"></canvas>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-title">Estadísticas — ${dataA.team_name} vs ${dataB.team_name}</div>
+            <div class="table-wrap">
+              <table class="compare-table">
+                <thead><tr>
+                  <th>Métrica</th>
+                  <th style="text-align:right;color:var(--accent)">${dataA.team_name}</th>
+                  <th style="text-align:right;color:var(--blue)">${dataB.team_name}</th>
+                </tr></thead>
+                <tbody>${rows}</tbody>
+              </table>
+            </div>
+          </div>
+        </div>`;
+
+      drawCompareRadar("chart-compare-radar", avA, avB, lg, dataA.team_name, dataB.team_name);
+    } catch (e) {
+      toast(e.message, "err");
+    } finally {
+      btnCompare.disabled = false;
+      btnCompare.textContent = "Comparar";
+    }
+  });
 }
 
 // ── Player section ─────────────────────────────────────────────────────────
@@ -372,7 +558,7 @@ async function renderPlayer(teamCode, playerName) {
             <tbody>
               ${data.game_log.map(g => `
                 <tr>
-                  <td class="td-muted">${g.date || "—"}</td>
+                  <td class="td-muted">${_fmtDate(g.date)}</td>
                   <td>${g.opponent}</td>
                   <td class="td-result">${g.pts}</td>
                   <td>${g.fgm}/${g.fga}</td>
@@ -399,10 +585,11 @@ async function renderPlayer(teamCode, playerName) {
 
 // ── Bootstrap ──────────────────────────────────────────────────────────────
 const NAV_ITEMS = {
-  import: { icon: "📥", label: "Importar" },
-  league: { icon: "🏆", label: "Liga" },
-  team:   { icon: "📊", label: "Equipo" },
-  player: { icon: "👤", label: "Jugador" },
+  import:  { icon: "📥", label: "Importar" },
+  league:  { icon: "🏆", label: "Liga" },
+  team:    { icon: "📊", label: "Equipo" },
+  compare: { icon: "⚡", label: "Comparar" },
+  player:  { icon: "👤", label: "Jugador" },
 };
 
 async function boot() {
@@ -422,6 +609,7 @@ async function boot() {
       <div class="section" id="sec-import"></div>
       <div class="section" id="sec-league"></div>
 
+      <!-- Team -->
       <div class="section" id="sec-team">
         <div class="card">
           <div class="team-controls">
@@ -429,29 +617,53 @@ async function boot() {
             <select id="player-select"><option value="">— Seleccionar jugador —</option></select>
             <button class="btn btn-ghost" id="btn-show-player">Ver jugador</button>
           </div>
+          <div class="filter-pills" id="team-filter-pills" style="display:none;margin-top:12px">
+            <span style="color:var(--muted);font-size:12px;align-self:center;margin-right:4px">Período:</span>
+            <button class="filter-pill active" data-n="0">Todos</button>
+            <button class="filter-pill" data-n="5">Últ. 5</button>
+            <button class="filter-pill" data-n="3">Últ. 3</button>
+          </div>
         </div>
         <div id="team-main"></div>
       </div>
 
+      <!-- Compare -->
+      <div class="section" id="sec-compare">
+        <div class="card">
+          <div class="card-title">Comparar equipos</div>
+          <div class="compare-controls">
+            <select id="compare-a"><option value="">— Equipo A —</option></select>
+            <select id="compare-b"><option value="">— Equipo B —</option></select>
+            <button class="btn" id="btn-compare">Comparar</button>
+          </div>
+        </div>
+        <div id="compare-result"></div>
+      </div>
+
+      <!-- Player -->
       <div class="section" id="sec-player">
         <div id="player-main"><p class="empty">Selecciona un jugador desde la vista de equipo.</p></div>
       </div>
     </main>`;
 
+  // Nav clicks
   document.querySelectorAll("nav button").forEach(btn => {
     btn.addEventListener("click", () => {
       setSection(btn.dataset.section);
       if (btn.dataset.section === "import")  renderImport();
       if (btn.dataset.section === "league")  renderLeague();
       if (btn.dataset.section === "team")    refreshTeamSelector();
+      if (btn.dataset.section === "compare") renderCompare();
     });
   });
 
+  // Team selector
   const teamSel = document.getElementById("team-select");
   teamSel.addEventListener("change", () => {
     if (teamSel.value) renderTeam(teamSel.value);
   });
 
+  // Player button
   document.getElementById("btn-show-player").addEventListener("click", () => {
     const team   = document.getElementById("team-select").value;
     const player = document.getElementById("player-select").value;
@@ -460,6 +672,17 @@ async function boot() {
     renderPlayer(team, player);
   });
 
+  // Last-N filter pills
+  document.getElementById("team-filter-pills").addEventListener("click", e => {
+    const pill = e.target.closest(".filter-pill");
+    if (!pill || !_teamData) return;
+    const n = parseInt(pill.dataset.n, 10);
+    _teamLastN = n;
+    document.querySelectorAll(".filter-pill").forEach(p => p.classList.toggle("active", p === pill));
+    _renderTeamContent(document.getElementById("team-main"), _teamData, n);
+  });
+
+  // Import section pagination
   document.getElementById("sec-import").addEventListener("click", async e => {
     if (e.target.id === "pg-prev" && importPage > 0) importPage--;
     else if (e.target.id === "pg-next") importPage++;
