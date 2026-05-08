@@ -29,9 +29,11 @@ def _opp_for(conn, game_id: str, team_code: str) -> dict | None:
 def _opp_dict(opp_row: dict) -> dict:
     return {
         "pts":  opp_row["pts"],
-        "fga2": opp_row["fga2"], "fga3": opp_row["fga3"],
-        "fta":  opp_row["fta"],  "orb":  opp_row["orb"],
-        "drb":  opp_row["drb"],  "tov":  opp_row["tov"],
+        "fgm2": opp_row["fgm2"], "fga2": opp_row["fga2"],
+        "fgm3": opp_row["fgm3"], "fga3": opp_row["fga3"],
+        "ftm":  opp_row["ftm"],  "fta":  opp_row["fta"],
+        "orb":  opp_row["orb"],  "drb":  opp_row["drb"],
+        "tov":  opp_row["tov"],
     }
 
 
@@ -182,17 +184,37 @@ def team_stats(team_code: str):
 
     keys = [
         "oer", "der", "net_rating", "efg_pct", "ts_pct",
-        "fg2_pct", "fg3_pct", "or_pct", "dr_pct", "to_pct",
-        "as_pct", "pace", "pts", "possessions",
+        "fg2_pct", "fg3_pct", "ft_pct", "ft_rate", "ft_rate_report",
+        "pps", "fg2_uso", "fg3_uso",
+        "or_pct", "dr_pct", "trb_pct", "to_pct", "to_ratio",
+        "as_pct", "ast_ratio", "pace", "pts", "possessions", "plays",
+        "peso_1p", "peso_2p", "peso_3p",
+        "opp_efg_pct", "opp_ts_pct", "opp_to_pct", "opp_ft_rate",
         "fgm", "fga", "fgm2", "fga2", "fgm3", "fga3",
         "ftm", "fta", "orb", "drb", "ast", "tov", "stl", "blk",
     ]
     averages = {k: _avg(k) for k in keys}
 
+    # Record (wins / losses)
+    wins  = sum(1 for g in game_stats if g.get("pts", 0) > g.get("opp_pts", 0))
+    losses = len(game_stats) - wins
+    home_gs   = [g for g in game_stats if g["home_away"] == "L"]
+    away_gs   = [g for g in game_stats if g["home_away"] == "V"]
+    home_wins = sum(1 for g in home_gs if g.get("pts", 0) > g.get("opp_pts", 0))
+    away_wins = sum(1 for g in away_gs if g.get("pts", 0) > g.get("opp_pts", 0))
+
+    record = {
+        "wins": wins, "losses": losses,
+        "win_pct": round(wins / len(game_stats), 3) if game_stats else 0,
+        "home": f"{home_wins}-{len(home_gs)-home_wins}",
+        "away": f"{away_wins}-{len(away_gs)-away_wins}",
+    }
+
     return jsonify({
         "team_code": team_code,
         "team_name": team_name,
         "games":     len(game_stats),
+        "record":    record,
         "averages":  averages,
         "league":    league,
         "game_log":  game_stats,
@@ -255,7 +277,9 @@ def player_stats(team_code: str, player_name: str):
 
     keys = [
         "oer", "efg_pct", "ts_pct", "fg2_pct", "fg3_pct",
-        "or_pct", "dr_pct", "to_pct", "as_pct",
+        "ft_pct", "ft_rate", "ft_rate_report", "pps", "ppp",
+        "fg2_uso", "fg3_uso", "peso_1p", "peso_2p", "peso_3p",
+        "or_pct", "dr_pct", "to_pct", "to_ratio", "as_pct", "ast_ratio", "ast_to",
         "pts", "fgm", "fga", "fgm2", "fga2", "fgm3", "fga3",
         "ftm", "fta", "orb", "drb", "ast", "tov", "stl", "blk",
     ]

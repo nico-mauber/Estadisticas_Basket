@@ -1,7 +1,6 @@
 """
 Advanced basketball statistics engine.
-Formulas sourced from basketanalisis.wordpress.com/sumario-de-la-estadistica-avanzada/
-and Dean Oliver's "Basketball on Paper".
+Formulas from Dean Oliver's "Basketball on Paper" and the FUBB scouting guide.
 """
 
 
@@ -17,73 +16,110 @@ def possessions(fga2, fga3, fta, orb, tov):
 def calc_team_stats(t: dict, opp: dict) -> dict:
     """
     t   — team raw stats dict
-    opp — opponent raw stats dict
+    opp — opponent raw stats dict (must include fgm2, fgm3, ftm, fta)
     Returns dict with all advanced metrics.
     """
-    # Possessions
-    t_pos  = possessions(t["fga2"], t["fga3"], t["fta"], t["orb"], t["tov"])
-    o_pos  = possessions(opp["fga2"], opp["fga3"], opp["fta"], opp["orb"], opp["tov"])
+    # ── Possessions ──────────────────────────────────────────────────────────
+    t_pos   = possessions(t["fga2"], t["fga3"], t["fta"], t["orb"], t["tov"])
+    o_pos   = possessions(opp["fga2"], opp["fga3"], opp["fta"], opp["orb"], opp["tov"])
     avg_pos = (t_pos + o_pos) / 2 if (t_pos + o_pos) else 1
 
-    # Shooting
-    fga  = t["fga2"] + t["fga3"]
-    fgm  = t["fgm2"] + t["fgm3"]
-    pts  = t["pts"]
-    fta  = t["fta"]
-    ftm  = t["ftm"]
+    # ── Shooting base ─────────────────────────────────────────────────────────
+    fga = t["fga2"] + t["fga3"]
+    fgm = t["fgm2"] + t["fgm3"]
+    pts = t["pts"]
+    fta = t["fta"]
+    ftm = t["ftm"]
 
-    efg  = _safe_div(fgm + 0.5 * t["fgm3"], fga)            # eFG%
-    ts   = _safe_div(pts, 2 * (fga + 0.44 * fta))           # TS%
-    ftr  = _safe_div(ftm, fga)                               # FTR
+    # ── Plays (finalizaciones ofensivas) ──────────────────────────────────────
+    plays = fga + 0.44 * fta + t["tov"]
 
-    # Usage splits (shot type distribution)
-    shot_base = t["fga2"] + t["fga3"] + fta * 0.44
-    t2_pct = _safe_div(t["fga2"], shot_base)
-    t3_pct = _safe_div(t["fga3"], shot_base)
-    t1_pct = _safe_div(fta * 0.44, shot_base)
-
-    # Efficiency ratings (pts per possession)
-    oer  = _safe_div(pts, t_pos)                             # OER
-    der  = _safe_div(opp["pts"], o_pos)                      # DER
-    net  = round(oer - der, 4)                               # Net rating
-
-    # Rebound percentages
-    or_pct = _safe_div(t["orb"], t["orb"] + opp["drb"])     # OR%
-    dr_pct = _safe_div(t["drb"], t["drb"] + opp["orb"])     # DR%
-
-    # Turnover & assist ratios
-    to_pct = _safe_div(t["tov"], fga + 0.44 * fta + t["tov"])  # TO%
-    as_pct = _safe_div(t["ast"], fgm) if fgm else 0.0           # AS%
-
-    # Pace (possessions per 40 min)
-    minutes = t.get("minutes", 40) or 40
-    pace = round(40 * avg_pos / minutes, 2)
-
-    # 2PT and 3PT effectiveness
+    # ── Shooting efficiency ───────────────────────────────────────────────────
+    efg  = _safe_div(fgm + 0.5 * t["fgm3"], fga)         # eFG%
+    ts   = _safe_div(pts, 2 * (fga + 0.44 * fta))         # TS%
+    ft_rate        = _safe_div(fta, fga)                   # FT Rate = 1PI/FGA
+    ft_rate_report = _safe_div(ftm, fga)                   # FT% reporte = 1PC/FGA
+    pps  = _safe_div(pts, fga)                             # Points Per Shot
+    fg2_uso = _safe_div(t["fga2"], fga)                    # %2P uso
+    fg3_uso = _safe_div(t["fga3"], fga)                    # %3P uso
     fg2_pct = _safe_div(t["fgm2"], t["fga2"])
     fg3_pct = _safe_div(t["fgm3"], t["fga3"])
     ft_pct  = _safe_div(ftm, fta)
 
+    # ── Point distribution ────────────────────────────────────────────────────
+    peso_1p = _safe_div(ftm, pts)
+    peso_2p = _safe_div(2 * t["fgm2"], pts)
+    peso_3p = _safe_div(3 * t["fgm3"], pts)
+
+    # ── Efficiency ratings ────────────────────────────────────────────────────
+    oer = _safe_div(pts, t_pos)
+    der = _safe_div(opp["pts"], o_pos)
+    net = round(oer - der, 4)
+
+    # ── Rebound percentages ───────────────────────────────────────────────────
+    or_pct   = _safe_div(t["orb"], t["orb"] + opp["drb"])
+    dr_pct   = _safe_div(t["drb"], t["drb"] + opp["orb"])
+    trb      = t["orb"] + t["drb"]
+    opp_trb  = opp["orb"] + opp["drb"]
+    trb_pct  = _safe_div(trb, trb + opp_trb)              # % Reb Total
+
+    # ── Turnover & assist ratios ──────────────────────────────────────────────
+    to_pct   = _safe_div(t["tov"], fga + 0.44 * fta + t["tov"])   # TO% (sobre plays)
+    to_ratio = _safe_div(t["tov"], plays)                           # TO Ratio
+    as_pct   = _safe_div(t["ast"], fgm) if fgm else 0.0
+    ast_ratio = _safe_div(t["ast"], plays)                          # AST Ratio
+
+    # ── Pace ──────────────────────────────────────────────────────────────────
+    minutes = t.get("minutes", 40) or 40
+    pace = round(40 * avg_pos / minutes, 2)
+
+    # ── Opponent / defensive metrics ──────────────────────────────────────────
+    opp_fga = opp["fga2"] + opp["fga3"]
+    opp_fgm = opp.get("fgm2", 0) + opp.get("fgm3", 0)
+    opp_efg_pct = _safe_div(opp_fgm + 0.5 * opp.get("fgm3", 0), opp_fga)
+    opp_ts_pct  = _safe_div(opp["pts"], 2 * (opp_fga + 0.44 * opp["fta"]))
+    opp_to_pct  = _safe_div(opp["tov"], opp_fga + 0.44 * opp["fta"] + opp["tov"])
+    opp_ft_rate = _safe_div(opp["fta"], opp_fga)
+
     return {
+        # Possessions
         "possessions": round(t_pos, 2),
-        "oer":  oer,
-        "der":  der,
-        "net_rating": net,
-        "efg_pct":  efg,
-        "ts_pct":   ts,
-        "ftr":      ftr,
-        "fg2_pct":  fg2_pct,
-        "fg3_pct":  fg3_pct,
-        "ft_pct":   ft_pct,
-        "t2_pct":   t2_pct,
-        "t3_pct":   t3_pct,
-        "t1_pct":   t1_pct,
-        "or_pct":   or_pct,
-        "dr_pct":   dr_pct,
-        "to_pct":   to_pct,
-        "as_pct":   as_pct,
-        "pace":     pace,
-        # raw
+        "plays":       round(plays, 2),
+        # Efficiency
+        "oer":         oer,
+        "der":         der,
+        "net_rating":  net,
+        "pace":        pace,
+        # Shooting
+        "efg_pct":     efg,
+        "ts_pct":      ts,
+        "fg2_pct":     fg2_pct,
+        "fg3_pct":     fg3_pct,
+        "ft_pct":      ft_pct,
+        "ft_rate":     ft_rate,
+        "ft_rate_report": ft_rate_report,
+        "pps":         pps,
+        "fg2_uso":     fg2_uso,
+        "fg3_uso":     fg3_uso,
+        # Point distribution
+        "peso_1p":     peso_1p,
+        "peso_2p":     peso_2p,
+        "peso_3p":     peso_3p,
+        # Rebotes
+        "or_pct":      or_pct,
+        "dr_pct":      dr_pct,
+        "trb_pct":     trb_pct,
+        # Turnover & assist
+        "to_pct":      to_pct,
+        "to_ratio":    to_ratio,
+        "as_pct":      as_pct,
+        "ast_ratio":   ast_ratio,
+        # Opponent defensive metrics
+        "opp_efg_pct": opp_efg_pct,
+        "opp_ts_pct":  opp_ts_pct,
+        "opp_to_pct":  opp_to_pct,
+        "opp_ft_rate": opp_ft_rate,
+        # Raw
         "pts":  pts,
         "fgm":  fgm,
         "fga":  fga,
@@ -101,49 +137,66 @@ def calc_team_stats(t: dict, opp: dict) -> dict:
         "stl":  t.get("stl", 0),
         "blk":  t.get("blk", 0),
         "pf":   t.get("pf", 0),
+        "opp_pts": opp["pts"],
     }
 
 
 def calc_player_stats(p: dict, team_pos: float) -> dict:
-    """Player advanced stats — OER/DER relative to team possessions."""
-    fga  = p["fga2"] + p["fga3"]
-    fgm  = p["fgm2"] + p["fgm3"]
-    pts  = p["pts"]
-    fta  = p["fta"]
-    ftm  = p["ftm"]
+    """Player advanced stats."""
+    fga = p["fga2"] + p["fga3"]
+    fgm = p["fgm2"] + p["fgm3"]
+    pts = p["pts"]
+    fta = p["fta"]
+    ftm = p["ftm"]
+
+    plays = fga + 0.44 * fta + p["tov"]
 
     efg  = _safe_div(fgm + 0.5 * p["fgm3"], fga)
     ts   = _safe_div(pts, 2 * (fga + 0.44 * fta))
-    ftr  = _safe_div(ftm, fga)
+    ft_rate        = _safe_div(fta, fga)
+    ft_rate_report = _safe_div(ftm, fga)
+    pps  = _safe_div(pts, fga)
+    ppp  = _safe_div(pts, plays)
     fg2  = _safe_div(p["fgm2"], p["fga2"])
     fg3  = _safe_div(p["fgm3"], p["fga3"])
     ft   = _safe_div(ftm, fta)
-    to_pct = _safe_div(p["tov"], fga + 0.44 * fta + p["tov"])
-    as_pct = _safe_div(p["ast"], fgm) if fgm else 0.0
+    fg2_uso = _safe_div(p["fga2"], fga)
+    fg3_uso = _safe_div(p["fga3"], fga)
+    to_pct  = _safe_div(p["tov"], fga + 0.44 * fta + p["tov"])
+    to_ratio = _safe_div(p["tov"], plays)
+    as_pct  = _safe_div(p["ast"], fgm) if fgm else 0.0
+    ast_to  = _safe_div(p["ast"], p["tov"]) if p["tov"] else (float("inf") if p["ast"] > 0 else 0.0)
+    ast_ratio = _safe_div(p["ast"], plays)
+    peso_1p = _safe_div(ftm, pts)
+    peso_2p = _safe_div(2 * p["fgm2"], pts)
+    peso_3p = _safe_div(3 * p["fgm3"], pts)
 
-    # Player possessions used (approx)
     p_pos = possessions(p["fga2"], p["fga3"], fta, p["orb"], p["tov"])
     oer   = _safe_div(pts, p_pos)
 
-    shot_base = p["fga2"] + p["fga3"] + fta * 0.44
-    t2_pct = _safe_div(p["fga2"], shot_base)
-    t3_pct = _safe_div(p["fga3"], shot_base)
-    t1_pct = _safe_div(fta * 0.44, shot_base)
-
     return {
-        "possessions": round(p_pos, 2),
-        "oer":     oer,
-        "efg_pct": efg,
-        "ts_pct":  ts,
-        "ftr":     ftr,
-        "fg2_pct": fg2,
-        "fg3_pct": fg3,
-        "ft_pct":  ft,
-        "t2_pct":  t2_pct,
-        "t3_pct":  t3_pct,
-        "t1_pct":  t1_pct,
-        "to_pct":  to_pct,
-        "as_pct":  as_pct,
+        "possessions":    round(p_pos, 2),
+        "plays":          round(plays, 2),
+        "oer":            oer,
+        "efg_pct":        efg,
+        "ts_pct":         ts,
+        "ft_rate":        ft_rate,
+        "ft_rate_report": ft_rate_report,
+        "pps":            pps,
+        "ppp":            ppp,
+        "fg2_pct":        fg2,
+        "fg3_pct":        fg3,
+        "ft_pct":         ft,
+        "fg2_uso":        fg2_uso,
+        "fg3_uso":        fg3_uso,
+        "to_pct":         to_pct,
+        "to_ratio":       to_ratio,
+        "as_pct":         as_pct,
+        "ast_ratio":      ast_ratio,
+        "ast_to":         ast_to if ast_to != float("inf") else 99.0,
+        "peso_1p":        peso_1p,
+        "peso_2p":        peso_2p,
+        "peso_3p":        peso_3p,
         "pts":  pts,
         "fgm":  fgm,
         "fga":  fga,
@@ -171,9 +224,17 @@ def league_averages(all_team_stats: list[dict]) -> dict:
 
     keys = [
         "oer", "der", "net_rating", "efg_pct", "ts_pct",
-        "fg2_pct", "fg3_pct", "or_pct", "dr_pct", "to_pct",
-        "as_pct", "pace", "pts", "possessions",
+        "fg2_pct", "fg3_pct", "ft_pct", "ft_rate", "pps",
+        "or_pct", "dr_pct", "trb_pct",
+        "to_pct", "to_ratio", "as_pct", "ast_ratio",
+        "pace", "pts", "possessions",
+        "opp_efg_pct", "opp_ts_pct", "opp_to_pct",
+        "peso_1p", "peso_2p", "peso_3p",
+        "fg2_uso", "fg3_uso",
     ]
+    # Metrics where lower = better
+    lower_is_better = {"der", "to_pct", "to_ratio", "opp_efg_pct", "opp_ts_pct"}
+
     result = {}
     for k in keys:
         vals = [s[k] for s in all_team_stats if k in s and s[k] is not None]
@@ -181,10 +242,6 @@ def league_averages(all_team_stats: list[dict]) -> dict:
             result[k] = {"avg": 0, "best": 0}
             continue
         avg  = round(sum(vals) / len(vals), 4)
-        # "best" = highest for offensive stats, lowest for DER/to_pct
-        if k in ("der", "to_pct"):
-            best = min(vals)
-        else:
-            best = max(vals)
+        best = min(vals) if k in lower_is_better else max(vals)
         result[k] = {"avg": avg, "best": best}
     return result

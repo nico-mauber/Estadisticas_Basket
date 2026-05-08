@@ -44,9 +44,13 @@ function _computeAvg(gameLog) {
   if (!n) return {};
   const keys = [
     "oer","der","efg_pct","ts_pct","fg2_pct","fg3_pct",
-    "or_pct","dr_pct","to_pct","as_pct","pace","pts",
+    "ft_pct","ft_rate","ft_rate_report","pps","ppp",
+    "fg2_uso","fg3_uso","peso_1p","peso_2p","peso_3p",
+    "or_pct","dr_pct","trb_pct","to_pct","to_ratio","as_pct","ast_ratio",
+    "opp_efg_pct","opp_ts_pct","opp_to_pct","opp_ft_rate",
+    "pace","pts","possessions","plays",
     "fgm","fga","fgm2","fga2","fgm3","fga3","ftm","fta",
-    "orb","drb","ast","tov","stl","blk","possessions",
+    "orb","drb","ast","tov","stl","blk",
   ];
   const result = {};
   for (const k of keys) {
@@ -55,6 +59,73 @@ function _computeAvg(gameLog) {
   }
   result.net_rating = (result.oer || 0) - (result.der || 0);
   return result;
+}
+
+// ── Four Factors card ──────────────────────────────────────────────────────
+function _fourFactorsCard(av, teamName) {
+  const factors = [
+    { label: "eFG%",    team: av.efg_pct,     opp: av.opp_efg_pct, fmt: PCT, hib: true,  title: "Eficiencia de tiro ajustada" },
+    { label: "TO%",     team: av.to_pct,      opp: av.opp_to_pct,  fmt: PCT, hib: false, title: "Cuidado del balón" },
+    { label: "RebOf%",  team: av.or_pct,      opp: 1-(av.dr_pct||0), fmt: PCT, hib: true, title: "Segundas oportunidades" },
+    { label: "FT Rate", team: av.ft_rate,     opp: av.opp_ft_rate, fmt: DEC2, hib: true,  title: "Agresividad hacia el aro (FTA/FGA)" },
+  ];
+
+  const rows = factors.map(f => {
+    const tWins = f.team != null && f.opp != null && (f.hib ? f.team > f.opp : f.team < f.opp);
+    const oWins = f.team != null && f.opp != null && (f.hib ? f.opp > f.team : f.opp < f.team);
+    return `
+      <tr title="${f.title}">
+        <td class="td-muted" style="font-weight:600;min-width:72px">${f.label}</td>
+        <td class="${tWins ? 'above-avg' : oWins ? 'below-avg' : ''}" style="text-align:right;font-weight:700">${f.fmt(f.team)}</td>
+        <td style="text-align:center;color:var(--border2);padding:0 6px">vs</td>
+        <td class="${oWins ? 'above-avg' : tWins ? 'below-avg' : ''}" style="text-align:left;font-weight:700">${f.fmt(f.opp)}</td>
+      </tr>`;
+  }).join("");
+
+  return `
+    <div class="card">
+      <div class="card-title">Four Factors <span style="color:var(--muted2);font-weight:400;text-transform:none;letter-spacing:0">— ${teamName} vs Rival</span></div>
+      <div class="table-wrap">
+        <table style="font-size:13px">
+          <thead><tr>
+            <th>Factor</th>
+            <th style="text-align:right;color:var(--accent)">${teamName}</th>
+            <th></th>
+            <th style="text-align:left;color:var(--muted)">Rival Ø</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
+// ── Record badge ────────────────────────────────────────────────────────────
+function _recordCard(record, teamName) {
+  if (!record) return "";
+  const pct = record.win_pct != null ? (record.win_pct * 100).toFixed(0) + "%" : "—";
+  return `
+    <div class="card" style="display:flex;align-items:center;gap:var(--sp-5);flex-wrap:wrap">
+      <div>
+        <div class="stat-label">Récord</div>
+        <div style="font-size:28px;font-weight:800;line-height:1.1">
+          <span class="above-avg">${record.wins}</span>
+          <span style="color:var(--border2);margin:0 4px">-</span>
+          <span class="below-avg">${record.losses}</span>
+        </div>
+      </div>
+      <div class="stat-box" style="flex:1;min-width:80px">
+        <div class="stat-label">% Victorias</div>
+        <div class="stat-value">${pct}</div>
+      </div>
+      <div class="stat-box" style="flex:1;min-width:80px">
+        <div class="stat-label">Local</div>
+        <div class="stat-value">${record.home}</div>
+      </div>
+      <div class="stat-box" style="flex:1;min-width:80px">
+        <div class="stat-label">Visitante</div>
+        <div class="stat-value">${record.away}</div>
+      </div>
+    </div>`;
 }
 
 // ── Team selector (module-level so renderImport can call it) ───────────────
@@ -318,8 +389,10 @@ function _renderTeamContent(main, data, n) {
   const filtered = _filteredLog(data.game_log, n);
   const av = n ? _computeAvg(filtered) : data.averages;
   const lg = data.league;
+  const rec = n ? null : data.record;
 
   main.innerHTML = `
+    ${_recordCard(rec, data.team_name)}
     <div class="card">
       <div class="card-title">Eficiencia</div>
       <div class="stat-grid">
@@ -327,8 +400,11 @@ function _renderTeamContent(main, data, n) {
         ${statBox("DER", av.der, DEC2(av.der), "der", lg, false)}
         ${statBox("Net Rating", av.net_rating, DEC2(av.net_rating), "net_rating", lg)}
         ${statBox("Pace", av.pace, DEC2(av.pace), "pace", lg)}
+        ${statBox("PPS", av.pps, DEC2(av.pps), "pps", lg)}
+        ${statBox("FT Rate", av.ft_rate, DEC2(av.ft_rate), "ft_rate", lg)}
       </div>
     </div>
+    ${_fourFactorsCard(av, data.team_name)}
     <div class="card">
       <div class="card-title">Tiro</div>
       <div class="stat-grid">
@@ -336,6 +412,8 @@ function _renderTeamContent(main, data, n) {
         ${statBox("TS%", av.ts_pct, PCT(av.ts_pct), "ts_pct", lg)}
         ${statBox("FG2%", av.fg2_pct, PCT(av.fg2_pct), "fg2_pct", lg)}
         ${statBox("FG3%", av.fg3_pct, PCT(av.fg3_pct), "fg3_pct", lg)}
+        ${statBox("FT%", av.ft_pct, PCT(av.ft_pct), "ft_pct", lg)}
+        ${statBox("Uso 3P", av.fg3_uso, PCT(av.fg3_uso), "fg3_uso", lg)}
       </div>
     </div>
     <div class="card">
@@ -343,8 +421,10 @@ function _renderTeamContent(main, data, n) {
       <div class="stat-grid">
         ${statBox("OR%", av.or_pct, PCT(av.or_pct), "or_pct", lg)}
         ${statBox("DR%", av.dr_pct, PCT(av.dr_pct), "dr_pct", lg)}
+        ${statBox("Reb%", av.trb_pct, PCT(av.trb_pct), "trb_pct", lg)}
         ${statBox("TO%", av.to_pct, PCT(av.to_pct), "to_pct", lg, false)}
         ${statBox("AS%", av.as_pct, PCT(av.as_pct), "as_pct", lg)}
+        ${statBox("Robos", av.stl, DEC2(av.stl), "stl", lg)}
       </div>
     </div>
     <div class="card">
@@ -518,10 +598,21 @@ async function renderPlayer(teamCode, playerName) {
         <div class="card-title">Producción ofensiva</div>
         <div class="stat-grid">
           ${statBox("OER", av.oer, DEC2(av.oer), "oer", lg)}
+          ${statBox("PPP", av.ppp, DEC2(av.ppp), "ppp", lg)}
+          ${statBox("PPS", av.pps, DEC2(av.pps), "pps", lg)}
           ${statBox("eFG%", av.efg_pct, PCT(av.efg_pct), "efg_pct", lg)}
           ${statBox("TS%", av.ts_pct, PCT(av.ts_pct), "ts_pct", lg)}
+          ${statBox("FT Rate", av.ft_rate, DEC2(av.ft_rate), "ft_rate", lg)}
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">Tiro</div>
+        <div class="stat-grid">
           ${statBox("FG2%", av.fg2_pct, PCT(av.fg2_pct), "fg2_pct", lg)}
           ${statBox("FG3%", av.fg3_pct, PCT(av.fg3_pct), "fg3_pct", lg)}
+          ${statBox("FT%", av.ft_pct, PCT(av.ft_pct), "ft_pct", lg)}
+          ${statBox("Uso 2P", av.fg2_uso, PCT(av.fg2_uso), "fg2_uso", lg)}
+          ${statBox("Uso 3P", av.fg3_uso, PCT(av.fg3_uso), "fg3_uso", lg)}
         </div>
       </div>
       <div class="card">
@@ -531,6 +622,8 @@ async function renderPlayer(teamCode, playerName) {
           ${statBox("DR%", av.dr_pct, PCT(av.dr_pct), "dr_pct", lg)}
           ${statBox("TO%", av.to_pct, PCT(av.to_pct), "to_pct", lg, false)}
           ${statBox("AS%", av.as_pct, PCT(av.as_pct), "as_pct", lg)}
+          ${statBox("AST/TO", av.ast_to, DEC2(av.ast_to), "ast_ratio", lg)}
+          ${statBox("Robos", av.stl, DEC2(av.stl), "stl", lg)}
         </div>
       </div>
       <div class="chart-grid">
