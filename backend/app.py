@@ -26,11 +26,11 @@ def _opp_for(conn, game_id: str, team_code: str) -> dict | None:
     return _row(row) if row else None
 
 
-def _classify_zone(action_type: str, sub_type: str, y: float) -> str:
-    sub = (sub_type or "").lower()
+def _classify_zone(action_type: str, sub_type: str, y: float = 0) -> str:
     if action_type == "3pt":
-        return "corner_3" if y < 22 or y > 78 else "above_break_3"
-    if any(k in sub for k in ["layup", "dunk", "alley", "tip", "hook", "putback"]):
+        return "triple"
+    sub = (sub_type or "").lower()
+    if any(k in sub for k in ["layup", "dunk", "alley", "tip", "hook", "putback", "driving"]):
         return "paint"
     return "mid_range"
 
@@ -319,7 +319,7 @@ def player_stats(team_code: str, player_name: str):
 
 # ── Player shots ───────────────────────────────────────────────────────────
 
-@app.route("/api/player/<team_code>/<path:player_name>/shots")
+@app.route("/api/shots/<team_code>/<player_name>")
 def player_shots(team_code: str, player_name: str):
     team_code = team_code.upper()
     with get_conn() as conn:
@@ -329,10 +329,9 @@ def player_shots(team_code: str, player_name: str):
         ).fetchall()
 
     zones = {
-        "paint":          {"made": 0, "attempts": 0},
-        "mid_range":      {"made": 0, "attempts": 0},
-        "corner_3":       {"made": 0, "attempts": 0},
-        "above_break_3":  {"made": 0, "attempts": 0},
+        "paint":     {"made": 0, "attempts": 0},
+        "mid_range": {"made": 0, "attempts": 0},
+        "triple":    {"made": 0, "attempts": 0},
     }
     for row in rows:
         z = _classify_zone(row["action_type"], row["sub_type"], row["y"])

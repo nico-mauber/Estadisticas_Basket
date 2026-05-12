@@ -583,125 +583,74 @@ async function renderCompare() {
   });
 }
 
-// ── Shot chart SVG (zone-based) ────────────────────────────────────────────
+// ── Shot chart SVG (3 zones, no coordinates) ──────────────────────────────
 function _shotChartSVG(zones, totalShots) {
-  const W = 400, H = 280;
+  const W = 400, H = 220;
+  const muted = "#8b949e", txt = "#c9d1d9", border = "#30363d";
 
-  // Zone color based on FG%
   function zc(z) {
-    if (!z || !z.attempts) return "#1a2233";
+    if (!z || !z.attempts) return "#131c2b";
     const p = z.pct;
     if (p >= 0.50) return "rgba(34,197,94,0.38)";
     if (p >= 0.35) return "rgba(234,179,8,0.32)";
     return "rgba(239,68,68,0.38)";
   }
-
-  // Zone text label (attempts shown / made shown \n pct)
-  function zt(z, short = false) {
-    if (!z || !z.attempts) return `<tspan>—</tspan>`;
-    const pctStr = (z.pct * 100).toFixed(0) + "%";
-    return `<tspan>${z.made}/${z.attempts}</tspan><tspan dy="14" x="50%">${pctStr}</tspan>`;
-  }
-  function ztc(z) {  // corner zones (compact)
-    if (!z || !z.attempts) return `<tspan>—</tspan>`;
-    return `<tspan>${z.made}/${z.attempts} · ${(z.pct*100).toFixed(0)}%</tspan>`;
+  function zstat(z, x, y) {
+    if (!z || !z.attempts)
+      return `<text x="${x}" y="${y}" text-anchor="middle" fill="${muted}" font-size="13" font-family="Inter,sans-serif">—</text>`;
+    const pct = (z.pct * 100).toFixed(0) + "%";
+    return `
+      <text x="${x}" y="${y}" text-anchor="middle" fill="${txt}" font-size="15" font-weight="800" font-family="Inter,sans-serif">${z.made}/${z.attempts}</text>
+      <text x="${x}" y="${y+18}" text-anchor="middle" fill="${txt}" font-size="12" font-family="Inter,sans-serif">${pct}</text>`;
   }
 
-  const paint   = zones.paint          || { attempts: 0 };
-  const mid     = zones.mid_range      || { attempts: 0 };
-  const corner  = zones.corner_3       || { attempts: 0 };
-  const above   = zones.above_break_3  || { attempts: 0 };
+  const paint = zones.paint     || { attempts: 0 };
+  const mid   = zones.mid_range || { attempts: 0 };
+  const triple = zones.triple   || { attempts: 0 };
 
-  // Layout zones (basket at RIGHT, x=0 = half-court line)
-  // Corner 3:      y 0-52 and y 228-280, x 0-200
-  // Above-break 3: y 52-228, x 0-200
-  // Mid-range:     x 200-307, full height
-  // Paint:         x 307-392, y 85-195
-
-  const txt = "#c9d1d9";
-  const muted = "#8b949e";
-  const border = "#30363d";
+  // Layout: Triple (left) | Mid (center) | Paint+basket (right)
+  // x: 0-155 = triple | 155-290 = mid | 290-398 = paint
 
   return `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg"
     style="width:100%;max-width:480px;margin:0 auto;display:block;border-radius:8px">
-
-    <!-- Court background -->
     <rect width="${W}" height="${H}" fill="#0d1117" rx="8"/>
 
     <!-- Zone fills -->
-    <!-- Corner 3 top -->
-    <rect x="1" y="1" width="199" height="51" fill="${zc(corner)}" rx="6"/>
-    <!-- Above-break 3 -->
-    <rect x="1" y="52" width="199" height="176" fill="${zc(above)}"/>
-    <!-- Corner 3 bottom -->
-    <rect x="1" y="228" width="199" height="51" fill="${zc(corner)}" rx="6"/>
-    <!-- Mid-range -->
-    <rect x="200" y="1" width="107" height="278" fill="${zc(mid)}"/>
-    <!-- Paint -->
-    <rect x="307" y="85" width="85" height="110" fill="${zc(paint)}" rx="4"/>
+    <rect x="1" y="1" width="154" height="${H-2}" fill="${zc(triple)}" rx="6 0 0 6"/>
+    <rect x="155" y="1" width="135" height="${H-2}" fill="${zc(mid)}"/>
+    <rect x="290" y="1" width="109" height="${H-2}" fill="${zc(paint)}" rx="0 6 6 0"/>
 
-    <!-- Court lines -->
-    <!-- Outer boundary -->
-    <rect x="1" y="1" width="398" height="278" fill="none" stroke="${border}" stroke-width="1.5" rx="6"/>
-    <!-- 3pt boundary (approx vertical separator with arc hint) -->
-    <line x1="200" y1="1" x2="200" y2="51" stroke="${border}" stroke-width="1" stroke-dasharray="4,3"/>
-    <line x1="200" y1="228" x2="200" y2="279" stroke="${border}" stroke-width="1" stroke-dasharray="4,3"/>
-    <!-- 3pt arc simplified as curve -->
-    <path d="M200,52 Q130,140 200,228" fill="none" stroke="${border}" stroke-width="1.5"/>
-    <!-- Corner 3 horizontal separator -->
-    <line x1="1" y1="52" x2="200" y2="52" stroke="${border}" stroke-width="1" stroke-dasharray="3,3"/>
-    <line x1="1" y1="228" x2="200" y2="228" stroke="${border}" stroke-width="1" stroke-dasharray="3,3"/>
-    <!-- Mid / paint separator -->
-    <line x1="307" y1="1" x2="307" y2="279" stroke="${border}" stroke-width="1" stroke-dasharray="4,3"/>
+    <!-- Separators -->
+    <line x1="155" y1="1" x2="155" y2="${H-1}" stroke="${border}" stroke-width="1.5" stroke-dasharray="5,3"/>
+    <line x1="290" y1="1" x2="290" y2="${H-1}" stroke="${border}" stroke-width="1.5"/>
+    <!-- 3pt arc hint -->
+    <path d="M155,1 Q105,${H/2} 155,${H-1}" fill="none" stroke="${border}" stroke-width="1.5"/>
     <!-- Paint box -->
-    <rect x="307" y="85" width="85" height="110" fill="none" stroke="${border}" stroke-width="1.5"/>
-    <!-- Free throw line (approximate) -->
-    <line x1="307" y1="140" x2="340" y2="140" stroke="${border}" stroke-width="1" opacity="0.4"/>
+    <rect x="290" y="55" width="85" height="110" fill="none" stroke="${border}" stroke-width="1.5"/>
     <!-- Basket -->
-    <circle cx="383" cy="140" r="9" fill="none" stroke="#8b949e" stroke-width="2"/>
-    <line x1="392" y1="120" x2="392" y2="160" stroke="#8b949e" stroke-width="3"/>
+    <circle cx="374" cy="110" r="9" fill="none" stroke="${muted}" stroke-width="2"/>
+    <line x1="383" y1="93" x2="383" y2="127" stroke="${muted}" stroke-width="3"/>
 
-    <!-- Zone labels & stats -->
-    <!-- Corner 3 top -->
-    <text x="100" y="22" text-anchor="middle" fill="${muted}" font-size="9" font-family="Inter,sans-serif" font-weight="600" letter-spacing="0.5">TRIPLE ESQUINA</text>
-    <text text-anchor="middle" fill="${txt}" font-size="11" font-family="Inter,sans-serif" font-weight="700">
-      <tspan x="100" dy="30">${ztc(corner)}</tspan>
-    </text>
+    <!-- Zone labels -->
+    <text x="77" y="24" text-anchor="middle" fill="${muted}" font-size="9" font-weight="600" font-family="Inter,sans-serif" letter-spacing="0.5">TRIPLE</text>
+    <text x="222" y="24" text-anchor="middle" fill="${muted}" font-size="9" font-weight="600" font-family="Inter,sans-serif" letter-spacing="0.5">MID-RANGE</text>
+    <text x="333" y="24" text-anchor="middle" fill="${muted}" font-size="9" font-weight="600" font-family="Inter,sans-serif" letter-spacing="0.5">PINTURA</text>
 
-    <!-- Above-break 3 -->
-    <text x="96" y="118" text-anchor="middle" fill="${muted}" font-size="9" font-family="Inter,sans-serif" font-weight="600" letter-spacing="0.5">TRIPLE ARRIBA</text>
-    <text text-anchor="middle" fill="${txt}" font-size="13" font-family="Inter,sans-serif" font-weight="800">
-      ${above.attempts ? `<tspan x="96" y="138">${above.made}/${above.attempts}</tspan><tspan x="96" dy="16" font-size="11">${(above.pct*100).toFixed(0)}%</tspan>` : `<tspan x="96" y="138">—</tspan>`}
-    </text>
+    <!-- Zone stats -->
+    ${zstat(triple, 77, 105)}
+    ${zstat(mid, 222, 105)}
+    ${zstat(paint, 333, 105)}
 
-    <!-- Corner 3 bottom -->
-    <text x="100" y="246" text-anchor="middle" fill="${muted}" font-size="9" font-family="Inter,sans-serif" font-weight="600" letter-spacing="0.5">TRIPLE ESQUINA</text>
-    <text text-anchor="middle" fill="${txt}" font-size="11" font-family="Inter,sans-serif" font-weight="700">
-      <tspan x="100" dy="14">${ztc(corner)}</tspan>
-    </text>
-
-    <!-- Mid-range -->
-    <text x="253" y="125" text-anchor="middle" fill="${muted}" font-size="9" font-family="Inter,sans-serif" font-weight="600" letter-spacing="0.5">MID-RANGE</text>
-    <text text-anchor="middle" fill="${txt}" font-size="13" font-family="Inter,sans-serif" font-weight="800">
-      ${mid.attempts ? `<tspan x="253" y="145">${mid.made}/${mid.attempts}</tspan><tspan x="253" dy="16" font-size="11">${(mid.pct*100).toFixed(0)}%</tspan>` : `<tspan x="253" y="145">—</tspan>`}
-    </text>
-
-    <!-- Paint -->
-    <text x="349" y="126" text-anchor="middle" fill="${muted}" font-size="9" font-family="Inter,sans-serif" font-weight="600" letter-spacing="0.5">PINTURA</text>
-    <text text-anchor="middle" fill="${txt}" font-size="12" font-family="Inter,sans-serif" font-weight="800">
-      ${paint.attempts ? `<tspan x="349" y="142">${paint.made}/${paint.attempts}</tspan><tspan x="349" dy="14" font-size="10">${(paint.pct*100).toFixed(0)}%</tspan>` : `<tspan x="349" y="142">—</tspan>`}
-    </text>
-
-    <!-- Total -->
-    <text x="${W-6}" y="${H-6}" text-anchor="end" fill="${muted}" font-size="9" font-family="Inter,sans-serif">${totalShots} tiros</text>
-
-    <!-- Legend -->
-    <rect x="6" y="${H-20}" width="9" height="9" fill="rgba(34,197,94,0.38)" rx="2"/>
-    <text x="18" y="${H-13}" fill="${muted}" font-size="8" font-family="Inter,sans-serif">≥50%</text>
-    <rect x="46" y="${H-20}" width="9" height="9" fill="rgba(234,179,8,0.32)" rx="2"/>
-    <text x="58" y="${H-13}" fill="${muted}" font-size="8" font-family="Inter,sans-serif">35-50%</text>
-    <rect x="92" y="${H-20}" width="9" height="9" fill="rgba(239,68,68,0.38)" rx="2"/>
-    <text x="104" y="${H-13}" fill="${muted}" font-size="8" font-family="Inter,sans-serif">&lt;35%</text>
+    <!-- Total & legend -->
+    <text x="${W-6}" y="${H-6}" text-anchor="end" fill="${muted}" font-size="9" font-family="Inter,sans-serif">${totalShots} tiros totales</text>
+    <rect x="6" y="${H-18}" width="8" height="8" fill="rgba(34,197,94,0.38)" rx="1"/>
+    <text x="17" y="${H-11}" fill="${muted}" font-size="8" font-family="Inter,sans-serif">≥50%</text>
+    <rect x="44" y="${H-18}" width="8" height="8" fill="rgba(234,179,8,0.32)" rx="1"/>
+    <text x="55" y="${H-11}" fill="${muted}" font-size="8" font-family="Inter,sans-serif">35-50%</text>
+    <rect x="86" y="${H-18}" width="8" height="8" fill="rgba(239,68,68,0.38)" rx="1"/>
+    <text x="97" y="${H-11}" fill="${muted}" font-size="8" font-family="Inter,sans-serif">&lt;35%</text>
+    <rect x="120" y="${H-18}" width="8" height="8" fill="#131c2b" stroke="${border}" stroke-width="1" rx="1"/>
+    <text x="131" y="${H-11}" fill="${muted}" font-size="8" font-family="Inter,sans-serif">sin datos</text>
   </svg>`;
 }
 
