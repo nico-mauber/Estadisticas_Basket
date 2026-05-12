@@ -342,9 +342,28 @@ def player_shots(team_code: str, player_name: str):
     for z in zones.values():
         z["pct"] = round(z["made"] / z["attempts"], 4) if z["attempts"] else None
 
+    # League-wide zone averages (all players, all games)
+    lg_zones = {
+        "paint":     {"made": 0, "attempts": 0},
+        "mid_range": {"made": 0, "attempts": 0},
+        "triple":    {"made": 0, "attempts": 0},
+    }
+    with get_conn() as conn:
+        all_shots = conn.execute(
+            "SELECT action_type, sub_type, made FROM shots"
+        ).fetchall()
+    for row in all_shots:
+        z = _classify_zone(row["action_type"], row["sub_type"])
+        if z in lg_zones:
+            lg_zones[z]["attempts"] += 1
+            lg_zones[z]["made"]     += row["made"]
+    for z in lg_zones.values():
+        z["pct"] = round(z["made"] / z["attempts"], 4) if z["attempts"] else None
+
     return jsonify({
-        "zones":       zones,
-        "total_shots": sum(z["attempts"] for z in zones.values()),
+        "zones":        zones,
+        "league_zones": lg_zones,
+        "total_shots":  sum(z["attempts"] for z in zones.values()),
     })
 
 
