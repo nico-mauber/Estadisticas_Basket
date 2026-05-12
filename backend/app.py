@@ -26,6 +26,15 @@ def _opp_for(conn, game_id: str, team_code: str) -> dict | None:
     return _row(row) if row else None
 
 
+def _classify_zone(action_type: str, sub_type: str, y: float) -> str:
+    sub = (sub_type or "").lower()
+    if action_type == "3pt":
+        return "corner_3" if y < 22 or y > 78 else "above_break_3"
+    if any(k in sub for k in ["layup", "dunk", "alley", "tip", "hook", "putback"]):
+        return "paint"
+    return "mid_range"
+
+
 def _opp_dict(opp_row: dict) -> dict:
     return {
         "pts":  opp_row["pts"],
@@ -99,6 +108,18 @@ def import_game():
                  p["ftm"], p["fta"],
                  p["orb"], p["drb"], p["trb"],
                  p["ast"], p["tov"], p["stl"], p["blk"], p["pf"])
+            )
+
+        for s in game.get("shots", []):
+            conn.execute(
+                """INSERT OR IGNORE INTO shots
+                   (game_id, team_code, player_name, x, y, made,
+                    action_type, sub_type, period, action_number)
+                   VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                (game_id, s["team_code"], s["player_name"],
+                 s["x"], s["y"], s["made"],
+                 s["action_type"], s["sub_type"],
+                 s["period"], s["action_number"])
             )
 
     # Return what teams were found so the UI can show them
@@ -293,6 +314,38 @@ def player_stats(team_code: str, player_name: str):
         "averages":  averages,
         "league":    league,
         "game_log":  game_log,
+    })
+
+
+# ── Player shots ───────────────────────────────────────────────────────────
+
+@app.route("/api/player/<team_code>/<path:player_name>/shots")
+def player_shots(team_code: str, player_name: str):
+    team_code = team_code.upper()
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT action_type, sub_type, y, made FROM shots WHERE team_code=? AND player_name=?",
+            (team_code, player_name)
+        ).fetchall()
+
+    zones = {
+        "paint":          {"made": 0, "attempts": 0},
+        "mid_range":      {"made": 0, "attempts": 0},
+        "corner_3":       {"made": 0, "attempts": 0},
+        "above_break_3":  {"made": 0, "attempts": 0},
+    }
+    for row in rows:
+        z = _classify_zone(row["action_type"], row["sub_type"], row["y"])
+        if z in zones:
+            zones[z]["attempts"] += 1
+            zones[z]["made"]     += row["made"]
+
+    for z in zones.values():
+        z["pct"] = round(z["made"] / z["attempts"], 4) if z["attempts"] else None
+
+    return jsonify({
+        "zones":       zones,
+        "total_shots": sum(z["attempts"] for z in zones.values()),
     })
 
 

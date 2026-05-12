@@ -158,14 +158,20 @@ def _parse_fiba_json(raw: dict, source_url: str = "") -> dict:
         "date":        raw.get("gdate") or raw.get("date") or "",
         "teams":       [],
         "players":     [],
+        "shots":       [],
     }
 
     teams_raw = raw.get("tm") or {}
     if not isinstance(teams_raw, dict):
         raise RuntimeError("Estructura JSON inesperada: 'tm' no es un dict.")
 
+    # Maps for enriching shots with team_code and player_name
+    tno_to_code = {}      # tno (int) → team_code
+    shirt_to_name = {}    # (tno, shirtNumber str) → player_name
+
     for i, (tk, t) in enumerate(teams_raw.items()):
         is_home = (i == 0)
+        tno = int(tk) if str(tk).isdigit() else (i + 1)
 
         # Team totals are flat on t with prefix "tot_s"
         def ti(suffixes):
@@ -177,6 +183,7 @@ def _parse_fiba_json(raw: dict, source_url: str = "") -> dict:
             return 0
 
         team_code = (t.get("code") or t.get("codeInternational") or t.get("shortName") or f"T{tk}").strip().upper()
+        tno_to_code[tno] = team_code
 
         team_row = {
             "team_code": team_code,
@@ -252,6 +259,31 @@ def _parse_fiba_json(raw: dict, source_url: str = "") -> dict:
                 if not player_row["trb"]:
                     player_row["trb"] = player_row["orb"] + player_row["drb"]
                 game["players"].append(player_row)
+
+                # Map jersey → full name for shot enrichment
+                jersey = str(p.get("shirtNumber") or "")
+                if jersey:
+                    shirt_to_name[(tno, jersey)] = full_name
+
+    # Extract shots
+    for shot in raw.get("shot", []):
+        s_tno   = int(shot.get("tno") or 0)
+        shirt   = str(shot.get("shirtNumber") or "")
+        player  = shirt_to_name.get((s_tno, shirt)) or shot.get("player") or ""
+        tc      = tno_to_code.get(s_tno, "")
+        if not tc:
+            continue
+        game["shots"].append({
+            "team_code":    tc,
+            "player_name":  player,
+            "x":            float(shot.get("x") or 0),
+            "y":            float(shot.get("y") or 0),
+            "made":         int(shot.get("r") or 0),
+            "action_type":  shot.get("actionType") or "",
+            "sub_type":     shot.get("subType") or "",
+            "period":       int(shot.get("per") or 0),
+            "action_number": int(shot.get("actionNumber") or 0),
+        })
 
     # Cross-fill opponent stats
     if len(game["teams"]) == 2:

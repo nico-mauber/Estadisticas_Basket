@@ -98,6 +98,21 @@ def init_db():
                 pf          INTEGER DEFAULT 0,
                 UNIQUE(game_id, team_code, player_name)
             );
+
+            CREATE TABLE IF NOT EXISTS shots (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                game_id     TEXT NOT NULL REFERENCES games(game_id),
+                team_code   TEXT NOT NULL,
+                player_name TEXT,
+                x           REAL,
+                y           REAL,
+                made        INTEGER DEFAULT 0,
+                action_type TEXT,
+                sub_type    TEXT,
+                period      INTEGER,
+                action_number INTEGER,
+                UNIQUE(game_id, action_number)
+            );
         """)
     print("DB initialized.")
 

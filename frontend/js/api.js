@@ -16,5 +16,6 @@ export const api = {
   team:          code       => apiFetch(`/api/team/${encodeURIComponent(code)}`),
   players:       code       => apiFetch(`/api/players/${encodeURIComponent(code)}`),
   player:        (code, name) => apiFetch(`/api/player/${encodeURIComponent(code)}/${encodeURIComponent(name)}`),
+  playerShots:   (code, name) => apiFetch(`/api/player/${encodeURIComponent(code)}/${encodeURIComponent(name)}/shots`),
   league:        ()   => apiFetch("/api/league"),
 };
