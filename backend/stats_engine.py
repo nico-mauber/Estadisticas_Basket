@@ -81,6 +81,13 @@ def calc_team_stats(t: dict, opp: dict) -> dict:
     opp_to_pct  = _safe_div(opp["tov"], opp_fga + 0.44 * opp["fta"] + opp["tov"])
     opp_ft_rate = _safe_div(opp["fta"], opp_fga)
 
+    # Defensive scouting (team level)
+    t_stl = t.get("stl", 0)
+    t_blk = t.get("blk", 0)
+    stocks         = t_stl + t_blk
+    def_playmaking = t_stl + t_blk - t["tov"]
+    def_to_ratio   = _safe_div(t_stl + t_blk + t["drb"], t["tov"]) if t["tov"] else (99.0 if (t_stl + t_blk + t["drb"]) > 0 else 0.0)
+
     return {
         # Possessions
         "possessions": round(t_pos, 2),
@@ -119,6 +126,10 @@ def calc_team_stats(t: dict, opp: dict) -> dict:
         "opp_ts_pct":  opp_ts_pct,
         "opp_to_pct":  opp_to_pct,
         "opp_ft_rate": opp_ft_rate,
+        # Defensive scouting
+        "stocks":         stocks,
+        "def_playmaking": def_playmaking,
+        "def_to_ratio":   def_to_ratio,
         # Raw
         "pts":  pts,
         "fgm":  fgm,
@@ -174,6 +185,14 @@ def calc_player_stats(p: dict, team_pos: float) -> dict:
     p_pos = possessions(p["fga2"], p["fga3"], fta, p["orb"], p["tov"])
     oer   = _safe_div(pts, p_pos)
 
+    # Defensive scouting metrics
+    stl_v = p.get("stl", 0)
+    blk_v = p.get("blk", 0)
+    stocks         = stl_v + blk_v
+    def_playmaking = stl_v + blk_v - p["tov"]
+    def_to_ratio   = _safe_div(stl_v + blk_v + p["drb"], p["tov"]) if p["tov"] else (99.0 if (stl_v + blk_v + p["drb"]) > 0 else 0.0)
+    physical_impact = p.get("trb", p["orb"] + p["drb"]) + stl_v
+
     return {
         "possessions":    round(p_pos, 2),
         "plays":          round(plays, 2),
@@ -197,6 +216,10 @@ def calc_player_stats(p: dict, team_pos: float) -> dict:
         "peso_1p":        peso_1p,
         "peso_2p":        peso_2p,
         "peso_3p":        peso_3p,
+        "stocks":         stocks,
+        "def_playmaking": def_playmaking,
+        "def_to_ratio":   def_to_ratio,
+        "physical_impact": physical_impact,
         "pts":  pts,
         "fgm":  fgm,
         "fga":  fga,
@@ -231,6 +254,7 @@ def league_averages(all_team_stats: list[dict]) -> dict:
         "opp_efg_pct", "opp_ts_pct", "opp_to_pct",
         "peso_1p", "peso_2p", "peso_3p",
         "fg2_uso", "fg3_uso",
+        "stocks", "def_playmaking", "def_to_ratio",
     ]
     # Metrics where lower = better
     lower_is_better = {"der", "to_pct", "to_ratio", "opp_efg_pct", "opp_ts_pct"}

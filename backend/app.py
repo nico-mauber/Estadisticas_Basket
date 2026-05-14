@@ -211,6 +211,7 @@ def team_stats(team_code: str):
         "as_pct", "ast_ratio", "pace", "pts", "possessions", "plays",
         "peso_1p", "peso_2p", "peso_3p",
         "opp_efg_pct", "opp_ts_pct", "opp_to_pct", "opp_ft_rate",
+        "stocks", "def_playmaking", "def_to_ratio",
         "fgm", "fga", "fgm2", "fga2", "fgm3", "fga3",
         "ftm", "fta", "orb", "drb", "ast", "tov", "stl", "blk",
     ]
@@ -275,6 +276,22 @@ def player_stats(team_code: str, player_name: str):
                 "SELECT date FROM games WHERE game_id=?", (row["game_id"],)
             ).fetchone()
             opp_row = _opp_for(conn, row["game_id"], team_code)
+
+            # Player share of team rebounds in this game
+            team_row = conn.execute(
+                "SELECT orb, drb, trb FROM team_game_stats WHERE game_id=? AND team_code=?",
+                (row["game_id"], team_code)
+            ).fetchone()
+            if team_row:
+                t_orb = team_row["orb"] or 0
+                t_drb = team_row["drb"] or 0
+                t_trb = team_row["trb"] or (t_orb + t_drb)
+                adv["reb_share"]  = round(adv["trb"] / t_trb, 4) if t_trb else 0
+                adv["oreb_share"] = round(adv["orb"] / t_orb, 4) if t_orb else 0
+                adv["dreb_share"] = round(adv["drb"] / t_drb, 4) if t_drb else 0
+            else:
+                adv["reb_share"] = adv["oreb_share"] = adv["dreb_share"] = 0
+
             game_log.append({
                 "game_id":      row["game_id"],
                 "date":         game_info["date"] if game_info else "",
@@ -301,6 +318,8 @@ def player_stats(team_code: str, player_name: str):
         "ft_pct", "ft_rate", "ft_rate_report", "pps", "ppp",
         "fg2_uso", "fg3_uso", "peso_1p", "peso_2p", "peso_3p",
         "or_pct", "dr_pct", "to_pct", "to_ratio", "as_pct", "ast_ratio", "ast_to",
+        "stocks", "def_playmaking", "def_to_ratio", "physical_impact",
+        "reb_share", "oreb_share", "dreb_share",
         "pts", "fgm", "fga", "fgm2", "fga2", "fgm3", "fga3",
         "ftm", "fta", "orb", "drb", "ast", "tov", "stl", "blk",
     ]

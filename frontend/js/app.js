@@ -49,6 +49,8 @@ function _computeAvg(gameLog) {
     "or_pct","dr_pct","trb_pct","to_pct","to_ratio","as_pct","ast_ratio",
     "opp_efg_pct","opp_ts_pct","opp_to_pct","opp_ft_rate",
     "pace","pts","possessions","plays",
+    "stocks","def_playmaking","def_to_ratio","physical_impact",
+    "reb_share","oreb_share","dreb_share",
     "fgm","fga","fgm2","fga2","fgm3","fga3","ftm","fta",
     "orb","drb","ast","tov","stl","blk",
   ];
@@ -424,7 +426,16 @@ function _renderTeamContent(main, data, n) {
         ${statBox("Reb%", av.trb_pct, PCT(av.trb_pct), "trb_pct", lg)}
         ${statBox("TO%", av.to_pct, PCT(av.to_pct), "to_pct", lg, false)}
         ${statBox("AS%", av.as_pct, PCT(av.as_pct), "as_pct", lg)}
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">Defensa avanzada</div>
+      <div class="stat-grid">
         ${statBox("Robos", av.stl, DEC2(av.stl), "stl", lg)}
+        ${statBox("Tapones", av.blk, DEC2(av.blk), "blk", lg)}
+        ${statBox("Stocks", av.stocks, DEC2(av.stocks), "stocks", lg)}
+        ${statBox("Def Playmaking", av.def_playmaking, DEC2(av.def_playmaking), "def_playmaking", lg)}
+        ${statBox("DEF/TO Ratio", av.def_to_ratio, DEC2(av.def_to_ratio), "def_to_ratio", lg)}
       </div>
     </div>
     <div class="card">
@@ -754,7 +765,20 @@ async function renderPlayer(teamCode, playerName) {
           ${statBox("TO%", av.to_pct, PCT(av.to_pct), "to_pct", lg, false)}
           ${statBox("AS%", av.as_pct, PCT(av.as_pct), "as_pct", lg)}
           ${statBox("AST/TO", av.ast_to, DEC2(av.ast_to), "ast_ratio", lg)}
+          ${statBox("% Reb Equipo", av.reb_share, PCT(av.reb_share), "reb_share", lg)}
+          ${statBox("% RebOf Equipo", av.oreb_share, PCT(av.oreb_share), "oreb_share", lg)}
+          ${statBox("% RebDef Equipo", av.dreb_share, PCT(av.dreb_share), "dreb_share", lg)}
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">Defensa avanzada</div>
+        <div class="stat-grid">
           ${statBox("Robos", av.stl, DEC2(av.stl), "stl", lg)}
+          ${statBox("Tapones", av.blk, DEC2(av.blk), "blk", lg)}
+          ${statBox("Stocks", av.stocks, DEC2(av.stocks), "stocks", lg)}
+          ${statBox("Def Playmaking", av.def_playmaking, DEC2(av.def_playmaking), "def_playmaking", lg)}
+          ${statBox("DEF/TO Ratio", av.def_to_ratio, DEC2(av.def_to_ratio), "def_to_ratio", lg)}
+          ${statBox("Impacto Físico", av.physical_impact, DEC2(av.physical_impact), "physical_impact", lg)}
         </div>
       </div>
       <div class="chart-grid">
