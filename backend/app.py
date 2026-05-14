@@ -26,9 +26,13 @@ def _opp_for(conn, game_id: str, team_code: str) -> dict | None:
     return _row(row) if row else None
 
 
-def _classify_zone(action_type: str, sub_type: str, y: float = 0) -> str:
+def _classify_zone(action_type: str, sub_type: str, y: float = 0, x: float = 0) -> str:
     if action_type == "3pt":
-        return "triple"
+        # x==0 and y==0 means no coordinate data (pbp fallback) — treat as above_break
+        if x != 0 or y != 0:
+            if y < 15 or y > 85:
+                return "corner_3"
+        return "above_break_3"
     sub = (sub_type or "").lower()
     if any(k in sub for k in ["layup", "dunk", "alley", "tip", "hook", "putback", "driving"]):
         return "paint"
@@ -343,17 +347,18 @@ def player_shots(team_code: str, player_name: str):
     team_code = team_code.upper()
     with get_conn() as conn:
         rows = conn.execute(
-            "SELECT action_type, sub_type, y, made FROM shots WHERE team_code=? AND player_name=?",
+            "SELECT action_type, sub_type, x, y, made FROM shots WHERE team_code=? AND player_name=?",
             (team_code, player_name)
         ).fetchall()
 
     zones = {
-        "paint":     {"made": 0, "attempts": 0},
-        "mid_range": {"made": 0, "attempts": 0},
-        "triple":    {"made": 0, "attempts": 0},
+        "paint":         {"made": 0, "attempts": 0},
+        "mid_range":     {"made": 0, "attempts": 0},
+        "corner_3":      {"made": 0, "attempts": 0},
+        "above_break_3": {"made": 0, "attempts": 0},
     }
     for row in rows:
-        z = _classify_zone(row["action_type"], row["sub_type"], row["y"])
+        z = _classify_zone(row["action_type"], row["sub_type"], row["y"], row["x"])
         if z in zones:
             zones[z]["attempts"] += 1
             zones[z]["made"]     += row["made"]
@@ -363,16 +368,17 @@ def player_shots(team_code: str, player_name: str):
 
     # League-wide zone averages (all players, all games)
     lg_zones = {
-        "paint":     {"made": 0, "attempts": 0},
-        "mid_range": {"made": 0, "attempts": 0},
-        "triple":    {"made": 0, "attempts": 0},
+        "paint":         {"made": 0, "attempts": 0},
+        "mid_range":     {"made": 0, "attempts": 0},
+        "corner_3":      {"made": 0, "attempts": 0},
+        "above_break_3": {"made": 0, "attempts": 0},
     }
     with get_conn() as conn:
         all_shots = conn.execute(
-            "SELECT action_type, sub_type, made FROM shots"
+            "SELECT action_type, sub_type, x, y, made FROM shots"
         ).fetchall()
     for row in all_shots:
-        z = _classify_zone(row["action_type"], row["sub_type"])
+        z = _classify_zone(row["action_type"], row["sub_type"], row["y"], row["x"])
         if z in lg_zones:
             lg_zones[z]["attempts"] += 1
             lg_zones[z]["made"]     += row["made"]

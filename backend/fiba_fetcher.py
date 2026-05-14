@@ -265,30 +265,56 @@ def _parse_fiba_json(raw: dict, source_url: str = "") -> dict:
                 if jersey:
                     shirt_to_name[(tno, jersey)] = full_name
 
-    # Extract shots from play-by-play (pbp) — FIBA FUBB data has no shot coordinates
-    for shot in raw.get("pbp", []):
-        if not isinstance(shot, dict):
-            continue
-        action = shot.get("actionType") or ""
-        if action not in ("2pt", "3pt"):
-            continue
-        s_tno  = int(shot.get("tno") or 0)
-        shirt  = str(shot.get("shirtNumber") or "")
-        player = shirt_to_name.get((s_tno, shirt)) or shot.get("player") or ""
-        tc     = tno_to_code.get(s_tno, "")
-        if not tc:
-            continue
-        game["shots"].append({
-            "team_code":     tc,
-            "player_name":   player,
-            "x":             0.0,
-            "y":             0.0,
-            "made":          int(shot.get("success") or 0),
-            "action_type":   action,
-            "sub_type":      shot.get("subType") or "",
-            "period":        int(shot.get("period") or 0),
-            "action_number": int(shot.get("actionNumber") or 0),
-        })
+    # Prefer top-level shot array (has x/y coordinates); fall back to pbp (no coordinates)
+    shot_array = raw.get("shot") or []
+    if shot_array:
+        for shot in shot_array:
+            if not isinstance(shot, dict):
+                continue
+            action = shot.get("actionType") or ""
+            if action not in ("2pt", "3pt"):
+                continue
+            s_tno  = int(shot.get("tno") or 0)
+            shirt  = str(shot.get("shirtNumber") or "")
+            player = shirt_to_name.get((s_tno, shirt)) or shot.get("player") or ""
+            tc     = tno_to_code.get(s_tno, "")
+            if not tc:
+                continue
+            game["shots"].append({
+                "team_code":     tc,
+                "player_name":   player,
+                "x":             float(shot.get("x") or 0),
+                "y":             float(shot.get("y") or 0),
+                "made":          int(shot.get("r") or 0),      # 'r' in shot array (not 'success')
+                "action_type":   action,
+                "sub_type":      shot.get("subType") or "",
+                "period":        int(shot.get("per") or 0),    # 'per' in shot array (not 'period')
+                "action_number": int(shot.get("actionNumber") or 0),
+            })
+    else:
+        for shot in raw.get("pbp", []):
+            if not isinstance(shot, dict):
+                continue
+            action = shot.get("actionType") or ""
+            if action not in ("2pt", "3pt"):
+                continue
+            s_tno  = int(shot.get("tno") or 0)
+            shirt  = str(shot.get("shirtNumber") or "")
+            player = shirt_to_name.get((s_tno, shirt)) or shot.get("player") or ""
+            tc     = tno_to_code.get(s_tno, "")
+            if not tc:
+                continue
+            game["shots"].append({
+                "team_code":     tc,
+                "player_name":   player,
+                "x":             0.0,
+                "y":             0.0,
+                "made":          int(shot.get("success") or 0),
+                "action_type":   action,
+                "sub_type":      shot.get("subType") or "",
+                "period":        int(shot.get("period") or 0),
+                "action_number": int(shot.get("actionNumber") or 0),
+            })
 
     # Cross-fill opponent stats
     if len(game["teams"]) == 2:

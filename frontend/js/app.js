@@ -594,18 +594,18 @@ async function renderCompare() {
   });
 }
 
-// ── Shot chart SVG — half court, arc zones, delta vs league ───────────────
+// ── Shot chart SVG — half court, 4 zones with corner_3, delta vs league ──────
 function _shotChartSVG(zones, totalShots, leagueZones) {
-  const W = 340, H = 310;
+  const W = 340, H = 350;  // extra 40px at bottom for corner_3 stats bar
   const muted = "#6b7280", txt = "#e2e8f0", line = "#374151";
 
   // Court geometry (basket at bottom-center, shooting UP)
-  const cx = 170, cy = 256;   // basket center
-  const cL = 20, cR = 320, cT = 8, cB = 288;  // court bounds
+  const cx = 170, cy = 256;
+  const cL = 20, cR = 320, cT = 8, cB = 288;
 
-  // Zone radii (approx FIBA proportions at ~20px/m)
-  const rP  = 50;   // paint/close boundary (~2.5m)
-  const r3  = 135;  // 3pt arc (~6.75m)
+  // Zone radii (FIBA proportions at ~20px/m: 6.75m arc, 2.5m paint)
+  const rP = 50;
+  const r3 = 135;
 
   function zColor(z, key) {
     if (!z?.attempts) return "#141f2e";
@@ -625,30 +625,25 @@ function _shotChartSVG(zones, totalShots, leagueZones) {
     return "rgba(220,38,38,0.78)";
   }
 
-  // Half-circle: from (cx-r,cy) arc UP to (cx+r,cy), close
   const hCirc = r => `M${cx-r},${cy} A${r},${r} 0 0,0 ${cx+r},${cy} Z`;
-
-  // Half-ring: outer arc up, line to inner, inner arc back down
   const hRing = (r1, r2) =>
     `M${cx-r2},${cy} A${r2},${r2} 0 0,0 ${cx+r2},${cy} L${cx+r1},${cy} A${r1},${r1} 0 0,1 ${cx-r1},${cy} Z`;
 
-  const paint  = zones.paint     || {attempts:0, pct:0};
-  const mid    = zones.mid_range || {attempts:0, pct:0};
-  const triple = zones.triple    || {attempts:0, pct:0};
+  const paint    = zones.paint         || {attempts:0, pct:null};
+  const mid      = zones.mid_range     || {attempts:0, pct:null};
+  const abBreak  = zones.above_break_3 || {attempts:0, pct:null};
+  const corner3  = zones.corner_3      || {attempts:0, pct:null};
 
-  // Zone label with stats + delta
   function zlabel(z, x, y, key, title) {
     const la = leagueZones?.[key];
     if (!z?.attempts) return `
       <text x="${x}" y="${y-10}" text-anchor="middle" fill="${muted}" font-size="9" font-weight="700" letter-spacing="0.5" font-family="Inter,sans-serif">${title}</text>
       <text x="${x}" y="${y+8}"  text-anchor="middle" fill="${muted}" font-size="14" font-family="Inter,sans-serif">—</text>`;
-
     const pct = (z.pct*100).toFixed(0)+"%";
     const d   = la?.pct != null ? (z.pct - la.pct)*100 : null;
     const ds  = d != null ? (d>=0?'+':'')+d.toFixed(0)+'pp' : null;
     const dc  = d == null ? muted : d >= 3 ? '#4ade80' : d <= -3 ? '#f87171' : '#9ca3af';
     const lap = la?.pct != null ? `Ø ${(la.pct*100).toFixed(0)}%` : '';
-
     return `
       <text x="${x}" y="${y-18}" text-anchor="middle" fill="${muted}" font-size="9" font-weight="700" letter-spacing="0.5" font-family="Inter,sans-serif">${title}</text>
       <text x="${x}" y="${y-2}"  text-anchor="middle" fill="${txt}"   font-size="16" font-weight="800" font-family="Inter,sans-serif">${z.made}/${z.attempts}</text>
@@ -657,7 +652,28 @@ function _shotChartSVG(zones, totalShots, leagueZones) {
       ${lap ? `<text x="${x}" y="${y+39}" text-anchor="middle" fill="${muted}" font-size="9"  font-family="Inter,sans-serif">${lap}</text>` : ''}`;
   }
 
-  // Paint box: 4.9m=98px wide, 5.8m=116px from basket to top of lane
+  // Corner_3 stats bar (rendered below court, y=296 to y=340)
+  function cornerBar(z, key) {
+    const barY = cB + 12;
+    const la = leagueZones?.[key];
+    if (!z?.attempts) return `
+      <text x="${W/2}" y="${barY+2}" text-anchor="middle" fill="${muted}" font-size="9" font-weight="700" letter-spacing="0.5" font-family="Inter,sans-serif">ESQUINA 3</text>
+      <text x="${W/2}" y="${barY+16}" text-anchor="middle" fill="${muted}" font-size="12" font-family="Inter,sans-serif">Sin datos</text>`;
+    const pct = (z.pct*100).toFixed(0)+"%";
+    const d   = la?.pct != null ? (z.pct - la.pct)*100 : null;
+    const ds  = d != null ? (d>=0?'+':'')+d.toFixed(0)+'pp' : null;
+    const dc  = d == null ? muted : d >= 3 ? '#4ade80' : d <= -3 ? '#f87171' : '#9ca3af';
+    const lap = la?.pct != null ? `Ø ${(la.pct*100).toFixed(0)}%` : '';
+    const fill = zColor(z, key);
+    return `
+      <rect x="${cL}" y="${barY-4}" width="${cR-cL}" height="44" fill="${fill}" rx="4" opacity="0.85"/>
+      <text x="${W/2}" y="${barY+8}" text-anchor="middle" fill="${muted}" font-size="9" font-weight="700" letter-spacing="0.5" font-family="Inter,sans-serif">ESQUINA 3 (CORNER)</text>
+      <text x="${W/2-60}" y="${barY+24}" text-anchor="middle" fill="${txt}" font-size="14" font-weight="800" font-family="Inter,sans-serif">${z.made}/${z.attempts}</text>
+      <text x="${W/2}" y="${barY+24}" text-anchor="middle" fill="${txt}" font-size="14" font-family="Inter,sans-serif">${pct}</text>
+      ${ds  ? `<text x="${W/2+55}" y="${barY+24}" text-anchor="middle" fill="${dc}" font-size="11" font-family="Inter,sans-serif">${ds}</text>` : ''}
+      ${lap ? `<text x="${W/2}" y="${barY+36}" text-anchor="middle" fill="${muted}" font-size="9" font-family="Inter,sans-serif">${lap}</text>` : ''}`;
+  }
+
   const pbX1 = cx-49, pbX2 = cx+49, pbTop = cy-116;
 
   const SCALE = [
@@ -678,45 +694,42 @@ function _shotChartSVG(zones, totalShots, leagueZones) {
     <rect width="${W}" height="${H}" fill="#0d1117" rx="8"/>
     <rect x="${cL}" y="${cT}" width="${cR-cL}" height="${cB-cT}" fill="#111827" rx="3"/>
 
-    <!-- ZONE FILLS (back to front, larger to smaller) -->
-    <!-- Triple: fills entire court, then mid and paint paint over it -->
-    <rect x="${cL}" y="${cT}" width="${cR-cL}" height="${cB-cT}" fill="${zColor(triple,'triple')}" clip-path="url(#sc-clip)" rx="3"/>
+    <!-- ZONE FILLS (back to front) -->
+    <!-- Above-break 3: fills entire court (others paint over it) -->
+    <rect x="${cL}" y="${cT}" width="${cR-cL}" height="${cB-cT}" fill="${zColor(abBreak,'above_break_3')}" clip-path="url(#sc-clip)" rx="3"/>
 
-    <!-- Mid-range: half-ring above cx + rect strip below cx within 3pt width -->
+    <!-- Corner 3: thin strips at each corner (below basket level, outside r3 from center) -->
+    <rect x="${cL}"    y="${cy}" width="${cx-r3-cL}" height="${cB-cy}" fill="${zColor(corner3,'corner_3')}" clip-path="url(#sc-clip)"/>
+    <rect x="${cx+r3}" y="${cy}" width="${cR-cx-r3}" height="${cB-cy}" fill="${zColor(corner3,'corner_3')}" clip-path="url(#sc-clip)"/>
+
+    <!-- Mid-range: half-ring above basket level + long-2 strip below arc -->
     <path d="${hRing(rP, r3)}" fill="${zColor(mid,'mid_range')}" clip-path="url(#sc-clip)"/>
     <rect x="${cx-r3}" y="${cy}" width="${r3*2}" height="${cB-cy}" fill="${zColor(mid,'mid_range')}" clip-path="url(#sc-clip)"/>
 
-    <!-- Paint: half-circle above cx + small rect below cx to baseline -->
+    <!-- Paint: half-circle + close rect below basket level -->
     <path d="${hCirc(rP)}" fill="${zColor(paint,'paint')}" clip-path="url(#sc-clip)"/>
     <rect x="${cx-rP}" y="${cy}" width="${rP*2}" height="${cB-cy}" fill="${zColor(paint,'paint')}" clip-path="url(#sc-clip)"/>
 
     <!-- COURT LINES -->
     <rect x="${cL}" y="${cT}" width="${cR-cL}" height="${cB-cT}" fill="none" stroke="${line}" stroke-width="1.5" rx="3"/>
-    <!-- Paint box -->
     <rect x="${pbX1}" y="${pbTop}" width="${pbX2-pbX1}" height="${cB-pbTop}" fill="none" stroke="#4b5563" stroke-width="1.5"/>
-    <!-- Free throw arc (top of paint box) -->
     <path d="M${pbX1},${pbTop} A49,49 0 0,0 ${pbX2},${pbTop}" fill="none" stroke="#4b5563" stroke-width="1.5" stroke-dasharray="4,3"/>
-    <!-- 3pt arc -->
     <path d="M${cx-r3},${cy} A${r3},${r3} 0 0,0 ${cx+r3},${cy}" fill="none" stroke="#4b5563" stroke-width="1.5"/>
-    <!-- 3pt corner lines -->
     <line x1="${cx-r3}" y1="${cy}" x2="${cx-r3}" y2="${cB}" stroke="#4b5563" stroke-width="1.5"/>
     <line x1="${cx+r3}" y1="${cy}" x2="${cx+r3}" y2="${cB}" stroke="#4b5563" stroke-width="1.5"/>
-    <!-- Restricted area circle hint -->
     <path d="M${cx-rP},${cy} A${rP},${rP} 0 0,0 ${cx+rP},${cy}" fill="none" stroke="#4b5563" stroke-width="1" stroke-dasharray="3,3" opacity="0.6"/>
-    <!-- Basket -->
     <circle cx="${cx}" cy="${cy}" r="9" fill="none" stroke="#9ca3af" stroke-width="2"/>
-    <!-- Backboard -->
     <line x1="${cx-26}" y1="${cB-3}" x2="${cx+26}" y2="${cB-3}" stroke="#9ca3af" stroke-width="3"/>
 
-    <!-- ZONE LABELS -->
-    ${zlabel(paint,  cx,        cy-18,  'paint',     'PINTURA')}
-    ${zlabel(mid,    cx,        cy-92,  'mid_range',  'MID-RANGE')}
-    ${zlabel(triple, cx,        cy-195, 'triple',     'TRIPLE')}
+    <!-- ZONE LABELS (paint, mid, above-break) -->
+    ${zlabel(paint,   cx, cy-18,  'paint',         'PINTURA')}
+    ${zlabel(mid,     cx, cy-92,  'mid_range',      'MID-RANGE')}
+    ${zlabel(abBreak, cx, cy-195, 'above_break_3',  'ARCO 3P')}
 
-    <!-- FOOTER -->
-    <text x="${W-6}" y="${H-22}" text-anchor="end" fill="${muted}" font-size="9" font-family="Inter,sans-serif">${totalShots} tiros</text>
+    <!-- CORNER_3 STATS BAR (below court) -->
+    ${cornerBar(corner3, 'corner_3')}
 
-    <!-- COLOR SCALE (delta vs liga) -->
+    <!-- COLOR SCALE -->
     <text x="6" y="${H-11}" fill="${muted}" font-size="8" font-weight="600" font-family="Inter,sans-serif">FG% vs liga:</text>
     ${SCALE.map(([v,c],i) => `
       <rect x="${62+i*46}" y="${H-22}" width="42" height="13" fill="${c}" rx="2"/>
