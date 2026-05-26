@@ -1,34 +1,34 @@
 from flask import Flask, jsonify, request
 from flask_cors import CORS
-import sqlite3
-from database import get_conn, init_db
+from sqlalchemy import func
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from database import db, init_db, Game, TeamGameStats, PlayerGameStats, Shot, DB_PATH
 from stats_engine import calc_team_stats, calc_player_stats, league_averages
 from fiba_fetcher import fetch_game_data
 
 app = Flask(__name__, static_folder="../frontend", static_url_path="/")
+app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{DB_PATH}"
+app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 CORS(app)
 
-init_db()
+init_db(app)
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────
 
-def _row(row) -> dict:
-    return {k: row[k] for k in row.keys()}
+def _to_dict(obj) -> dict:
+    return {c.name: getattr(obj, c.name) for c in obj.__table__.columns}
 
 
-def _opp_for(conn, game_id: str, team_code: str) -> dict | None:
-    cur = conn.execute(
-        "SELECT * FROM team_game_stats WHERE game_id=? AND team_code!=?",
-        (game_id, team_code)
-    )
-    row = cur.fetchone()
-    return _row(row) if row else None
+def _opp_for(game_id: str, team_code: str) -> TeamGameStats | None:
+    return TeamGameStats.query.filter(
+        TeamGameStats.game_id == game_id,
+        TeamGameStats.team_code != team_code
+    ).first()
 
 
 def _classify_zone(action_type: str, sub_type: str, y: float = 0, x: float = 0) -> str:
     if action_type == "3pt":
-        # x==0 and y==0 means no coordinate data (pbp fallback) — treat as above_break
         if x != 0 or y != 0:
             if y < 15 or y > 85:
                 return "corner_3"
@@ -39,14 +39,14 @@ def _classify_zone(action_type: str, sub_type: str, y: float = 0, x: float = 0) 
     return "mid_range"
 
 
-def _opp_dict(opp_row: dict) -> dict:
+def _opp_dict(opp: TeamGameStats) -> dict:
     return {
-        "pts":  opp_row["pts"],
-        "fgm2": opp_row["fgm2"], "fga2": opp_row["fga2"],
-        "fgm3": opp_row["fgm3"], "fga3": opp_row["fga3"],
-        "ftm":  opp_row["ftm"],  "fta":  opp_row["fta"],
-        "orb":  opp_row["orb"],  "drb":  opp_row["drb"],
-        "tov":  opp_row["tov"],
+        "pts":  opp.pts,
+        "fgm2": opp.fgm2, "fga2": opp.fga2,
+        "fgm3": opp.fgm3, "fga3": opp.fga3,
+        "ftm":  opp.ftm,  "fta":  opp.fta,
+        "orb":  opp.orb,  "drb":  opp.drb,
+        "tov":  opp.tov,
     }
 
 
@@ -66,67 +66,127 @@ def import_game():
 
     game_id = game["game_id"]
 
-    with get_conn() as conn:
-        conn.execute(
-            """INSERT OR REPLACE INTO games
-               (game_id, competition, date,
-                home_team, home_code, away_team, away_code,
-                home_score, away_score)
-               VALUES (?,?,?,?,?,?,?,?,?)""",
-            (game_id, game.get("competition"), game.get("date"),
-             game.get("home_team"), game.get("home_code"),
-             game.get("away_team"), game.get("away_code"),
-             game.get("home_score"), game.get("away_score"))
+    # Upsert game
+    db.session.execute(
+        sqlite_insert(Game).values(
+            game_id     = game_id,
+            competition = game.get("competition"),
+            date        = game.get("date"),
+            home_team   = game.get("home_team"),
+            home_code   = game.get("home_code"),
+            away_team   = game.get("away_team"),
+            away_code   = game.get("away_code"),
+            home_score  = game.get("home_score"),
+            away_score  = game.get("away_score"),
+        ).on_conflict_do_update(
+            index_elements=["game_id"],
+            set_=dict(
+                competition = game.get("competition"),
+                date        = game.get("date"),
+                home_team   = game.get("home_team"),
+                home_code   = game.get("home_code"),
+                away_team   = game.get("away_team"),
+                away_code   = game.get("away_code"),
+                home_score  = game.get("home_score"),
+                away_score  = game.get("away_score"),
+            )
+        )
+    )
+
+    for t in game.get("teams", []):
+        db.session.execute(
+            sqlite_insert(TeamGameStats).values(
+                game_id   = game_id,
+                team_code = t["team_code"],
+                team_name = t["team_name"],
+                is_home   = t["is_home"],
+                pts  = t["pts"],  fgm  = t["fgm"],  fga  = t["fga"],
+                fgm2 = t["fgm2"], fga2 = t["fga2"],
+                fgm3 = t["fgm3"], fga3 = t["fga3"],
+                ftm  = t["ftm"],  fta  = t["fta"],
+                orb  = t["orb"],  drb  = t["drb"],  trb  = t["trb"],
+                ast  = t["ast"],  tov  = t["tov"],
+                stl  = t["stl"],  blk  = t["blk"],  pf   = t["pf"],
+                opp_pts  = t.get("opp_pts",  0),
+                opp_fga2 = t.get("opp_fga2", 0),
+                opp_fga3 = t.get("opp_fga3", 0),
+                opp_fta  = t.get("opp_fta",  0),
+                opp_orb  = t.get("opp_orb",  0),
+                opp_drb  = t.get("opp_drb",  0),
+                opp_tov  = t.get("opp_tov",  0),
+            ).on_conflict_do_update(
+                index_elements=["game_id", "team_code"],
+                set_=dict(
+                    team_name = t["team_name"],
+                    pts  = t["pts"],  fgm  = t["fgm"],  fga  = t["fga"],
+                    fgm2 = t["fgm2"], fga2 = t["fga2"],
+                    fgm3 = t["fgm3"], fga3 = t["fga3"],
+                    ftm  = t["ftm"],  fta  = t["fta"],
+                    orb  = t["orb"],  drb  = t["drb"],  trb  = t["trb"],
+                    ast  = t["ast"],  tov  = t["tov"],
+                    stl  = t["stl"],  blk  = t["blk"],  pf   = t["pf"],
+                    opp_pts  = t.get("opp_pts",  0),
+                    opp_fga2 = t.get("opp_fga2", 0),
+                    opp_fga3 = t.get("opp_fga3", 0),
+                    opp_fta  = t.get("opp_fta",  0),
+                    opp_orb  = t.get("opp_orb",  0),
+                    opp_drb  = t.get("opp_drb",  0),
+                    opp_tov  = t.get("opp_tov",  0),
+                )
+            )
         )
 
-        for t in game.get("teams", []):
-            conn.execute(
-                """INSERT OR REPLACE INTO team_game_stats
-                   (game_id, team_code, team_name, is_home,
-                    pts, fgm, fga, fgm2, fga2, fgm3, fga3, ftm, fta,
-                    orb, drb, trb, ast, tov, stl, blk, pf,
-                    opp_pts, opp_fga2, opp_fga3, opp_fta, opp_orb, opp_drb, opp_tov)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                (game_id, t["team_code"], t["team_name"], t["is_home"],
-                 t["pts"], t["fgm"], t["fga"],
-                 t["fgm2"], t["fga2"], t["fgm3"], t["fga3"],
-                 t["ftm"], t["fta"],
-                 t["orb"], t["drb"], t["trb"],
-                 t["ast"], t["tov"], t["stl"], t["blk"], t["pf"],
-                 t.get("opp_pts", 0), t.get("opp_fga2", 0), t.get("opp_fga3", 0),
-                 t.get("opp_fta", 0), t.get("opp_orb", 0),
-                 t.get("opp_drb", 0), t.get("opp_tov", 0))
+    for p in game.get("players", []):
+        db.session.execute(
+            sqlite_insert(PlayerGameStats).values(
+                game_id     = game_id,
+                team_code   = p["team_code"],
+                team_name   = p["team_name"],
+                player_name = p["player_name"],
+                jersey      = p.get("jersey"),
+                minutes     = p.get("minutes"),
+                pts  = p["pts"],  fgm  = p["fgm"],  fga  = p["fga"],
+                fgm2 = p["fgm2"], fga2 = p["fga2"],
+                fgm3 = p["fgm3"], fga3 = p["fga3"],
+                ftm  = p["ftm"],  fta  = p["fta"],
+                orb  = p["orb"],  drb  = p["drb"],  trb  = p["trb"],
+                ast  = p["ast"],  tov  = p["tov"],
+                stl  = p["stl"],  blk  = p["blk"],  pf   = p["pf"],
+            ).on_conflict_do_update(
+                index_elements=["game_id", "team_code", "player_name"],
+                set_=dict(
+                    team_name = p["team_name"],
+                    jersey    = p.get("jersey"),
+                    minutes   = p.get("minutes"),
+                    pts  = p["pts"],  fgm  = p["fgm"],  fga  = p["fga"],
+                    fgm2 = p["fgm2"], fga2 = p["fga2"],
+                    fgm3 = p["fgm3"], fga3 = p["fga3"],
+                    ftm  = p["ftm"],  fta  = p["fta"],
+                    orb  = p["orb"],  drb  = p["drb"],  trb  = p["trb"],
+                    ast  = p["ast"],  tov  = p["tov"],
+                    stl  = p["stl"],  blk  = p["blk"],  pf   = p["pf"],
+                )
             )
+        )
 
-        for p in game.get("players", []):
-            conn.execute(
-                """INSERT OR REPLACE INTO player_game_stats
-                   (game_id, team_code, team_name, player_name, jersey, minutes,
-                    pts, fgm, fga, fgm2, fga2, fgm3, fga3, ftm, fta,
-                    orb, drb, trb, ast, tov, stl, blk, pf)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                (game_id, p["team_code"], p["team_name"],
-                 p["player_name"], p.get("jersey"), p.get("minutes"),
-                 p["pts"], p["fgm"], p["fga"],
-                 p["fgm2"], p["fga2"], p["fgm3"], p["fga3"],
-                 p["ftm"], p["fta"],
-                 p["orb"], p["drb"], p["trb"],
-                 p["ast"], p["tov"], p["stl"], p["blk"], p["pf"])
-            )
+    for s in game.get("shots", []):
+        db.session.execute(
+            sqlite_insert(Shot).values(
+                game_id       = game_id,
+                team_code     = s["team_code"],
+                player_name   = s["player_name"],
+                x             = s["x"],
+                y             = s["y"],
+                made          = s["made"],
+                action_type   = s["action_type"],
+                sub_type      = s["sub_type"],
+                period        = s["period"],
+                action_number = s["action_number"],
+            ).on_conflict_do_nothing()
+        )
 
-        for s in game.get("shots", []):
-            conn.execute(
-                """INSERT OR IGNORE INTO shots
-                   (game_id, team_code, player_name, x, y, made,
-                    action_type, sub_type, period, action_number)
-                   VALUES (?,?,?,?,?,?,?,?,?,?)""",
-                (game_id, s["team_code"], s["player_name"],
-                 s["x"], s["y"], s["made"],
-                 s["action_type"], s["sub_type"],
-                 s["period"], s["action_number"])
-            )
+    db.session.commit()
 
-    # Return what teams were found so the UI can show them
     teams_imported = [
         {"code": t["team_code"], "name": t["team_name"]}
         for t in game.get("teams", [])
@@ -138,70 +198,62 @@ def import_game():
 
 @app.route("/api/games")
 def list_games():
-    with get_conn() as conn:
-        rows = conn.execute(
-            "SELECT * FROM games ORDER BY date DESC, imported_at DESC"
-        ).fetchall()
-    return jsonify([dict(r) for r in rows])
+    games = Game.query.order_by(Game.date.desc(), Game.imported_at.desc()).all()
+    return jsonify([_to_dict(g) for g in games])
 
 
 # ── Teams ─────────────────────────────────────────────────────────────────
-# Identified by team_code. team_name = most recent name used by FIBA.
 
 @app.route("/api/teams")
 def list_teams():
-    with get_conn() as conn:
-        rows = conn.execute("""
-            SELECT team_code, team_name, COUNT(*) as games
-            FROM team_game_stats
-            GROUP BY team_code
-            ORDER BY team_name
-        """).fetchall()
-    return jsonify([{"code": r["team_code"], "name": r["team_name"], "games": r["games"]} for r in rows])
+    rows = (
+        db.session.query(
+            TeamGameStats.team_code,
+            TeamGameStats.team_name,
+            func.count().label("games"),
+        )
+        .group_by(TeamGameStats.team_code)
+        .order_by(TeamGameStats.team_name)
+        .all()
+    )
+    return jsonify([{"code": r.team_code, "name": r.team_name, "games": r.games} for r in rows])
 
 
 @app.route("/api/team/<team_code>")
 def team_stats(team_code: str):
     team_code = team_code.upper()
-    with get_conn() as conn:
-        rows = conn.execute(
-            "SELECT * FROM team_game_stats WHERE team_code=?", (team_code,)
-        ).fetchall()
-        if not rows:
-            return jsonify({"error": "Equipo no encontrado"}), 404
+    rows = TeamGameStats.query.filter_by(team_code=team_code).all()
+    if not rows:
+        return jsonify({"error": "Equipo no encontrado"}), 404
 
-        team_name = rows[-1]["team_name"]  # most recent name
+    team_name = rows[-1].team_name
 
-        game_stats = []
-        for row in rows:
-            t   = _row(row)
-            opp_row = _opp_for(conn, row["game_id"], team_code)
-            if not opp_row:
-                continue
-            adv = calc_team_stats(t, _opp_dict(opp_row))
-            game_info = conn.execute(
-                "SELECT date, home_team, away_team, home_score, away_score FROM games WHERE game_id=?",
-                (row["game_id"],)
-            ).fetchone()
-            game_stats.append({
-                "game_id":   row["game_id"],
-                "date":      game_info["date"] if game_info else "",
-                "opponent":      opp_row["team_name"],
-                "opponent_code": opp_row["team_code"],
-                "home_away": "L" if row["is_home"] else "V",
-                **adv
-            })
+    game_stats = []
+    for row in rows:
+        t   = _to_dict(row)
+        opp = _opp_for(row.game_id, team_code)
+        if not opp:
+            continue
+        adv = calc_team_stats(t, _opp_dict(opp))
+        game_info = Game.query.filter_by(game_id=row.game_id).first()
+        game_stats.append({
+            "game_id":       row.game_id,
+            "date":          game_info.date if game_info else "",
+            "opponent":      opp.team_name,
+            "opponent_code": opp.team_code,
+            "home_away":     "L" if row.is_home else "V",
+            **adv
+        })
 
-        # League context
-        all_rows = conn.execute("SELECT * FROM team_game_stats").fetchall()
-        all_adv  = []
-        for ar in all_rows:
-            ao = _opp_for(conn, ar["game_id"], ar["team_code"])
-            if not ao:
-                continue
-            all_adv.append(calc_team_stats(_row(ar), _opp_dict(ao)))
+    all_rows = TeamGameStats.query.all()
+    all_adv  = []
+    for ar in all_rows:
+        ao = _opp_for(ar.game_id, ar.team_code)
+        if not ao:
+            continue
+        all_adv.append(calc_team_stats(_to_dict(ar), _opp_dict(ao)))
 
-        league = league_averages(all_adv)
+    league = league_averages(all_adv)
 
     def _avg(key):
         vals = [g[key] for g in game_stats if key in g]
@@ -221,19 +273,19 @@ def team_stats(team_code: str):
     ]
     averages = {k: _avg(k) for k in keys}
 
-    # Record (wins / losses)
-    wins  = sum(1 for g in game_stats if g.get("pts", 0) > g.get("opp_pts", 0))
-    losses = len(game_stats) - wins
+    wins      = sum(1 for g in game_stats if g.get("pts", 0) > g.get("opp_pts", 0))
+    losses    = len(game_stats) - wins
     home_gs   = [g for g in game_stats if g["home_away"] == "L"]
     away_gs   = [g for g in game_stats if g["home_away"] == "V"]
     home_wins = sum(1 for g in home_gs if g.get("pts", 0) > g.get("opp_pts", 0))
     away_wins = sum(1 for g in away_gs if g.get("pts", 0) > g.get("opp_pts", 0))
 
     record = {
-        "wins": wins, "losses": losses,
+        "wins":    wins,
+        "losses":  losses,
         "win_pct": round(wins / len(game_stats), 3) if game_stats else 0,
-        "home": f"{home_wins}-{len(home_gs)-home_wins}",
-        "away": f"{away_wins}-{len(away_gs)-away_wins}",
+        "home":    f"{home_wins}-{len(home_gs) - home_wins}",
+        "away":    f"{away_wins}-{len(away_gs) - away_wins}",
     }
 
     return jsonify({
@@ -251,67 +303,64 @@ def team_stats(team_code: str):
 
 @app.route("/api/players/<team_code>")
 def team_players(team_code: str):
-    with get_conn() as conn:
-        rows = conn.execute(
-            """SELECT DISTINCT player_name FROM player_game_stats
-               WHERE team_code=? ORDER BY player_name""",
-            (team_code.upper(),)
-        ).fetchall()
-    return jsonify([r["player_name"] for r in rows])
+    rows = (
+        PlayerGameStats.query
+        .filter_by(team_code=team_code.upper())
+        .with_entities(PlayerGameStats.player_name)
+        .distinct()
+        .order_by(PlayerGameStats.player_name)
+        .all()
+    )
+    return jsonify([r.player_name for r in rows])
 
 
 @app.route("/api/player/<team_code>/<player_name>")
 def player_stats(team_code: str, player_name: str):
     team_code = team_code.upper()
-    with get_conn() as conn:
-        rows = conn.execute(
-            "SELECT * FROM player_game_stats WHERE team_code=? AND player_name=?",
-            (team_code, player_name)
-        ).fetchall()
-        if not rows:
-            return jsonify({"error": "Jugador no encontrado"}), 404
+    rows = PlayerGameStats.query.filter_by(
+        team_code=team_code, player_name=player_name
+    ).all()
+    if not rows:
+        return jsonify({"error": "Jugador no encontrado"}), 404
 
-        game_log = []
-        for row in rows:
-            p = _row(row)
-            p.setdefault("trb", p["orb"] + p["drb"])
-            adv = calc_player_stats(p, team_pos=0)
-            game_info = conn.execute(
-                "SELECT date FROM games WHERE game_id=?", (row["game_id"],)
-            ).fetchone()
-            opp_row = _opp_for(conn, row["game_id"], team_code)
+    game_log = []
+    for row in rows:
+        p = _to_dict(row)
+        p.setdefault("trb", p["orb"] + p["drb"])
+        adv = calc_player_stats(p, team_pos=0)
 
-            # Player share of team rebounds in this game
-            team_row = conn.execute(
-                "SELECT orb, drb, trb FROM team_game_stats WHERE game_id=? AND team_code=?",
-                (row["game_id"], team_code)
-            ).fetchone()
-            if team_row:
-                t_orb = team_row["orb"] or 0
-                t_drb = team_row["drb"] or 0
-                t_trb = team_row["trb"] or (t_orb + t_drb)
-                adv["reb_share"]  = round(adv["trb"] / t_trb, 4) if t_trb else 0
-                adv["oreb_share"] = round(adv["orb"] / t_orb, 4) if t_orb else 0
-                adv["dreb_share"] = round(adv["drb"] / t_drb, 4) if t_drb else 0
-            else:
-                adv["reb_share"] = adv["oreb_share"] = adv["dreb_share"] = 0
+        game_info = Game.query.filter_by(game_id=row.game_id).first()
+        opp = _opp_for(row.game_id, team_code)
 
-            game_log.append({
-                "game_id":      row["game_id"],
-                "date":         game_info["date"] if game_info else "",
-                "opponent":     opp_row["team_name"] if opp_row else "",
-                "opponent_code": opp_row["team_code"] if opp_row else "",
-                **adv
-            })
+        team_row = TeamGameStats.query.filter_by(
+            game_id=row.game_id, team_code=team_code
+        ).first()
+        if team_row:
+            t_orb = team_row.orb or 0
+            t_drb = team_row.drb or 0
+            t_trb = team_row.trb or (t_orb + t_drb)
+            adv["reb_share"]  = round(adv["trb"] / t_trb, 4) if t_trb else 0
+            adv["oreb_share"] = round(adv["orb"] / t_orb, 4) if t_orb else 0
+            adv["dreb_share"] = round(adv["drb"] / t_drb, 4) if t_drb else 0
+        else:
+            adv["reb_share"] = adv["oreb_share"] = adv["dreb_share"] = 0
 
-        all_players = conn.execute("SELECT * FROM player_game_stats").fetchall()
-        all_adv = []
-        for ap in all_players:
-            pp = _row(ap)
-            pp.setdefault("trb", pp["orb"] + pp["drb"])
-            all_adv.append(calc_player_stats(pp, team_pos=0))
+        game_log.append({
+            "game_id":       row.game_id,
+            "date":          game_info.date if game_info else "",
+            "opponent":      opp.team_name  if opp else "",
+            "opponent_code": opp.team_code  if opp else "",
+            **adv
+        })
 
-        league = league_averages(all_adv)
+    all_players = PlayerGameStats.query.all()
+    all_adv = []
+    for ap in all_players:
+        pp = _to_dict(ap)
+        pp.setdefault("trb", pp["orb"] + pp["drb"])
+        all_adv.append(calc_player_stats(pp, team_pos=0))
+
+    league = league_averages(all_adv)
 
     def _avg(key):
         vals = [g[key] for g in game_log if key in g]
@@ -332,7 +381,7 @@ def player_stats(team_code: str, player_name: str):
     return jsonify({
         "player":    player_name,
         "team_code": team_code,
-        "team_name": rows[0]["team_name"],
+        "team_name": rows[0].team_name,
         "games":     len(game_log),
         "averages":  averages,
         "league":    league,
@@ -345,11 +394,7 @@ def player_stats(team_code: str, player_name: str):
 @app.route("/api/shots/<team_code>/<player_name>")
 def player_shots(team_code: str, player_name: str):
     team_code = team_code.upper()
-    with get_conn() as conn:
-        rows = conn.execute(
-            "SELECT action_type, sub_type, x, y, made FROM shots WHERE team_code=? AND player_name=?",
-            (team_code, player_name)
-        ).fetchall()
+    rows = Shot.query.filter_by(team_code=team_code, player_name=player_name).all()
 
     zones = {
         "paint":         {"made": 0, "attempts": 0},
@@ -358,30 +403,26 @@ def player_shots(team_code: str, player_name: str):
         "above_break_3": {"made": 0, "attempts": 0},
     }
     for row in rows:
-        z = _classify_zone(row["action_type"], row["sub_type"], row["y"], row["x"])
+        z = _classify_zone(row.action_type, row.sub_type, row.y or 0, row.x or 0)
         if z in zones:
             zones[z]["attempts"] += 1
-            zones[z]["made"]     += row["made"]
+            zones[z]["made"]     += row.made
 
     for z in zones.values():
         z["pct"] = round(z["made"] / z["attempts"], 4) if z["attempts"] else None
 
-    # League-wide zone averages (all players, all games)
     lg_zones = {
         "paint":         {"made": 0, "attempts": 0},
         "mid_range":     {"made": 0, "attempts": 0},
         "corner_3":      {"made": 0, "attempts": 0},
         "above_break_3": {"made": 0, "attempts": 0},
     }
-    with get_conn() as conn:
-        all_shots = conn.execute(
-            "SELECT action_type, sub_type, x, y, made FROM shots"
-        ).fetchall()
-    for row in all_shots:
-        z = _classify_zone(row["action_type"], row["sub_type"], row["y"], row["x"])
+    for row in Shot.query.all():
+        z = _classify_zone(row.action_type, row.sub_type, row.y or 0, row.x or 0)
         if z in lg_zones:
             lg_zones[z]["attempts"] += 1
-            lg_zones[z]["made"]     += row["made"]
+            lg_zones[z]["made"]     += row.made
+
     for z in lg_zones.values():
         z["pct"] = round(z["made"] / z["attempts"], 4) if z["attempts"] else None
 
@@ -396,54 +437,49 @@ def player_shots(team_code: str, player_name: str):
 
 @app.route("/api/league")
 def league_overview():
-    with get_conn() as conn:
-        codes = conn.execute(
-            "SELECT DISTINCT team_code FROM team_game_stats"
-        ).fetchall()
-        all_rows = conn.execute("SELECT * FROM team_game_stats").fetchall()
+    codes    = db.session.query(TeamGameStats.team_code).distinct().all()
+    all_rows = TeamGameStats.query.all()
 
-        result = []
-        for c_row in codes:
-            code  = c_row["team_code"]
-            rows  = [r for r in all_rows if r["team_code"] == code]
-            # Most recent name for this code
-            name  = rows[-1]["team_name"]
+    result = []
+    for (code,) in codes:
+        rows = [r for r in all_rows if r.team_code == code]
+        name = rows[-1].team_name
 
-            adv_list = []
-            for row in rows:
-                ao = _opp_for(conn, row["game_id"], code)
-                if not ao:
-                    continue
-                adv_list.append(calc_team_stats(_row(row), _opp_dict(ao)))
-
-            if not adv_list:
+        adv_list = []
+        for row in rows:
+            ao = _opp_for(row.game_id, code)
+            if not ao:
                 continue
+            adv_list.append(calc_team_stats(_to_dict(row), _opp_dict(ao)))
 
-            def _avg(key):
-                vals = [a[key] for a in adv_list if key in a]
-                return round(sum(vals) / len(vals), 4) if vals else 0
+        if not adv_list:
+            continue
 
-            result.append({
-                "team_code":  code,
-                "team_name":  name,
-                "games":      len(adv_list),
-                "oer":        _avg("oer"),
-                "der":        _avg("der"),
-                "net_rating": _avg("net_rating"),
-                "efg_pct":    _avg("efg_pct"),
-                "ts_pct":     _avg("ts_pct"),
-                "or_pct":     _avg("or_pct"),
-                "dr_pct":     _avg("dr_pct"),
-                "to_pct":     _avg("to_pct"),
-                "pace":       _avg("pace"),
-                "pts":        _avg("pts"),
-            })
+        def _avg(key):
+            vals = [a[key] for a in adv_list if key in a]
+            return round(sum(vals) / len(vals), 4) if vals else 0
+
+        result.append({
+            "team_code":  code,
+            "team_name":  name,
+            "games":      len(adv_list),
+            "oer":        _avg("oer"),
+            "der":        _avg("der"),
+            "net_rating": _avg("net_rating"),
+            "efg_pct":    _avg("efg_pct"),
+            "ts_pct":     _avg("ts_pct"),
+            "or_pct":     _avg("or_pct"),
+            "dr_pct":     _avg("dr_pct"),
+            "to_pct":     _avg("to_pct"),
+            "pace":       _avg("pace"),
+            "pts":        _avg("pts"),
+        })
 
     result.sort(key=lambda x: x["oer"], reverse=True)
     return jsonify(result)
 
 
-# ── Delete games ──────────────────────────────────────────────────────
+# ── Delete games ──────────────────────────────────────────────────────────
 
 @app.route("/api/games", methods=["DELETE"])
 def delete_games():
@@ -451,13 +487,13 @@ def delete_games():
     ids  = body.get("game_ids", [])
     if not ids or not isinstance(ids, list):
         return jsonify({"error": "Se requiere game_ids[]"}), 400
-    placeholders = ",".join("?" * len(ids))
-    with get_conn() as conn:
-        conn.execute(f"DELETE FROM shots             WHERE game_id IN ({placeholders})", ids)
-        conn.execute(f"DELETE FROM player_game_stats WHERE game_id IN ({placeholders})", ids)
-        conn.execute(f"DELETE FROM team_game_stats   WHERE game_id IN ({placeholders})", ids)
-        conn.execute(f"DELETE FROM games             WHERE game_id IN ({placeholders})", ids)
-    return jsonify({"ok": True, "deleted": len(ids)})
+
+    games = Game.query.filter(Game.game_id.in_(ids)).all()
+    for g in games:
+        db.session.delete(g)  # cascade removes team_stats, player_stats, shots
+    db.session.commit()
+
+    return jsonify({"ok": True, "deleted": len(games)})
 
 
 # ── PWA ────────────────────────────────────────────────────────────────────

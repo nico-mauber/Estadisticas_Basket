@@ -1,10 +1,12 @@
-import sqlite3
 import os
+from datetime import datetime
+from flask_sqlalchemy import SQLAlchemy
+
+db = SQLAlchemy()
 
 _default_db = os.path.join(os.path.dirname(__file__), "basketball.db")
 DB_PATH = os.environ.get("DB_PATH", _default_db)
 
-# Ensure parent dir exists; fall back to app dir if mount point not available
 _db_dir = os.path.dirname(os.path.abspath(DB_PATH))
 if not os.path.exists(_db_dir):
     try:
@@ -13,109 +15,121 @@ if not os.path.exists(_db_dir):
         DB_PATH = _default_db
 
 
-def get_conn():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    return conn
+class Game(db.Model):
+    __tablename__ = "games"
+
+    id          = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    game_id     = db.Column(db.String,  unique=True, nullable=False)
+    competition = db.Column(db.String)
+    date        = db.Column(db.String)
+    home_team   = db.Column(db.String)
+    home_code   = db.Column(db.String)
+    away_team   = db.Column(db.String)
+    away_code   = db.Column(db.String)
+    home_score  = db.Column(db.Integer)
+    away_score  = db.Column(db.Integer)
+    minutes     = db.Column(db.Integer, default=40)
+    imported_at = db.Column(db.String,  default=lambda: datetime.utcnow().isoformat())
+
+    team_stats   = db.relationship("TeamGameStats",   backref="game", cascade="all, delete-orphan")
+    player_stats = db.relationship("PlayerGameStats", backref="game", cascade="all, delete-orphan")
+    shots        = db.relationship("Shot",            backref="game", cascade="all, delete-orphan")
 
 
-def init_db():
-    with get_conn() as conn:
-        conn.executescript("""
-            CREATE TABLE IF NOT EXISTS games (
-                id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                game_id     TEXT UNIQUE NOT NULL,
-                competition TEXT,
-                date        TEXT,
-                home_team   TEXT,
-                home_code   TEXT,
-                away_team   TEXT,
-                away_code   TEXT,
-                home_score  INTEGER,
-                away_score  INTEGER,
-                minutes     INTEGER DEFAULT 40,
-                imported_at TEXT DEFAULT (datetime('now'))
-            );
+class TeamGameStats(db.Model):
+    __tablename__  = "team_game_stats"
+    __table_args__ = (db.UniqueConstraint("game_id", "team_code"),)
 
-            CREATE TABLE IF NOT EXISTS team_game_stats (
-                id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                game_id     TEXT NOT NULL REFERENCES games(game_id),
-                team_code   TEXT NOT NULL,
-                team_name   TEXT NOT NULL,
-                is_home     INTEGER NOT NULL,
-                pts         INTEGER DEFAULT 0,
-                fgm         INTEGER DEFAULT 0,
-                fga         INTEGER DEFAULT 0,
-                fgm2        INTEGER DEFAULT 0,
-                fga2        INTEGER DEFAULT 0,
-                fgm3        INTEGER DEFAULT 0,
-                fga3        INTEGER DEFAULT 0,
-                ftm         INTEGER DEFAULT 0,
-                fta         INTEGER DEFAULT 0,
-                orb         INTEGER DEFAULT 0,
-                drb         INTEGER DEFAULT 0,
-                trb         INTEGER DEFAULT 0,
-                ast         INTEGER DEFAULT 0,
-                tov         INTEGER DEFAULT 0,
-                stl         INTEGER DEFAULT 0,
-                blk         INTEGER DEFAULT 0,
-                pf          INTEGER DEFAULT 0,
-                opp_pts     INTEGER DEFAULT 0,
-                opp_fga2    INTEGER DEFAULT 0,
-                opp_fga3    INTEGER DEFAULT 0,
-                opp_fta     INTEGER DEFAULT 0,
-                opp_orb     INTEGER DEFAULT 0,
-                opp_drb     INTEGER DEFAULT 0,
-                opp_tov     INTEGER DEFAULT 0,
-                UNIQUE(game_id, team_code)
-            );
+    id        = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    game_id   = db.Column(db.String,  db.ForeignKey("games.game_id"), nullable=False)
+    team_code = db.Column(db.String,  nullable=False)
+    team_name = db.Column(db.String,  nullable=False)
+    is_home   = db.Column(db.Integer, nullable=False)
 
-            CREATE TABLE IF NOT EXISTS player_game_stats (
-                id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                game_id     TEXT NOT NULL REFERENCES games(game_id),
-                team_code   TEXT NOT NULL,
-                team_name   TEXT NOT NULL,
-                player_name TEXT NOT NULL,
-                jersey      TEXT,
-                minutes     TEXT,
-                pts         INTEGER DEFAULT 0,
-                fgm         INTEGER DEFAULT 0,
-                fga         INTEGER DEFAULT 0,
-                fgm2        INTEGER DEFAULT 0,
-                fga2        INTEGER DEFAULT 0,
-                fgm3        INTEGER DEFAULT 0,
-                fga3        INTEGER DEFAULT 0,
-                ftm         INTEGER DEFAULT 0,
-                fta         INTEGER DEFAULT 0,
-                orb         INTEGER DEFAULT 0,
-                drb         INTEGER DEFAULT 0,
-                trb         INTEGER DEFAULT 0,
-                ast         INTEGER DEFAULT 0,
-                tov         INTEGER DEFAULT 0,
-                stl         INTEGER DEFAULT 0,
-                blk         INTEGER DEFAULT 0,
-                pf          INTEGER DEFAULT 0,
-                UNIQUE(game_id, team_code, player_name)
-            );
+    pts  = db.Column(db.Integer, default=0)
+    fgm  = db.Column(db.Integer, default=0)
+    fga  = db.Column(db.Integer, default=0)
+    fgm2 = db.Column(db.Integer, default=0)
+    fga2 = db.Column(db.Integer, default=0)
+    fgm3 = db.Column(db.Integer, default=0)
+    fga3 = db.Column(db.Integer, default=0)
+    ftm  = db.Column(db.Integer, default=0)
+    fta  = db.Column(db.Integer, default=0)
+    orb  = db.Column(db.Integer, default=0)
+    drb  = db.Column(db.Integer, default=0)
+    trb  = db.Column(db.Integer, default=0)
+    ast  = db.Column(db.Integer, default=0)
+    tov  = db.Column(db.Integer, default=0)
+    stl  = db.Column(db.Integer, default=0)
+    blk  = db.Column(db.Integer, default=0)
+    pf   = db.Column(db.Integer, default=0)
 
-            CREATE TABLE IF NOT EXISTS shots (
-                id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                game_id     TEXT NOT NULL REFERENCES games(game_id),
-                team_code   TEXT NOT NULL,
-                player_name TEXT,
-                x           REAL,
-                y           REAL,
-                made        INTEGER DEFAULT 0,
-                action_type TEXT,
-                sub_type    TEXT,
-                period      INTEGER,
-                action_number INTEGER,
-                UNIQUE(game_id, action_number)
-            );
-        """)
+    opp_pts  = db.Column(db.Integer, default=0)
+    opp_fga2 = db.Column(db.Integer, default=0)
+    opp_fga3 = db.Column(db.Integer, default=0)
+    opp_fta  = db.Column(db.Integer, default=0)
+    opp_orb  = db.Column(db.Integer, default=0)
+    opp_drb  = db.Column(db.Integer, default=0)
+    opp_tov  = db.Column(db.Integer, default=0)
+
+
+class PlayerGameStats(db.Model):
+    __tablename__  = "player_game_stats"
+    __table_args__ = (db.UniqueConstraint("game_id", "team_code", "player_name"),)
+
+    id          = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    game_id     = db.Column(db.String,  db.ForeignKey("games.game_id"), nullable=False)
+    team_code   = db.Column(db.String,  nullable=False)
+    team_name   = db.Column(db.String,  nullable=False)
+    player_name = db.Column(db.String,  nullable=False)
+    jersey      = db.Column(db.String)
+    minutes     = db.Column(db.String)
+
+    pts  = db.Column(db.Integer, default=0)
+    fgm  = db.Column(db.Integer, default=0)
+    fga  = db.Column(db.Integer, default=0)
+    fgm2 = db.Column(db.Integer, default=0)
+    fga2 = db.Column(db.Integer, default=0)
+    fgm3 = db.Column(db.Integer, default=0)
+    fga3 = db.Column(db.Integer, default=0)
+    ftm  = db.Column(db.Integer, default=0)
+    fta  = db.Column(db.Integer, default=0)
+    orb  = db.Column(db.Integer, default=0)
+    drb  = db.Column(db.Integer, default=0)
+    trb  = db.Column(db.Integer, default=0)
+    ast  = db.Column(db.Integer, default=0)
+    tov  = db.Column(db.Integer, default=0)
+    stl  = db.Column(db.Integer, default=0)
+    blk  = db.Column(db.Integer, default=0)
+    pf   = db.Column(db.Integer, default=0)
+
+
+class Shot(db.Model):
+    __tablename__  = "shots"
+    __table_args__ = (db.UniqueConstraint("game_id", "action_number"),)
+
+    id            = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    game_id       = db.Column(db.String,  db.ForeignKey("games.game_id"), nullable=False)
+    team_code     = db.Column(db.String,  nullable=False)
+    player_name   = db.Column(db.String)
+    x             = db.Column(db.Float)
+    y             = db.Column(db.Float)
+    made          = db.Column(db.Integer, default=0)
+    action_type   = db.Column(db.String)
+    sub_type      = db.Column(db.String)
+    period        = db.Column(db.Integer)
+    action_number = db.Column(db.Integer)
+
+
+def init_db(app):
+    db.init_app(app)
+    with app.app_context():
+        db.create_all()
     print("DB initialized.")
 
 
 if __name__ == "__main__":
-    init_db()
+    from flask import Flask
+    _app = Flask(__name__)
+    _app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{DB_PATH}"
+    init_db(_app)
