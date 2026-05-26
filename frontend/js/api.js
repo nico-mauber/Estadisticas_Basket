@@ -18,4 +18,5 @@ export const api = {
   player:        (code, name) => apiFetch(`/api/player/${encodeURIComponent(code)}/${encodeURIComponent(name)}`),
   playerShots:   (code, name) => apiFetch(`/api/shots/${encodeURIComponent(code)}/${encodeURIComponent(name)}`),
   league:        ()   => apiFetch("/api/league"),
+  deleteGames:   (ids) => apiFetch("/api/games", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ game_ids: ids }) }),
 };

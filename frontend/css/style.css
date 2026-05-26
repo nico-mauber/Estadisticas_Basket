@@ -472,6 +472,46 @@ canvas { display: block; width: 100% !important; }
   margin-bottom: var(--sp-3);
   flex-wrap: wrap;
 }
+
+/* ── Modal ───────────────────────────────────────────── */
+.modal-backdrop {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,.6);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 1000;
+}
+.modal {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--sp-5);
+  max-width: 420px; width: 90%;
+}
+.modal h3 { margin: 0 0 var(--sp-3); font-size: 1rem; color: var(--text); }
+.modal p  { margin: 0 0 var(--sp-5); color: var(--muted); font-size: .875rem; line-height: 1.5; }
+.modal-actions { display: flex; gap: var(--sp-3); justify-content: flex-end; }
+.btn-danger { background: var(--red) !important; color: #fff !important; border: none; }
+.btn-danger:hover { opacity: .85; }
+
+/* ── Select / delete mode ────────────────────────────── */
+.games-header {
+  display: flex; align-items: center; justify-content: space-between;
+  flex-wrap: wrap; gap: var(--sp-2);
+}
+.games-header-actions { display: flex; gap: var(--sp-2); align-items: center; }
+.row-cb { accent-color: var(--accent); width: 16px; height: 16px; cursor: pointer; }
+tr.selected-row { background: var(--surface3); }
+.btn-delete-sel {
+  background: transparent;
+  border: 1px solid var(--red);
+  color: var(--red);
+  border-radius: var(--radius);
+  padding: 6px 12px;
+  font-size: .8rem;
+  cursor: pointer;
+  transition: background .15s, color .15s;
+}
+.btn-delete-sel:hover { background: var(--red); color: #fff; }
 .filter-pill {
   background: var(--surface2);
   border: 1px solid var(--border);

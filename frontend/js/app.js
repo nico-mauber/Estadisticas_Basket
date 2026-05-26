@@ -163,7 +163,9 @@ function setSection(id) {
 
 // ── Import section ─────────────────────────────────────────────────────────
 const PAGE_SIZE = 10;
-let importPage = 0;
+let importPage    = 0;
+let selectMode    = false;
+let selectedGames = new Set();
 
 function _fmtDate(d) {
   if (!d) return "—";
@@ -184,30 +186,85 @@ function _gamesTable(games, page) {
       <button class="btn btn-ghost btn-sm" id="pg-next" ${page >= totalPages - 1 ? "disabled" : ""}>Sig. →</button>
     </div>` : "";
 
+  const cbHeader = selectMode ? "<th></th>" : "";
+  const rows = slice.map(g => {
+    const id      = g.game_id || "";
+    const checked = selectedGames.has(id) ? "checked" : "";
+    const selCls  = selectedGames.has(id) ? " selected-row" : "";
+    const cbCell  = selectMode
+      ? `<td><input type="checkbox" class="row-cb" data-id="${id}" ${checked}></td>`
+      : "";
+    return `<tr data-game-id="${id}" class="${selCls}">
+      ${cbCell}
+      <td class="td-muted">${_fmtDate(g.date)}</td>
+      <td class="td-team">${g.home_team || "—"}</td>
+      <td class="td-result">${g.home_score ?? "—"} – ${g.away_score ?? "—"}</td>
+      <td class="td-team">${g.away_team || "—"}</td>
+      <td class="td-comp">${g.competition || "—"}</td>
+    </tr>`;
+  }).join("");
+
   return `
     <div class="table-wrap">
       <table>
         <thead><tr>
-          <th>Fecha</th><th>Local</th><th>Result.</th><th>Visitante</th><th>Competencia</th>
+          ${cbHeader}<th>Fecha</th><th>Local</th><th>Result.</th><th>Visitante</th><th>Competencia</th>
         </tr></thead>
-        <tbody>
-          ${slice.map(g => `
-            <tr>
-              <td class="td-muted">${_fmtDate(g.date)}</td>
-              <td class="td-team">${g.home_team || "—"}</td>
-              <td class="td-result">${g.home_score ?? "—"} – ${g.away_score ?? "—"}</td>
-              <td class="td-team">${g.away_team || "—"}</td>
-              <td class="td-comp">${g.competition || "—"}</td>
-            </tr>`).join("")}
-        </tbody>
+        <tbody>${rows}</tbody>
       </table>
     </div>
     ${pagination}`;
 }
 
+function _showDeleteModal(count, ids) {
+  const backdrop = document.createElement("div");
+  backdrop.className = "modal-backdrop";
+  backdrop.innerHTML = `
+    <div class="modal">
+      <h3>Eliminar partido${count > 1 ? "s" : ""}</h3>
+      <p>¿Eliminar ${count} partido${count > 1 ? "s" : ""}? Se eliminará toda la información asociada (estadísticas, jugadores, tiros). Esta acción no se puede deshacer.</p>
+      <div class="modal-actions">
+        <button class="btn btn-ghost btn-sm" id="btn-cancel-delete">Cancelar</button>
+        <button class="btn btn-danger btn-sm" id="btn-confirm-delete">Eliminar</button>
+      </div>
+    </div>`;
+
+  document.body.appendChild(backdrop);
+
+  backdrop.addEventListener("click", async e => {
+    if (e.target === backdrop || e.target.id === "btn-cancel-delete") {
+      backdrop.remove();
+      return;
+    }
+    if (e.target.id === "btn-confirm-delete") {
+      const btn = e.target;
+      btn.disabled = true;
+      btn.textContent = "Eliminando…";
+      try {
+        await api.deleteGames(ids);
+        toast(`${count} partido${count > 1 ? "s" : ""} eliminado${count > 1 ? "s" : ""}`);
+        selectMode = false;
+        selectedGames.clear();
+        importPage = 0;
+        backdrop.remove();
+        renderImport();
+        refreshTeamSelector();
+        refreshCompareSelectors();
+      } catch (err) {
+        toast(err.message, "err");
+        btn.disabled = false;
+        btn.textContent = "Eliminar";
+      }
+    }
+  });
+}
+
 async function renderImport(allGames) {
   const games = allGames || await api.games().catch(() => []);
   const sec   = document.getElementById("sec-import");
+
+  const deleteBtnStyle = selectMode && selectedGames.size > 0 ? "" : "display:none";
+  const selectBtnLabel = selectMode ? "Cancelar" : "Seleccionar partidos";
 
   sec.innerHTML = `
     <div class="card">
@@ -219,7 +276,13 @@ async function renderImport(allGames) {
       <p class="import-hint">El sistema captura los datos automáticamente desde la URL de FIBA LiveStats.</p>
     </div>
     <div class="card">
-      <div class="card-title">Partidos importados (${games.length})</div>
+      <div class="games-header">
+        <div class="card-title" style="margin:0">Partidos importados (${games.length})</div>
+        <div class="games-header-actions">
+          <button class="btn btn-ghost btn-sm" id="btn-select-mode">${selectBtnLabel}</button>
+          <button class="btn-delete-sel" id="btn-delete-sel" style="${deleteBtnStyle}">🗑 Eliminar seleccionados</button>
+        </div>
+      </div>
       <div id="games-table">${_gamesTable(games, importPage)}</div>
     </div>`;
 
@@ -954,8 +1017,41 @@ async function boot() {
     _renderTeamContent(document.getElementById("team-main"), _teamData, n);
   });
 
-  // Import section pagination
+  // Import section: pagination + select mode + delete
   document.getElementById("sec-import").addEventListener("click", async e => {
+    // Select mode toggle
+    if (e.target.id === "btn-select-mode") {
+      selectMode = !selectMode;
+      selectedGames.clear();
+      const games = await api.games().catch(() => []);
+      renderImport(games);
+      return;
+    }
+
+    // Delete selected
+    if (e.target.id === "btn-delete-sel") {
+      if (selectedGames.size === 0) return;
+      _showDeleteModal(selectedGames.size, [...selectedGames]);
+      return;
+    }
+
+    // Checkbox toggle
+    if (e.target.classList.contains("row-cb")) {
+      const id = e.target.dataset.id;
+      if (!id) return;
+      if (e.target.checked) {
+        selectedGames.add(id);
+      } else {
+        selectedGames.delete(id);
+      }
+      const row = e.target.closest("tr");
+      if (row) row.classList.toggle("selected-row", e.target.checked);
+      const delBtn = document.getElementById("btn-delete-sel");
+      if (delBtn) delBtn.style.display = selectedGames.size > 0 ? "" : "none";
+      return;
+    }
+
+    // Pagination
     if (e.target.id === "pg-prev" && importPage > 0) importPage--;
     else if (e.target.id === "pg-next") importPage++;
     else return;

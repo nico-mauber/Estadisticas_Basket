@@ -443,6 +443,23 @@ def league_overview():
     return jsonify(result)
 
 
+# ── Delete games ──────────────────────────────────────────────────────
+
+@app.route("/api/games", methods=["DELETE"])
+def delete_games():
+    body = request.get_json(force=True) or {}
+    ids  = body.get("game_ids", [])
+    if not ids or not isinstance(ids, list):
+        return jsonify({"error": "Se requiere game_ids[]"}), 400
+    placeholders = ",".join("?" * len(ids))
+    with get_conn() as conn:
+        conn.execute(f"DELETE FROM shots             WHERE game_id IN ({placeholders})", ids)
+        conn.execute(f"DELETE FROM player_game_stats WHERE game_id IN ({placeholders})", ids)
+        conn.execute(f"DELETE FROM team_game_stats   WHERE game_id IN ({placeholders})", ids)
+        conn.execute(f"DELETE FROM games             WHERE game_id IN ({placeholders})", ids)
+    return jsonify({"ok": True, "deleted": len(ids)})
+
+
 # ── PWA ────────────────────────────────────────────────────────────────────
 
 @app.route("/")
