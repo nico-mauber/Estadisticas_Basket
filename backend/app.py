@@ -1,3 +1,4 @@
+import os
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from sqlalchemy import func
@@ -15,6 +16,13 @@ init_db(app)
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────
+
+def _require_admin():
+    token = os.environ.get("ADMIN_TOKEN")
+    if token and request.headers.get("X-Admin-Token") != token:
+        return jsonify({"error": "No autorizado"}), 401
+    return None
+
 
 def _to_dict(obj) -> dict:
     return {c.name: getattr(obj, c.name) for c in obj.__table__.columns}
@@ -61,8 +69,11 @@ def import_game():
 
     try:
         game = fetch_game_data(url)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
     except Exception as e:
-        return jsonify({"error": str(e)}), 502
+        app.logger.error("Import failed: %s", e)
+        return jsonify({"error": "No se pudo obtener datos de FIBA LiveStats. Verifica la URL."}), 502
 
     game_id = game["game_id"]
 
@@ -483,6 +494,9 @@ def league_overview():
 
 @app.route("/api/games", methods=["DELETE"])
 def delete_games():
+    err = _require_admin()
+    if err:
+        return err
     body = request.get_json(force=True) or {}
     ids  = body.get("game_ids", [])
     if not ids or not isinstance(ids, list):

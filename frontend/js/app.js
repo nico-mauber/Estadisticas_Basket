@@ -217,12 +217,19 @@ function _gamesTable(games, page) {
 }
 
 function _showDeleteModal(count, ids) {
+  const hasToken = !!localStorage.getItem("adminToken");
+  const tokenNote = hasToken
+    ? `<p class="token-note">Token configurado. <a href="#" id="lnk-change-token">Cambiar</a></p>`
+    : `<p class="token-note token-missing">Token de administrador requerido:</p>
+       <input id="admin-token-input" type="password" placeholder="Token de administrador" class="token-input" />`;
+
   const backdrop = document.createElement("div");
   backdrop.className = "modal-backdrop";
   backdrop.innerHTML = `
     <div class="modal">
       <h3>Eliminar partido${count > 1 ? "s" : ""}</h3>
       <p>¿Eliminar ${count} partido${count > 1 ? "s" : ""}? Se eliminará toda la información asociada (estadísticas, jugadores, tiros). Esta acción no se puede deshacer.</p>
+      ${tokenNote}
       <div class="modal-actions">
         <button class="btn btn-ghost btn-sm" id="btn-cancel-delete">Cancelar</button>
         <button class="btn btn-danger btn-sm" id="btn-confirm-delete">Eliminar</button>
@@ -236,7 +243,20 @@ function _showDeleteModal(count, ids) {
       backdrop.remove();
       return;
     }
+    if (e.target.id === "lnk-change-token") {
+      e.preventDefault();
+      localStorage.removeItem("adminToken");
+      backdrop.remove();
+      _showDeleteModal(count, ids);
+      return;
+    }
     if (e.target.id === "btn-confirm-delete") {
+      const tokenInput = backdrop.querySelector("#admin-token-input");
+      if (tokenInput) {
+        const val = tokenInput.value.trim();
+        if (!val) { toast("Ingresa el token de administrador", "err"); return; }
+        localStorage.setItem("adminToken", val);
+      }
       const btn = e.target;
       btn.disabled = true;
       btn.textContent = "Eliminando…";
@@ -251,7 +271,12 @@ function _showDeleteModal(count, ids) {
         refreshTeamSelector();
         refreshCompareSelectors();
       } catch (err) {
-        toast(err.message, "err");
+        if (err.message.includes("autorizado") || err.message.includes("401")) {
+          localStorage.removeItem("adminToken");
+          toast("Token incorrecto. Intenta de nuevo.", "err");
+        } else {
+          toast(err.message, "err");
+        }
         btn.disabled = false;
         btn.textContent = "Eliminar";
       }

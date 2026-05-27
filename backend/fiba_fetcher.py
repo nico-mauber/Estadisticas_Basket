@@ -18,6 +18,9 @@ except ImportError:
     _PLAYWRIGHT_AVAILABLE = False
 
 
+_ALLOWED_HOST = "fibalivestats.dcd.shared.geniussports.com"
+_ALLOWED_BASE = f"https://{_ALLOWED_HOST}"
+
 _HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -40,9 +43,12 @@ def _extract_game_id(url: str) -> str:
 def _data_url(url: str) -> str:
     """Convert a bs.html URL to its data.json URL."""
     game_id = _extract_game_id(url)
-    base = re.match(r"(https?://[^/]+)", url)
-    host = base.group(1) if base else "https://fibalivestats.dcd.shared.geniussports.com"
-    return f"{host}/data/{game_id}/data.json"
+    m = re.match(r"https?://([^/]+)", url)
+    if not m or m.group(1) != _ALLOWED_HOST:
+        raise ValueError(
+            f"URL no permitida. Solo se aceptan URLs de {_ALLOWED_HOST}."
+        )
+    return f"{_ALLOWED_BASE}/data/{game_id}/data.json"
 
 
 def _fetch_direct(data_url: str, referer: str) -> dict:
@@ -55,6 +61,9 @@ def _fetch_direct(data_url: str, referer: str) -> dict:
 
 def _fetch_game_date(page_url: str) -> str:
     """Extract game date from the bs.html page (DD/MM/YY or DD/MM/YYYY pattern)."""
+    m_host = re.match(r"https?://([^/]+)", page_url)
+    if not m_host or m_host.group(1) != _ALLOWED_HOST:
+        return ""
     try:
         req = urllib.request.Request(page_url, headers=_HEADERS)
         with urllib.request.urlopen(req, timeout=10) as resp:

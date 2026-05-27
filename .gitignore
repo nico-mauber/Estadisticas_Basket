@@ -3,4 +3,6 @@ backend/*.pyc
 backend/basketball.db
 *.db
 .env
+.env.*
 CLAUDE.md
+.gstack/
