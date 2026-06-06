@@ -565,7 +565,7 @@ function _renderTeamContent(main, data, n) {
       <div class="stat-grid">
         ${statBox("Robos", av.stl, DEC2(av.stl), "stl", lg)}
         ${statBox("Tapones", av.blk, DEC2(av.blk), "blk", lg)}
-        ${statBox("Stocks", av.stocks, DEC2(av.stocks), "stocks", lg)}
+        ${statBox("Stops", av.stocks, DEC2(av.stocks), "stocks", lg)}
         ${statBox("Def Playmaking", av.def_playmaking, DEC2(av.def_playmaking), "def_playmaking", lg)}
         ${statBox("DEF/TO Ratio", av.def_to_ratio, DEC2(av.def_to_ratio), "def_to_ratio", lg)}
       </div>
@@ -880,7 +880,7 @@ async function renderPlayer(teamCode, playerName) {
         <div class="stat-grid">
           ${statBox("Robos", av.stl, DEC2(av.stl), "stl", lg)}
           ${statBox("Tapones", av.blk, DEC2(av.blk), "blk", lg)}
-          ${statBox("Stocks", av.stocks, DEC2(av.stocks), "stocks", lg)}
+          ${statBox("Stops", av.stocks, DEC2(av.stocks), "stocks", lg)}
           ${statBox("Def Playmaking", av.def_playmaking, DEC2(av.def_playmaking), "def_playmaking", lg)}
           ${statBox("DEF/TO Ratio", av.def_to_ratio, DEC2(av.def_to_ratio), "def_to_ratio", lg)}
           ${statBox("Impacto Físico", av.physical_impact, DEC2(av.physical_impact), "physical_impact", lg)}

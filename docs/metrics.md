@@ -143,7 +143,7 @@ Calculadas sobre las stats crudas del rival en ese partido:
 
 | Métrica | Fórmula | Descripción |
 |---------|---------|-------------|
-| **Stocks** | `STL + BLK` | Recuperaciones defensivas directas |
+| **Stops** | `STL + BLK` | Actividad defensiva — robos + tapones |
 | **Def Playmaking** | `STL + BLK − TOV` | Impacto neto defensivo |
 | **Def TO Ratio** | `(STL + BLK + DR) / TOV` | Eficiencia defensiva global; alto = mejor |
 | **Physical Impact** *(jugador)* | `TRB + STL` | Impacto físico total |
