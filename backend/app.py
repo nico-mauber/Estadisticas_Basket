@@ -47,6 +47,81 @@ def _classify_zone(action_type: str, sub_type: str, y: float = 0, x: float = 0) 
     return "mid_range"
 
 
+_PAINT_KWORDS = {"layup", "dunk", "alley", "tip", "hook", "putback", "driving", "fingerroll"}
+
+ZONE_KEYS_11 = [
+    "restricted_area",
+    "mid_left_close", "mid_right_close",
+    "mid_left_far",   "mid_right_far",   "mid_top",
+    "left_corner_3",  "right_corner_3",
+    "left_wing_3",    "right_wing_3",    "top_key_3",
+]
+
+ZONE_POINTS = {
+    "restricted_area": 2, "mid_left_close": 2, "mid_right_close": 2,
+    "mid_left_far": 2,    "mid_right_far": 2,   "mid_top": 2,
+    "left_corner_3": 3,   "right_corner_3": 3,
+    "left_wing_3": 3,     "right_wing_3": 3,    "top_key_3": 3,
+}
+
+_2PT_ZONES = {"restricted_area", "mid_left_close", "mid_right_close",
+              "mid_left_far", "mid_right_far", "mid_top"}
+_3PT_ZONES = {"left_corner_3", "right_corner_3", "left_wing_3",
+              "right_wing_3", "top_key_3"}
+
+
+def _classify_zone_11(action_type: str, sub_type: str, x: float = 0, y: float = 0) -> str:
+    """
+    Classify a shot into one of 11 zones.
+
+    Coordinate system (FIBA LiveStats normalized):
+      x: 0–100, center=50, left<50
+      y: 0–100, baseline=0, increases away from basket
+
+    Zone geometry matches SVG rendering:
+      restricted_area  = full paint box (x 34–66)
+      mid_left_close   = outside paint left, near baseline (x<34, y<25)
+      mid_right_close  = outside paint right, near baseline (x>66, y<25)
+      mid_left_far     = left elbow / wing mid (x<42, y≥25)
+      mid_right_far    = right elbow (x≥58, y≥25)
+      mid_top          = high post center (x 42–58, y≥25)
+    """
+    sub       = (sub_type or "").lower()
+    has_coord = x != 0 or y != 0
+
+    if action_type == "3pt":
+        if has_coord and y < 14:
+            return "left_corner_3" if x < 50 else "right_corner_3"
+        if not has_coord:
+            return "top_key_3"
+        if x < 38:
+            return "left_wing_3"
+        if x >= 62:
+            return "right_wing_3"
+        return "top_key_3"
+
+    # 2pt — paint keywords always → restricted area
+    paint_sub = any(k in sub for k in _PAINT_KWORDS)
+    if paint_sub:
+        return "restricted_area"
+
+    if has_coord:
+        # Inside paint box (lane lines x ≈ 34–66)
+        if 34 <= x <= 66:
+            return "restricted_area"
+        # Outside paint, near baseline
+        if y < 25:
+            return "mid_left_close" if x < 50 else "mid_right_close"
+        # Mid-range above baseline
+        if x < 42:
+            return "mid_left_far"
+        if x >= 58:
+            return "mid_right_far"
+        return "mid_top"
+
+    return "mid_top"
+
+
 def _opp_dict(opp: TeamGameStats) -> dict:
     return {
         "pts":  opp.pts,
@@ -407,41 +482,36 @@ def player_shots(team_code: str, player_name: str):
     team_code = team_code.upper()
     rows = Shot.query.filter_by(team_code=team_code, player_name=player_name).all()
 
-    zones = {
-        "paint":         {"made": 0, "attempts": 0},
-        "mid_range":     {"made": 0, "attempts": 0},
-        "corner_3":      {"made": 0, "attempts": 0},
-        "above_break_3": {"made": 0, "attempts": 0},
-    }
+    zones = {k: {"made": 0, "attempts": 0} for k in ZONE_KEYS_11}
     for row in rows:
-        z = _classify_zone(row.action_type, row.sub_type, row.y or 0, row.x or 0)
-        if z in zones:
-            zones[z]["attempts"] += 1
-            zones[z]["made"]     += row.made
+        z = _classify_zone_11(row.action_type, row.sub_type, row.x or 0, row.y or 0)
+        zones[z]["attempts"] += 1
+        zones[z]["made"]     += row.made
 
-    for z in zones.values():
-        z["pct"] = round(z["made"] / z["attempts"], 4) if z["attempts"] else None
+    total_fga = sum(z["attempts"] for z in zones.values())
+    total_pts = sum(zones[k]["made"] * ZONE_POINTS[k] for k in ZONE_KEYS_11)
+    fgm2 = sum(zones[k]["made"] for k in _2PT_ZONES)
+    fgm3 = sum(zones[k]["made"] for k in _3PT_ZONES)
 
-    lg_zones = {
-        "paint":         {"made": 0, "attempts": 0},
-        "mid_range":     {"made": 0, "attempts": 0},
-        "corner_3":      {"made": 0, "attempts": 0},
-        "above_break_3": {"made": 0, "attempts": 0},
+    for k, z in zones.items():
+        if z["attempts"]:
+            z["pct"] = round(z["made"] / z["attempts"], 4)
+            z["pf"]  = round(z["made"] * ZONE_POINTS[k] / z["attempts"], 3)
+        else:
+            z["pct"] = None
+            z["pf"]  = None
+
+    games = db.session.query(Shot.game_id).filter_by(
+        team_code=team_code, player_name=player_name
+    ).distinct().count()
+
+    summary = {
+        "global_pf": round(total_pts / total_fga, 3) if total_fga else None,
+        "efg_pct":   round((fgm2 + 1.5 * fgm3) / total_fga, 4) if total_fga else None,
+        "games":     games,
     }
-    for row in Shot.query.all():
-        z = _classify_zone(row.action_type, row.sub_type, row.y or 0, row.x or 0)
-        if z in lg_zones:
-            lg_zones[z]["attempts"] += 1
-            lg_zones[z]["made"]     += row.made
 
-    for z in lg_zones.values():
-        z["pct"] = round(z["made"] / z["attempts"], 4) if z["attempts"] else None
-
-    return jsonify({
-        "zones":        zones,
-        "league_zones": lg_zones,
-        "total_shots":  sum(z["attempts"] for z in zones.values()),
-    })
+    return jsonify({"zones": zones, "total_shots": total_fga, "summary": summary})
 
 
 # ── League ─────────────────────────────────────────────────────────────────

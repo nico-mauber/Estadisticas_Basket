@@ -682,147 +682,102 @@ async function renderCompare() {
   });
 }
 
-// ── Shot chart SVG — half court, 4 zones with corner_3, delta vs league ──────
-function _shotChartSVG(zones, totalShots, leagueZones) {
-  const W = 340, H = 350;  // extra 40px at bottom for corner_3 stats bar
-  const muted = "#6b7280", txt = "#e2e8f0", line = "#374151";
-
-  // Court geometry (basket at bottom-center, shooting UP)
+// ── Shot chart SVG — half court, 11 zones (P/F color coding) ──────────────
+function _shotChartSVG(zones, totalShots, summary) {
+  const W = 340, H = 320;
   const cx = 170, cy = 256;
   const cL = 20, cR = 320, cT = 8, cB = 288;
+  const r3 = 135, rP = 50;
+  const pbX1 = 121, pbX2 = 219, pbTop = 140;
+  const c3xL = 38, c3xR = 302;
+  const c3yJoin = Math.round(cy - Math.sqrt(r3 * r3 - (cx - c3xL) ** 2));
+  const wingX = 75;
+  const courtBg = "#162032", line = "#374151";
 
-  // Zone radii (FIBA proportions at ~20px/m: 6.75m arc, 2.5m paint)
-  const rP = 50;
-  const r3 = 135;
-
-  function zColor(z, key) {
-    if (!z?.attempts) return "#141f2e";
-    const la = leagueZones?.[key]?.pct;
-    if (la == null) {
-      const p = z.pct;
-      if (p >= 0.58) return "rgba(22,163,74,0.72)";
-      if (p >= 0.44) return "rgba(101,163,13,0.60)";
-      if (p >= 0.32) return "rgba(75,85,99,0.50)";
-      return "rgba(220,38,38,0.68)";
-    }
-    const d = (z.pct - la) * 100;
-    if (d >= 9)  return "rgba(22,163,74,0.80)";
-    if (d >= 3)  return "rgba(101,163,13,0.68)";
-    if (d >= -3) return "rgba(75,85,99,0.50)";
-    if (d >= -9) return "rgba(234,88,12,0.68)";
-    return "rgba(220,38,38,0.78)";
+  function zFill(key) {
+    const z = zones?.[key];
+    if (!z?.attempts) return courtBg;
+    const pf = z.pf;
+    if (pf >= 1.05) return "rgba(22,163,74,0.80)";
+    if (pf >= 0.90) return "rgba(101,163,13,0.72)";
+    if (pf >= 0.70) return "rgba(234,88,12,0.72)";
+    return "rgba(220,38,38,0.82)";
   }
 
-  const hCirc = r => `M${cx-r},${cy} A${r},${r} 0 0,0 ${cx+r},${cy} Z`;
+  const hCirc = r => `M${cx - r},${cy} A${r},${r} 0 0,0 ${cx + r},${cy} Z`;
   const hRing = (r1, r2) =>
     `M${cx-r2},${cy} A${r2},${r2} 0 0,0 ${cx+r2},${cy} L${cx+r1},${cy} A${r1},${r1} 0 0,1 ${cx-r1},${cy} Z`;
 
-  const paint    = zones.paint         || {attempts:0, pct:null};
-  const mid      = zones.mid_range     || {attempts:0, pct:null};
-  const abBreak  = zones.above_break_3 || {attempts:0, pct:null};
-  const corner3  = zones.corner_3      || {attempts:0, pct:null};
-
-  function zlabel(z, x, y, key, title) {
-    const la = leagueZones?.[key];
-    if (!z?.attempts) return `
-      <text x="${x}" y="${y-10}" text-anchor="middle" fill="${muted}" font-size="9" font-weight="700" letter-spacing="0.5" font-family="Inter,sans-serif">${title}</text>
-      <text x="${x}" y="${y+8}"  text-anchor="middle" fill="${muted}" font-size="14" font-family="Inter,sans-serif">—</text>`;
-    const pct = (z.pct*100).toFixed(0)+"%";
-    const d   = la?.pct != null ? (z.pct - la.pct)*100 : null;
-    const ds  = d != null ? (d>=0?'+':'')+d.toFixed(0)+'pp' : null;
-    const dc  = d == null ? muted : d >= 3 ? '#4ade80' : d <= -3 ? '#f87171' : '#9ca3af';
-    const lap = la?.pct != null ? `Ø ${(la.pct*100).toFixed(0)}%` : '';
+  function lbl(key, lx, ly) {
+    const z = zones?.[key];
+    if (!z?.attempts) return '';
+    const pct = (z.pct * 100).toFixed(1) + '%';
+    const pf  = z.pf.toFixed(2);
+    const bg  = zFill(key);
+    const w = 58, h = 38, r = 4;
+    const x0 = lx - w / 2, y0 = ly - h / 2;
     return `
-      <text x="${x}" y="${y-18}" text-anchor="middle" fill="${muted}" font-size="9" font-weight="700" letter-spacing="0.5" font-family="Inter,sans-serif">${title}</text>
-      <text x="${x}" y="${y-2}"  text-anchor="middle" fill="${txt}"   font-size="16" font-weight="800" font-family="Inter,sans-serif">${z.made}/${z.attempts}</text>
-      <text x="${x}" y="${y+14}" text-anchor="middle" fill="${txt}"   font-size="13" font-family="Inter,sans-serif">${pct}</text>
-      ${ds  ? `<text x="${x}" y="${y+27}" text-anchor="middle" fill="${dc}"   font-size="10" font-family="Inter,sans-serif">${ds} vs liga</text>` : ''}
-      ${lap ? `<text x="${x}" y="${y+39}" text-anchor="middle" fill="${muted}" font-size="9"  font-family="Inter,sans-serif">${lap}</text>` : ''}`;
+      <rect x="${x0}" y="${y0}" width="${w}" height="${h}" rx="${r}" fill="${bg}" stroke="rgba(255,255,255,0.12)" stroke-width="0.8"/>
+      <text x="${lx - 6}" y="${ly - 5}" text-anchor="end"   fill="rgba(255,255,255,0.75)" font-size="9" font-family="Inter,sans-serif">${z.attempts}</text>
+      <text x="${lx + 4}" y="${ly - 5}" text-anchor="start" fill="rgba(255,255,255,0.75)" font-size="9" font-family="Inter,sans-serif">${pf}</text>
+      <text x="${lx}"     y="${ly + 11}" text-anchor="middle" fill="#fff" font-size="14" font-weight="800" font-family="Inter,sans-serif">${pct}</text>`;
   }
 
-  // Corner_3 stats bar (rendered below court, y=296 to y=340)
-  function cornerBar(z, key) {
-    const barY = cB + 12;
-    const la = leagueZones?.[key];
-    if (!z?.attempts) return `
-      <text x="${W/2}" y="${barY+2}" text-anchor="middle" fill="${muted}" font-size="9" font-weight="700" letter-spacing="0.5" font-family="Inter,sans-serif">ESQUINA 3</text>
-      <text x="${W/2}" y="${barY+16}" text-anchor="middle" fill="${muted}" font-size="12" font-family="Inter,sans-serif">Sin datos</text>`;
-    const pct = (z.pct*100).toFixed(0)+"%";
-    const d   = la?.pct != null ? (z.pct - la.pct)*100 : null;
-    const ds  = d != null ? (d>=0?'+':'')+d.toFixed(0)+'pp' : null;
-    const dc  = d == null ? muted : d >= 3 ? '#4ade80' : d <= -3 ? '#f87171' : '#9ca3af';
-    const lap = la?.pct != null ? `Ø ${(la.pct*100).toFixed(0)}%` : '';
-    const fill = zColor(z, key);
+  function badge() {
+    if (!summary) return '';
+    const pf  = summary.global_pf  != null ? summary.global_pf.toFixed(2) : '—';
+    const efg = summary.efg_pct    != null ? (summary.efg_pct * 100).toFixed(1)+'%' : '—';
+    const g   = summary.games ?? 0;
     return `
-      <rect x="${cL}" y="${barY-4}" width="${cR-cL}" height="44" fill="${fill}" rx="4" opacity="0.85"/>
-      <text x="${W/2}" y="${barY+8}" text-anchor="middle" fill="${muted}" font-size="9" font-weight="700" letter-spacing="0.5" font-family="Inter,sans-serif">ESQUINA 3 (CORNER)</text>
-      <text x="${W/2-60}" y="${barY+24}" text-anchor="middle" fill="${txt}" font-size="14" font-weight="800" font-family="Inter,sans-serif">${z.made}/${z.attempts}</text>
-      <text x="${W/2}" y="${barY+24}" text-anchor="middle" fill="${txt}" font-size="14" font-family="Inter,sans-serif">${pct}</text>
-      ${ds  ? `<text x="${W/2+55}" y="${barY+24}" text-anchor="middle" fill="${dc}" font-size="11" font-family="Inter,sans-serif">${ds}</text>` : ''}
-      ${lap ? `<text x="${W/2}" y="${barY+36}" text-anchor="middle" fill="${muted}" font-size="9" font-family="Inter,sans-serif">${lap}</text>` : ''}`;
+      <rect x="${cR - 116}" y="${cT}"    width="56" height="22" rx="3" fill="rgba(234,88,12,0.90)"/>
+      <text x="${cR - 88}"  y="${cT+14}" text-anchor="middle" fill="#fff" font-size="10" font-weight="700" font-family="Inter,sans-serif">P/F ${pf}</text>
+      <rect x="${cR - 58}"  y="${cT}"    width="56" height="22" rx="3" fill="rgba(101,163,13,0.90)"/>
+      <text x="${cR - 30}"  y="${cT+14}" text-anchor="middle" fill="#fff" font-size="10" font-weight="700" font-family="Inter,sans-serif">eFG ${efg}</text>
+      <circle cx="${cR - 4}" cy="${cT+11}" r="11" fill="#374151"/>
+      <text   x="${cR - 4}"  y="${cT+15}" text-anchor="middle" fill="#e2e8f0" font-size="9" font-weight="700" font-family="Inter,sans-serif">${g}P</text>`;
   }
-
-  const pbX1 = cx-49, pbX2 = cx+49, pbTop = cy-116;
-
-  const SCALE = [
-    [-9,'rgba(220,38,38,0.78)'], [-3,'rgba(234,88,12,0.68)'],
-    [0,'rgba(75,85,99,0.50)'],   [3,'rgba(101,163,13,0.68)'],
-    [9,'rgba(22,163,74,0.80)'],
-  ];
 
   return `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg"
     style="width:100%;max-width:420px;margin:0 auto;display:block;border-radius:8px">
     <defs>
-      <clipPath id="sc-clip">
-        <rect x="${cL}" y="${cT}" width="${cR-cL}" height="${cB-cT}"/>
-      </clipPath>
+      <clipPath id="sc-clip"><rect x="${cL}" y="${cT}" width="${cR-cL}" height="${cB-cT}"/></clipPath>
+      <clipPath id="sc-left"><rect x="${cL}" y="${cT}" width="${cx-cL}" height="${cB-cT}"/></clipPath>
+      <clipPath id="sc-right"><rect x="${cx}" y="${cT}" width="${cR-cx}" height="${cB-cT}"/></clipPath>
+      <clipPath id="sc-ctr"><rect x="${cx-wingX}" y="${cT}" width="${wingX*2}" height="${cB-cT}"/></clipPath>
     </defs>
-
-    <!-- Background -->
     <rect width="${W}" height="${H}" fill="#0d1117" rx="8"/>
-    <rect x="${cL}" y="${cT}" width="${cR-cL}" height="${cB-cT}" fill="#111827" rx="3"/>
-
-    <!-- ZONE FILLS (back to front) -->
-    <!-- Above-break 3: fills entire court (others paint over it) -->
-    <rect x="${cL}" y="${cT}" width="${cR-cL}" height="${cB-cT}" fill="${zColor(abBreak,'above_break_3')}" clip-path="url(#sc-clip)" rx="3"/>
-
-    <!-- Corner 3: thin strips at each corner (below basket level, outside r3 from center) -->
-    <rect x="${cL}"    y="${cy}" width="${cx-r3-cL}" height="${cB-cy}" fill="${zColor(corner3,'corner_3')}" clip-path="url(#sc-clip)"/>
-    <rect x="${cx+r3}" y="${cy}" width="${cR-cx-r3}" height="${cB-cy}" fill="${zColor(corner3,'corner_3')}" clip-path="url(#sc-clip)"/>
-
-    <!-- Mid-range: half-ring above basket level + long-2 strip below arc -->
-    <path d="${hRing(rP, r3)}" fill="${zColor(mid,'mid_range')}" clip-path="url(#sc-clip)"/>
-    <rect x="${cx-r3}" y="${cy}" width="${r3*2}" height="${cB-cy}" fill="${zColor(mid,'mid_range')}" clip-path="url(#sc-clip)"/>
-
-    <!-- Paint: half-circle + close rect below basket level -->
-    <path d="${hCirc(rP)}" fill="${zColor(paint,'paint')}" clip-path="url(#sc-clip)"/>
-    <rect x="${cx-rP}" y="${cy}" width="${rP*2}" height="${cB-cy}" fill="${zColor(paint,'paint')}" clip-path="url(#sc-clip)"/>
-
-    <!-- COURT LINES -->
-    <rect x="${cL}" y="${cT}" width="${cR-cL}" height="${cB-cT}" fill="none" stroke="${line}" stroke-width="1.5" rx="3"/>
-    <rect x="${pbX1}" y="${pbTop}" width="${pbX2-pbX1}" height="${cB-pbTop}" fill="none" stroke="#4b5563" stroke-width="1.5"/>
-    <path d="M${pbX1},${pbTop} A49,49 0 0,0 ${pbX2},${pbTop}" fill="none" stroke="#4b5563" stroke-width="1.5" stroke-dasharray="4,3"/>
-    <path d="M${cx-r3},${cy} A${r3},${r3} 0 0,0 ${cx+r3},${cy}" fill="none" stroke="#4b5563" stroke-width="1.5"/>
-    <line x1="${cx-r3}" y1="${cy}" x2="${cx-r3}" y2="${cB}" stroke="#4b5563" stroke-width="1.5"/>
-    <line x1="${cx+r3}" y1="${cy}" x2="${cx+r3}" y2="${cB}" stroke="#4b5563" stroke-width="1.5"/>
-    <path d="M${cx-rP},${cy} A${rP},${rP} 0 0,0 ${cx+rP},${cy}" fill="none" stroke="#4b5563" stroke-width="1" stroke-dasharray="3,3" opacity="0.6"/>
-    <circle cx="${cx}" cy="${cy}" r="9" fill="none" stroke="#9ca3af" stroke-width="2"/>
-    <line x1="${cx-26}" y1="${cB-3}" x2="${cx+26}" y2="${cB-3}" stroke="#9ca3af" stroke-width="3"/>
-
-    <!-- ZONE LABELS (paint, mid, above-break) -->
-    ${zlabel(paint,   cx, cy-18,  'paint',         'PINTURA')}
-    ${zlabel(mid,     cx, cy-92,  'mid_range',      'MID-RANGE')}
-    ${zlabel(abBreak, cx, cy-195, 'above_break_3',  'ARCO 3P')}
-
-    <!-- CORNER_3 STATS BAR (below court) -->
-    ${cornerBar(corner3, 'corner_3')}
-
-    <!-- COLOR SCALE -->
-    <text x="6" y="${H-11}" fill="${muted}" font-size="8" font-weight="600" font-family="Inter,sans-serif">FG% vs liga:</text>
-    ${SCALE.map(([v,c],i) => `
-      <rect x="${62+i*46}" y="${H-22}" width="42" height="13" fill="${c}" rx="2"/>
-      <text x="${62+i*46+21}" y="${H-12}" text-anchor="middle" fill="${txt}" font-size="8" font-family="Inter,sans-serif">${v>0?'+':''}${v}pp</text>
-    `).join('')}
+    <rect x="${cL}" y="${cT}" width="${cR-cL}" height="${cB-cT}" fill="${courtBg}" rx="3"/>
+    <rect x="${cx-wingX}" y="${cT}" width="${wingX*2}"  height="${cB-cT}" fill="${zFill('top_key_3')}"    clip-path="url(#sc-clip)"/>
+    <rect x="${cL}"        y="${cT}" width="${cx-cL}"    height="${cB-cT}" fill="${zFill('left_wing_3')}"  clip-path="url(#sc-left)"/>
+    <rect x="${cx}"        y="${cT}" width="${cR-cx}"    height="${cB-cT}" fill="${zFill('right_wing_3')}" clip-path="url(#sc-right)"/>
+    <rect x="${cL}"   y="${c3yJoin}" width="${c3xL-cL}"   height="${cB-c3yJoin}" fill="${zFill('left_corner_3')}"  clip-path="url(#sc-clip)"/>
+    <rect x="${c3xR}" y="${c3yJoin}" width="${cR-c3xR}"   height="${cB-c3yJoin}" fill="${zFill('right_corner_3')}" clip-path="url(#sc-clip)"/>
+    <path d="${hRing(rP, r3)}" fill="${zFill('mid_left_far')}"  clip-path="url(#sc-left)"/>
+    <path d="${hRing(rP, r3)}" fill="${zFill('mid_right_far')}" clip-path="url(#sc-right)"/>
+    <path d="${hRing(rP, r3)}" fill="${zFill('mid_top')}"       clip-path="url(#sc-ctr)"/>
+    <rect x="${c3xL}" y="${cy}" width="${pbX1-c3xL}" height="${cB-cy}" fill="${zFill('mid_left_close')}"  clip-path="url(#sc-clip)"/>
+    <rect x="${pbX2}" y="${cy}" width="${c3xR-pbX2}" height="${cB-cy}" fill="${zFill('mid_right_close')}" clip-path="url(#sc-clip)"/>
+    <path d="${hCirc(rP)}"                                                                         fill="${zFill('restricted_area')}" clip-path="url(#sc-clip)"/>
+    <rect x="${pbX1}" y="${pbTop}" width="${pbX2-pbX1}" height="${cB-pbTop}"                       fill="${zFill('restricted_area')}" clip-path="url(#sc-clip)"/>
+    <rect  x="${cL}" y="${cT}" width="${cR-cL}" height="${cB-cT}" fill="none" stroke="${line}" stroke-width="1.5" rx="3"/>
+    <rect  x="${pbX1}" y="${pbTop}" width="${pbX2-pbX1}" height="${cB-pbTop}" fill="none" stroke="#4b5563" stroke-width="1.5"/>
+    <path  d="M${pbX1},${pbTop} A49,49 0 0,0 ${pbX2},${pbTop}" fill="none" stroke="#4b5563" stroke-width="1.5" stroke-dasharray="4,3"/>
+    <path  d="M${c3xL},${cB} L${c3xL},${c3yJoin} A${r3},${r3} 0 0,0 ${c3xR},${c3yJoin} L${c3xR},${cB}" fill="none" stroke="#4b5563" stroke-width="1.5"/>
+    <path  d="M${cx-rP},${cy} A${rP},${rP} 0 0,0 ${cx+rP},${cy}" fill="none" stroke="#4b5563" stroke-width="1" stroke-dasharray="3,3" opacity="0.6"/>
+    <circle cx="${cx}" cy="${cy}" r="9"  fill="none" stroke="#9ca3af" stroke-width="2"/>
+    <line   x1="${cx-26}" y1="${cB-3}" x2="${cx+26}" y2="${cB-3}" stroke="#9ca3af" stroke-width="3"/>
+    ${lbl('top_key_3',       cx,          75)}
+    ${lbl('left_wing_3',     cL + 36,    200)}
+    ${lbl('right_wing_3',    cR - 36,    200)}
+    ${lbl('left_corner_3',   cL + 22,    266)}
+    ${lbl('right_corner_3',  cR - 22,    266)}
+    ${lbl('mid_top',         cx,         168)}
+    ${lbl('mid_left_far',    cx - 102,   172)}
+    ${lbl('mid_right_far',   cx + 102,   172)}
+    ${lbl('mid_left_close',  cx - 68,    268)}
+    ${lbl('mid_right_close', cx + 68,    268)}
+    ${lbl('restricted_area', cx,         222)}
+    ${badge()}
   </svg>`;
 }
 
@@ -935,7 +890,7 @@ async function renderPlayer(teamCode, playerName) {
       shotCard.className = "card";
       shotCard.innerHTML = `
         <div class="card-title">Shot chart por zonas <span style="color:var(--muted2);font-weight:400;text-transform:none;letter-spacing:0">— ${playerName}</span></div>
-        ${_shotChartSVG(shots.zones, shots.total_shots, shots.league_zones)}`;
+        ${_shotChartSVG(shots.zones, shots.total_shots, shots.summary)}`;
       main.insertBefore(shotCard, main.querySelector(".chart-grid"));
     }).catch(() => {});
   } catch (e) {
