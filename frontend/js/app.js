@@ -682,7 +682,7 @@ async function renderCompare() {
   });
 }
 
-// ── Shot chart SVG — half court, 11 zones (P/F color coding) ──────────────
+// ── Shot chart SVG — half court, 11 zones (PPT color coding) ──────────────
 function _shotChartSVG(zones, totalShots, summary) {
   const W = 340, H = 320;
   const cx = 170, cy = 256;
@@ -719,7 +719,7 @@ function _shotChartSVG(zones, totalShots, summary) {
     return `
       <rect x="${x0}" y="${y0}" width="${w}" height="${h}" rx="${r}" fill="${bg}" stroke="rgba(255,255,255,0.12)" stroke-width="0.8"/>
       <text x="${lx - 6}" y="${ly - 5}" text-anchor="end"   fill="rgba(255,255,255,0.75)" font-size="9" font-family="Inter,sans-serif">${z.attempts}</text>
-      <text x="${lx + 4}" y="${ly - 5}" text-anchor="start" fill="rgba(255,255,255,0.75)" font-size="9" font-family="Inter,sans-serif">${pf}</text>
+      <text x="${lx + 4}" y="${ly - 5}" text-anchor="start" fill="rgba(255,255,255,0.75)" font-size="9" font-family="Inter,sans-serif">PPT ${pf}</text>
       <text x="${lx}"     y="${ly + 11}" text-anchor="middle" fill="#fff" font-size="14" font-weight="800" font-family="Inter,sans-serif">${pct}</text>`;
   }
 
@@ -730,7 +730,7 @@ function _shotChartSVG(zones, totalShots, summary) {
     const g   = summary.games ?? 0;
     return `
       <rect x="${cR - 116}" y="${cT}"    width="56" height="22" rx="3" fill="rgba(234,88,12,0.90)"/>
-      <text x="${cR - 88}"  y="${cT+14}" text-anchor="middle" fill="#fff" font-size="10" font-weight="700" font-family="Inter,sans-serif">P/F ${pf}</text>
+      <text x="${cR - 88}"  y="${cT+14}" text-anchor="middle" fill="#fff" font-size="10" font-weight="700" font-family="Inter,sans-serif">PPT ${pf}</text>
       <rect x="${cR - 58}"  y="${cT}"    width="56" height="22" rx="3" fill="rgba(101,163,13,0.90)"/>
       <text x="${cR - 30}"  y="${cT+14}" text-anchor="middle" fill="#fff" font-size="10" font-weight="700" font-family="Inter,sans-serif">eFG ${efg}</text>
       <circle cx="${cR - 4}" cy="${cT+11}" r="11" fill="#374151"/>
