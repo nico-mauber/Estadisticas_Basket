@@ -725,14 +725,17 @@ function _shotChartSVG(zones, totalShots, summary) {
 
   function badge() {
     if (!summary) return '';
-    const pf  = summary.global_pf  != null ? summary.global_pf.toFixed(2) : '—';
-    const efg = summary.efg_pct    != null ? (summary.efg_pct * 100).toFixed(1)+'%' : '—';
+    const ppt = summary.global_pf != null ? summary.global_pf.toFixed(2) : '—';
+    const ppp = summary.ppp       != null ? summary.ppp.toFixed(2)       : '—';
+    const efg = summary.efg_pct   != null ? (summary.efg_pct * 100).toFixed(1)+'%' : '—';
     const g   = summary.games ?? 0;
     return `
-      <rect x="${cR - 116}" y="${cT}"    width="56" height="22" rx="3" fill="rgba(234,88,12,0.90)"/>
-      <text x="${cR - 88}"  y="${cT+14}" text-anchor="middle" fill="#fff" font-size="10" font-weight="700" font-family="Inter,sans-serif">PPT ${pf}</text>
-      <rect x="${cR - 58}"  y="${cT}"    width="56" height="22" rx="3" fill="rgba(101,163,13,0.90)"/>
-      <text x="${cR - 30}"  y="${cT+14}" text-anchor="middle" fill="#fff" font-size="10" font-weight="700" font-family="Inter,sans-serif">eFG ${efg}</text>
+      <rect x="${cR - 172}" y="${cT}"    width="54" height="22" rx="3" fill="rgba(99,102,241,0.90)"/>
+      <text x="${cR - 145}"  y="${cT+14}" text-anchor="middle" fill="#fff" font-size="10" font-weight="700" font-family="Inter,sans-serif">PPP ${ppp}</text>
+      <rect x="${cR - 116}" y="${cT}"    width="54" height="22" rx="3" fill="rgba(234,88,12,0.90)"/>
+      <text x="${cR - 89}"  y="${cT+14}" text-anchor="middle" fill="#fff" font-size="10" font-weight="700" font-family="Inter,sans-serif">PPT ${ppt}</text>
+      <rect x="${cR - 60}"  y="${cT}"    width="54" height="22" rx="3" fill="rgba(101,163,13,0.90)"/>
+      <text x="${cR - 33}"  y="${cT+14}" text-anchor="middle" fill="#fff" font-size="10" font-weight="700" font-family="Inter,sans-serif">eFG ${efg}</text>
       <circle cx="${cR - 4}" cy="${cT+11}" r="11" fill="#374151"/>
       <text   x="${cR - 4}"  y="${cT+15}" text-anchor="middle" fill="#e2e8f0" font-size="9" font-weight="700" font-family="Inter,sans-serif">${g}P</text>`;
   }

@@ -505,9 +505,23 @@ def player_shots(team_code: str, player_name: str):
         team_code=team_code, player_name=player_name
     ).distinct().count()
 
+    pgs = db.session.query(
+        func.sum(PlayerGameStats.pts).label("pts"),
+        func.sum(PlayerGameStats.fga).label("fga"),
+        func.sum(PlayerGameStats.fta).label("fta"),
+        func.sum(PlayerGameStats.tov).label("tov"),
+    ).filter_by(team_code=team_code, player_name=player_name).first()
+
+    ppp = None
+    if pgs and pgs.fga:
+        poss = (pgs.fga or 0) + 0.44 * (pgs.fta or 0) + (pgs.tov or 0)
+        if poss:
+            ppp = round((pgs.pts or 0) / poss, 3)
+
     summary = {
         "global_pf": round(total_pts / total_fga, 3) if total_fga else None,
         "efg_pct":   round((fgm2 + 1.5 * fgm3) / total_fga, 4) if total_fga else None,
+        "ppp":       ppp,
         "games":     games,
     }
 
