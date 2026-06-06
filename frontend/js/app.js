@@ -475,6 +475,50 @@ function _filteredLog(gameLog, n) {
   return sorted.slice(0, n);
 }
 
+// ── Usage ranking card ──────────────────────────────────────────────────────
+function _renderUsageRanking(players) {
+  const el = document.getElementById("usage-ranking");
+  if (!el || !players?.length) return;
+  const maxUso = players[0]?.uso_pct || 1;
+  const rows = players.map(p => {
+    const pct = p.uso_pct ? (p.uso_pct * 100).toFixed(1) + "%" : "—";
+    const bar = p.uso_pct ? Math.round((p.uso_pct / maxUso) * 100) : 0;
+    const pts = p.pts ? p.pts.toFixed(1) : "—";
+    return `
+      <tr class="clickable-row" data-player="${p.name}">
+        <td style="font-weight:600">${p.name}</td>
+        <td style="width:120px">
+          <div style="background:var(--border);border-radius:3px;height:8px;overflow:hidden">
+            <div style="width:${bar}%;height:100%;background:var(--accent);border-radius:3px"></div>
+          </div>
+        </td>
+        <td style="text-align:right;font-weight:700;color:var(--accent)">${pct}</td>
+        <td style="text-align:right;color:var(--muted)">${pts} pts</td>
+        <td style="text-align:right;color:var(--muted);font-size:11px">${p.games}P</td>
+      </tr>`;
+  }).join("");
+  el.innerHTML = `
+    <div class="card" style="margin-top:8px">
+      <div class="card-title">Jugadores más influyentes — USO%</div>
+      <table class="game-log" style="width:100%">
+        <thead><tr>
+          <th>Jugador</th><th></th>
+          <th style="text-align:right">USO%</th>
+          <th style="text-align:right">PPG</th>
+          <th style="text-align:right">PJ</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+  el.querySelectorAll(".clickable-row").forEach(tr => {
+    tr.addEventListener("click", () => {
+      const pName = tr.dataset.player;
+      document.getElementById("player-select").value = pName;
+      document.getElementById("player-select").dispatchEvent(new Event("change"));
+    });
+  });
+}
+
 function _renderTeamContent(main, data, n) {
   const filtered = _filteredLog(data.game_log, n);
   const av = n ? _computeAvg(filtered) : data.averages;
@@ -593,7 +637,8 @@ async function renderTeam(teamCode) {
     const players = await api.players(teamCode);
     const pSel = document.getElementById("player-select");
     pSel.innerHTML = '<option value="">— Seleccionar jugador —</option>' +
-      players.map(p => `<option value="${p}">${p}</option>`).join("");
+      players.map(p => `<option value="${p.name}">${p.name}</option>`).join("");
+    _renderUsageRanking(players);
   } catch (e) {
     main.innerHTML = `<p class="empty below-avg">${e.message}</p>`;
   }
@@ -799,6 +844,7 @@ async function renderPlayer(teamCode, playerName) {
         <div class="card-title">Producción ofensiva</div>
         <div class="stat-grid">
           ${statBox("OER", av.oer, DEC2(av.oer), "oer", lg)}
+          ${statBox("USO%", av.uso_pct, PCT(av.uso_pct), "uso_pct", lg)}
           ${statBox("PPP", av.ppp, DEC2(av.ppp), "ppp", lg)}
           ${statBox("PPT", av.pps, DEC2(av.pps), "pps", lg)}
           ${statBox("eFG%", av.efg_pct, PCT(av.efg_pct), "efg_pct", lg)}
@@ -943,6 +989,7 @@ async function boot() {
           </div>
         </div>
         <div id="team-main"></div>
+        <div id="usage-ranking"></div>
       </div>
 
       <!-- Compare -->

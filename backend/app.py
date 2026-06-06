@@ -389,15 +389,43 @@ def team_stats(team_code: str):
 
 @app.route("/api/players/<team_code>")
 def team_players(team_code: str):
-    rows = (
+    team_code = team_code.upper()
+    names = [
+        r.player_name for r in
         PlayerGameStats.query
-        .filter_by(team_code=team_code.upper())
+        .filter_by(team_code=team_code)
         .with_entities(PlayerGameStats.player_name)
         .distinct()
         .order_by(PlayerGameStats.player_name)
         .all()
-    )
-    return jsonify([r.player_name for r in rows])
+    ]
+    result = []
+    for name in names:
+        rows = PlayerGameStats.query.filter_by(team_code=team_code, player_name=name).all()
+        uso_vals, pts_vals = [], []
+        for row in rows:
+            p = _to_dict(row)
+            p.setdefault("trb", p["orb"] + p["drb"])
+            team_row = TeamGameStats.query.filter_by(
+                game_id=row.game_id, team_code=team_code
+            ).first()
+            game_obj = Game.query.filter_by(game_id=row.game_id).first()
+            t_dict   = _to_dict(team_row) if team_row else None
+            game_min = game_obj.minutes if game_obj else 40
+            adv = calc_player_stats(p, team_pos=0, team=t_dict, game_minutes=game_min)
+            if adv.get("uso_pct") is not None:
+                uso_vals.append(adv["uso_pct"])
+            pts_vals.append(p.get("pts", 0))
+        avg_uso = round(sum(uso_vals) / len(uso_vals), 4) if uso_vals else 0
+        avg_pts = round(sum(pts_vals) / len(pts_vals), 2) if pts_vals else 0
+        result.append({
+            "name":    name,
+            "games":   len(rows),
+            "uso_pct": avg_uso,
+            "pts":     avg_pts,
+        })
+    result.sort(key=lambda x: x["uso_pct"], reverse=True)
+    return jsonify(result)
 
 
 @app.route("/api/player/<team_code>/<player_name>")
@@ -413,14 +441,17 @@ def player_stats(team_code: str, player_name: str):
     for row in rows:
         p = _to_dict(row)
         p.setdefault("trb", p["orb"] + p["drb"])
-        adv = calc_player_stats(p, team_pos=0)
 
         game_info = Game.query.filter_by(game_id=row.game_id).first()
-        opp = _opp_for(row.game_id, team_code)
-
-        team_row = TeamGameStats.query.filter_by(
+        opp       = _opp_for(row.game_id, team_code)
+        team_row  = TeamGameStats.query.filter_by(
             game_id=row.game_id, team_code=team_code
         ).first()
+
+        t_dict   = _to_dict(team_row) if team_row else None
+        game_min = game_info.minutes if game_info else 40
+        adv = calc_player_stats(p, team_pos=0, team=t_dict, game_minutes=game_min)
+
         if team_row:
             t_orb = team_row.orb or 0
             t_drb = team_row.drb or 0
@@ -459,6 +490,7 @@ def player_stats(team_code: str, player_name: str):
         "or_pct", "dr_pct", "to_pct", "to_ratio", "as_pct", "ast_ratio", "ast_to",
         "stocks", "def_playmaking", "def_to_ratio", "physical_impact",
         "reb_share", "oreb_share", "dreb_share",
+        "uso_pct",
         "pts", "fgm", "fga", "fgm2", "fga2", "fgm3", "fga3",
         "ftm", "fta", "orb", "drb", "ast", "tov", "stl", "blk",
     ]

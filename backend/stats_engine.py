@@ -8,6 +8,19 @@ def _safe_div(num, den, default=0.0):
     return round(num / den, 4) if den else default
 
 
+def _parse_minutes(s) -> float:
+    """Parse '28:34' → 28.567, '0' → 0.0, None → 0.0."""
+    if not s:
+        return 0.0
+    try:
+        if ":" in str(s):
+            m, sec = str(s).split(":", 1)
+            return int(m) + int(sec) / 60
+        return float(s)
+    except (ValueError, TypeError):
+        return 0.0
+
+
 def possessions(fga2, fga3, fta, orb, tov):
     """POS = 2PA + 3PA + FTA×0.44 + TO - OR"""
     return fga2 + fga3 + fta * 0.44 + tov - orb
@@ -152,7 +165,7 @@ def calc_team_stats(t: dict, opp: dict) -> dict:
     }
 
 
-def calc_player_stats(p: dict, team_pos: float) -> dict:
+def calc_player_stats(p: dict, team_pos: float, team: dict = None, game_minutes: int = 40) -> dict:
     """Player advanced stats."""
     fga = p["fga2"] + p["fga3"]
     fgm = p["fgm2"] + p["fgm3"]
@@ -181,6 +194,16 @@ def calc_player_stats(p: dict, team_pos: float) -> dict:
     peso_1p = _safe_div(ftm, pts)
     peso_2p = _safe_div(2 * p["fgm2"], pts)
     peso_3p = _safe_div(3 * p["fgm3"], pts)
+
+    # USO% = plays / (team_plays × player_min / team_min)
+    player_min = _parse_minutes(p.get("minutes"))
+    if team and player_min > 0:
+        team_fga  = (team.get("fga2", 0) or 0) + (team.get("fga3", 0) or 0)
+        team_plays = team_fga + 0.44 * (team.get("fta", 0) or 0) + (team.get("tov", 0) or 0)
+        team_min   = 5 * game_minutes
+        uso_pct = _safe_div(plays, team_plays * (player_min / team_min))
+    else:
+        uso_pct = None
 
     p_pos = possessions(p["fga2"], p["fga3"], fta, p["orb"], p["tov"])
     oer   = _safe_div(pts, p_pos)
@@ -220,6 +243,7 @@ def calc_player_stats(p: dict, team_pos: float) -> dict:
         "def_playmaking": def_playmaking,
         "def_to_ratio":   def_to_ratio,
         "physical_impact": physical_impact,
+        "uso_pct": uso_pct,
         "pts":  pts,
         "fgm":  fgm,
         "fga":  fga,
@@ -255,6 +279,7 @@ def league_averages(all_team_stats: list[dict]) -> dict:
         "peso_1p", "peso_2p", "peso_3p",
         "fg2_uso", "fg3_uso",
         "stocks", "def_playmaking", "def_to_ratio",
+        "uso_pct",
     ]
     # Metrics where lower = better
     lower_is_better = {"der", "to_pct", "to_ratio", "opp_efg_pct", "opp_ts_pct"}
