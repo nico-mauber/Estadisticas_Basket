@@ -58,7 +58,7 @@ Similar a posesiones pero sin descuento de rebotes ofensivos. Representa el tota
 | **FG2%** | `2PM / 2PA` | Porcentaje de dobles |
 | **FG3%** | `3PM / 3PA` | Porcentaje de triples |
 | **FT%** | `FTM / FTA` | Porcentaje de tiros libres |
-| **PPS** | `PTS / FGA` | Puntos por tiro intentado |
+| **PPT** | `PTS / FGA` | Puntos por tiro intentado |
 | **PPP** | `PTS / PLAYS` | Puntos por play (jugador) |
 
 ---

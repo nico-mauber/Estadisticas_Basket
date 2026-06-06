@@ -490,7 +490,7 @@ function _renderTeamContent(main, data, n) {
         ${statBox("DER", av.der, DEC2(av.der), "der", lg, false)}
         ${statBox("Net Rating", av.net_rating, DEC2(av.net_rating), "net_rating", lg)}
         ${statBox("Pace", av.pace, DEC2(av.pace), "pace", lg)}
-        ${statBox("PPS", av.pps, DEC2(av.pps), "pps", lg)}
+        ${statBox("PPT", av.pps, DEC2(av.pps), "pps", lg)}
         ${statBox("FT Rate", av.ft_rate, DEC2(av.ft_rate), "ft_rate", lg)}
       </div>
     </div>
@@ -800,7 +800,7 @@ async function renderPlayer(teamCode, playerName) {
         <div class="stat-grid">
           ${statBox("OER", av.oer, DEC2(av.oer), "oer", lg)}
           ${statBox("PPP", av.ppp, DEC2(av.ppp), "ppp", lg)}
-          ${statBox("PPS", av.pps, DEC2(av.pps), "pps", lg)}
+          ${statBox("PPT", av.pps, DEC2(av.pps), "pps", lg)}
           ${statBox("eFG%", av.efg_pct, PCT(av.efg_pct), "efg_pct", lg)}
           ${statBox("TS%", av.ts_pct, PCT(av.ts_pct), "ts_pct", lg)}
           ${statBox("FT Rate", av.ft_rate, DEC2(av.ft_rate), "ft_rate", lg)}
