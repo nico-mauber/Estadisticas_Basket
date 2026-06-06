@@ -1,4 +1,4 @@
-const CACHE = "courtiq-v18";
+const CACHE = "courtiq-v19";
 const STATIC = [
   "/",
   "/manifest.json",

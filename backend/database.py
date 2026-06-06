@@ -71,6 +71,13 @@ class TeamGameStats(db.Model):
     opp_orb  = db.Column(db.Integer, default=0)
     opp_drb  = db.Column(db.Integer, default=0)
     opp_tov  = db.Column(db.Integer, default=0)
+    opp_pf   = db.Column(db.Integer, default=0)
+
+    paint_pts         = db.Column(db.Integer, default=0)
+    second_chance_pts = db.Column(db.Integer, default=0)
+    pts_from_tov      = db.Column(db.Integer, default=0)
+    bench_pts         = db.Column(db.Integer, default=0)
+    fast_break_pts    = db.Column(db.Integer, default=0)
 
 
 class PlayerGameStats(db.Model):
@@ -126,6 +133,28 @@ def init_db(app):
     with app.app_context():
         db.create_all()
     print("DB initialized.")
+
+
+def upgrade_db(app):
+    """Add new columns to existing tables (idempotent)."""
+    new_cols = [
+        ("team_game_stats", "opp_pf",            "INTEGER DEFAULT 0"),
+        ("team_game_stats", "paint_pts",          "INTEGER DEFAULT 0"),
+        ("team_game_stats", "second_chance_pts",  "INTEGER DEFAULT 0"),
+        ("team_game_stats", "pts_from_tov",       "INTEGER DEFAULT 0"),
+        ("team_game_stats", "bench_pts",          "INTEGER DEFAULT 0"),
+        ("team_game_stats", "fast_break_pts",     "INTEGER DEFAULT 0"),
+    ]
+    with app.app_context():
+        conn = db.engine.raw_connection()
+        cur = conn.cursor()
+        for table, col, typedef in new_cols:
+            try:
+                cur.execute(f"ALTER TABLE {table} ADD COLUMN {col} {typedef}")
+            except Exception:
+                pass  # column already exists
+        conn.commit()
+        conn.close()
 
 
 if __name__ == "__main__":

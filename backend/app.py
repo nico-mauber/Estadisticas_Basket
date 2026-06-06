@@ -3,7 +3,7 @@ from flask import Flask, jsonify, request
 from flask_cors import CORS
 from sqlalchemy import func
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
-from database import db, init_db, Game, TeamGameStats, PlayerGameStats, Shot, DB_PATH
+from database import db, init_db, upgrade_db, Game, TeamGameStats, PlayerGameStats, Shot, DB_PATH
 from stats_engine import calc_team_stats, calc_player_stats, league_averages
 from fiba_fetcher import fetch_game_data
 
@@ -13,6 +13,7 @@ app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 CORS(app)
 
 init_db(app)
+upgrade_db(app)
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────
@@ -145,6 +146,9 @@ def import_game():
     try:
         game = fetch_game_data(url)
     except ValueError as e:
+        # ValueError covers bad URLs AND FibaSchemaError (upstream schema drift).
+        # Log so a format change is visible in server logs, not just the UI.
+        app.logger.warning("Import rejected for %s: %s", url, e)
         return jsonify({"error": str(e)}), 400
     except Exception as e:
         app.logger.error("Import failed: %s", e)
@@ -200,6 +204,12 @@ def import_game():
                 opp_orb  = t.get("opp_orb",  0),
                 opp_drb  = t.get("opp_drb",  0),
                 opp_tov  = t.get("opp_tov",  0),
+                opp_pf   = t.get("opp_pf",   0),
+                paint_pts         = t.get("paint_pts",         0),
+                second_chance_pts = t.get("second_chance_pts", 0),
+                pts_from_tov      = t.get("pts_from_tov",      0),
+                bench_pts         = t.get("bench_pts",         0),
+                fast_break_pts    = t.get("fast_break_pts",    0),
             ).on_conflict_do_update(
                 index_elements=["game_id", "team_code"],
                 set_=dict(
@@ -218,6 +228,12 @@ def import_game():
                     opp_orb  = t.get("opp_orb",  0),
                     opp_drb  = t.get("opp_drb",  0),
                     opp_tov  = t.get("opp_tov",  0),
+                    opp_pf   = t.get("opp_pf",   0),
+                    paint_pts         = t.get("paint_pts",         0),
+                    second_chance_pts = t.get("second_chance_pts", 0),
+                    pts_from_tov      = t.get("pts_from_tov",      0),
+                    bench_pts         = t.get("bench_pts",         0),
+                    fast_break_pts    = t.get("fast_break_pts",    0),
                 )
             )
         )
@@ -328,7 +344,13 @@ def team_stats(team_code: str):
             "opponent":      opp.team_name,
             "opponent_code": opp.team_code,
             "home_away":     "L" if row.is_home else "V",
-            **adv
+            **adv,
+            "opp_pf":            t.get("opp_pf",            0),
+            "paint_pts":         t.get("paint_pts",         0),
+            "second_chance_pts": t.get("second_chance_pts", 0),
+            "pts_from_tov":      t.get("pts_from_tov",      0),
+            "bench_pts":         t.get("bench_pts",         0),
+            "fast_break_pts":    t.get("fast_break_pts",    0),
         })
 
     all_rows = TeamGameStats.query.all()
@@ -355,7 +377,8 @@ def team_stats(team_code: str):
         "opp_efg_pct", "opp_ts_pct", "opp_to_pct", "opp_ft_rate",
         "stocks", "def_playmaking", "def_to_ratio",
         "fgm", "fga", "fgm2", "fga2", "fgm3", "fga3",
-        "ftm", "fta", "orb", "drb", "ast", "tov", "stl", "blk",
+        "ftm", "fta", "orb", "drb", "trb", "ast", "tov", "stl", "blk", "pf",
+        "opp_pf", "paint_pts", "second_chance_pts", "pts_from_tov", "bench_pts", "fast_break_pts",
     ]
     averages = {k: _avg(k) for k in keys}
 

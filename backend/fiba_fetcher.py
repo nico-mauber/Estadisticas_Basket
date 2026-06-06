@@ -18,6 +18,16 @@ except ImportError:
     _PLAYWRIGHT_AVAILABLE = False
 
 
+class FibaSchemaError(ValueError):
+    """
+    Raised when FIBA data doesn't match the structure we depend on.
+
+    Subclasses ValueError so the API layer returns it as a clear 400 instead
+    of silently storing all-zero stats. This is the canary for upstream changes
+    to FIBA LiveStats' data.json schema.
+    """
+
+
 _ALLOWED_HOST = "fibalivestats.dcd.shared.geniussports.com"
 _ALLOWED_BASE = f"https://{_ALLOWED_HOST}"
 
@@ -121,6 +131,68 @@ def _fetch_playwright(data_url: str) -> dict:
     return result["data"]
 
 
+def _validate_raw(raw) -> None:
+    """
+    Structural check on the FIBA data.json BEFORE parsing.
+
+    Catches gross schema changes early with a clear message. Intentionally
+    checks only structure (containers, counts), NOT specific stat key names —
+    key-name drift is caught by _validate_game after parsing, which is
+    schema-agnostic (renamed keys → zero values → flagged there).
+    """
+    if not isinstance(raw, dict):
+        raise FibaSchemaError("Respuesta de FIBA no es un objeto JSON válido.")
+
+    teams = raw.get("tm")
+    if not isinstance(teams, dict):
+        raise FibaSchemaError("Esquema de FIBA cambió: falta el objeto de equipos ('tm').")
+    if len(teams) < 2:
+        raise FibaSchemaError(
+            f"Esquema de FIBA cambió: se esperaban 2 equipos, se encontraron {len(teams)}."
+        )
+
+    for tk, t in teams.items():
+        if not isinstance(t, dict):
+            raise FibaSchemaError(f"Esquema de FIBA cambió: el equipo '{tk}' no es un objeto.")
+        if not isinstance(t.get("pl"), dict) or not t.get("pl"):
+            raise FibaSchemaError(
+                f"Esquema de FIBA cambió: el equipo '{tk}' no tiene jugadores ('pl')."
+            )
+
+
+def _validate_game(game: dict) -> None:
+    """
+    Sanity check on the PARSED game. This is the real safety net.
+
+    Because the parser defaults every missing field to 0, a renamed FIBA key
+    produces a structurally-valid game full of zeros. These checks turn that
+    silent corruption into a loud, actionable error.
+    """
+    teams = game.get("teams") or []
+    if len(teams) != 2:
+        raise FibaSchemaError(
+            f"Datos incompletos: se esperaban 2 equipos, se obtuvieron {len(teams)}."
+        )
+
+    total_pts = sum(t.get("pts", 0) for t in teams)
+    total_fga = sum(t.get("fga", 0) for t in teams)
+    if total_pts == 0 and total_fga == 0:
+        raise FibaSchemaError(
+            "Datos vacíos o esquema cambiado: ambos equipos tienen 0 puntos y 0 tiros. "
+            "El formato de FIBA LiveStats probablemente cambió, o el partido no se jugó."
+        )
+
+    for t in teams:
+        if t.get("fga", 0) == 0 and t.get("fta", 0) == 0:
+            raise FibaSchemaError(
+                f"Datos sospechosos: el equipo '{t.get('team_code')}' no tiene tiros "
+                "registrados. Posible cambio en el esquema de FIBA."
+            )
+
+    if not game.get("players"):
+        raise FibaSchemaError("Datos incompletos: no se importó ningún jugador.")
+
+
 def fetch_game_data(url: str) -> dict:
     """
     Main entry point. Accepts any FIBA LiveStats bs.html URL.
@@ -140,7 +212,9 @@ def fetch_game_data(url: str) -> dict:
             raise RuntimeError("No se pudo obtener datos de FIBA LiveStats (urllib falló y Playwright no está disponible).")
         raw = _fetch_playwright(data_url)
 
+    _validate_raw(raw)                     # structural guard (clear early error)
     game = _parse_fiba_json(raw, url)
+    _validate_game(game)                   # value guard (catches silent key drift)
 
     # Date not in JSON — extract from HTML page
     if not game.get("date"):
@@ -213,6 +287,11 @@ def _parse_fiba_json(raw: dict, source_url: str = "") -> dict:
             "stl":  ti(["Steals"]),
             "blk":  ti(["Blocks"]),
             "pf":   ti(["FoulsPersonal"]),
+            "paint_pts":         ti(["PointsInThePaint", "PaintPoints"]),
+            "second_chance_pts": ti(["SecondChancePoints"]),
+            "pts_from_tov":      ti(["PointsFromTurnovers"]),
+            "bench_pts":         ti(["BenchPoints"]),
+            "fast_break_pts":    ti(["FastBreakPoints"]),
         }
         team_row["fgm"] = team_row["fgm2"] + team_row["fgm3"]
         team_row["fga"] = team_row["fga2"] + team_row["fga3"]
@@ -335,6 +414,7 @@ def _parse_fiba_json(raw: dict, source_url: str = "") -> dict:
         a["opp_orb"]  = b["orb"];  b["opp_orb"]  = a["orb"]
         a["opp_drb"]  = b["drb"];  b["opp_drb"]  = a["drb"]
         a["opp_tov"]  = b["tov"];  b["opp_tov"]  = a["tov"]
+        a["opp_pf"]   = b["pf"];   b["opp_pf"]   = a["pf"]
         game["home_team"]  = a["team_name"]
         game["home_code"]  = a["team_code"]
         game["away_team"]  = b["team_name"]

@@ -158,6 +158,13 @@ export function drawCompareRadar(canvasId, avgA, avgB, league, labelA, labelB) {
           borderColor: C.blue, backgroundColor: C.blueA,
           borderWidth: 2, pointBackgroundColor: C.blue, pointRadius: 3,
         },
+        {
+          label: "Promedio liga",
+          data: Array(dims.length).fill(50),
+          borderColor: C.muted, backgroundColor: C.mutedA,
+          borderDash: [4, 4], borderWidth: 1.5,
+          pointBackgroundColor: C.muted, pointRadius: 2,
+        },
       ],
     },
     options: {

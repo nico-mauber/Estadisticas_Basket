@@ -560,3 +560,8 @@ thead th[data-key]:hover  { color: var(--text); }
 .compare-table td { min-width: 80px; }
 .compare-table .winner { color: var(--green); font-weight: 700; }
 .compare-table .loser  { color: var(--muted); }
+
+.fiba-box td, .fiba-box th { text-align: center; min-width: 0; }
+.fiba-box .lbl { color: var(--muted); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; white-space: nowrap; }
+.fiba-box td:first-child, .fiba-box th:first-child { text-align: right; padding-right: var(--sp-2); }
+.fiba-box td:last-child,  .fiba-box th:last-child  { text-align: left;  padding-left:  var(--sp-2); }

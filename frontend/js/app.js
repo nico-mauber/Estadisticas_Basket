@@ -52,7 +52,8 @@ function _computeAvg(gameLog) {
     "stocks","def_playmaking","def_to_ratio","physical_impact",
     "reb_share","oreb_share","dreb_share",
     "fgm","fga","fgm2","fga2","fgm3","fga3","ftm","fta",
-    "orb","drb","ast","tov","stl","blk",
+    "orb","drb","trb","ast","tov","stl","blk","pf",
+    "opp_pf","paint_pts","second_chance_pts","pts_from_tov","bench_pts","fast_break_pts",
   ];
   const result = {};
   for (const k of keys) {
@@ -570,6 +571,17 @@ function _renderTeamContent(main, data, n) {
         ${statBox("DEF/TO Ratio", av.def_to_ratio, DEC2(av.def_to_ratio), "def_to_ratio", lg)}
       </div>
     </div>
+    ${(av.paint_pts || av.second_chance_pts || av.pts_from_tov || av.bench_pts || av.fast_break_pts) ? `
+    <div class="card">
+      <div class="card-title">Desglose ofensivo</div>
+      <div class="stat-grid">
+        ${statBox("PeP",       av.paint_pts,         DEC2(av.paint_pts),         null, null, false)}
+        ${statBox("Seg. Op.",  av.second_chance_pts,  DEC2(av.second_chance_pts), null, null, false)}
+        ${statBox("Ptos/PER",  av.pts_from_tov,       DEC2(av.pts_from_tov),      null, null, false)}
+        ${statBox("Banca",     av.bench_pts,          DEC2(av.bench_pts),         null, null, false)}
+        ${statBox("PCA",       av.fast_break_pts,     DEC2(av.fast_break_pts),    null, null, false)}
+      </div>
+    </div>` : ""}
     <div class="card">
       <div class="card-title">Game log</div>
       <div class="table-wrap">
@@ -667,32 +679,51 @@ async function renderCompare() {
       const avA = dataA.averages, avB = dataB.averages;
       const lg  = dataA.league;
 
-      const METRICS = [
-        { key: "oer",       label: "OER",        hib: true,  fmt: DEC2 },
-        { key: "der",       label: "DER",        hib: false, fmt: DEC2 },
-        { key: "net_rating",label: "Net Rating",  hib: true,  fmt: DEC2 },
-        { key: "efg_pct",   label: "eFG%",       hib: true,  fmt: PCT  },
-        { key: "ts_pct",    label: "TS%",        hib: true,  fmt: PCT  },
-        { key: "fg2_pct",   label: "FG2%",       hib: true,  fmt: PCT  },
-        { key: "fg3_pct",   label: "FG3%",       hib: true,  fmt: PCT  },
-        { key: "or_pct",    label: "OR%",        hib: true,  fmt: PCT  },
-        { key: "dr_pct",    label: "DR%",        hib: true,  fmt: PCT  },
-        { key: "to_pct",    label: "TO%",        hib: false, fmt: PCT  },
-        { key: "as_pct",    label: "AS%",        hib: true,  fmt: PCT  },
-        { key: "pace",      label: "Pace",       hib: true,  fmt: DEC2 },
-        { key: "pts",       label: "Pts/partido",hib: true,  fmt: DEC2 },
-      ];
+      const a = avA, b = avB;
+      const N1 = v => v != null ? Math.round(v) : 0;
+      const D1 = v => v != null ? Number(v).toFixed(1) : "0";
 
-      const rows = METRICS.map(m => {
-        const va = avA[m.key], vb = avB[m.key];
-        const aWins = va != null && vb != null && (m.hib ? va > vb : va < vb);
-        const bWins = va != null && vb != null && (m.hib ? vb > va : vb < va);
+      const shootRow = (label, madeA, attA, madeB, attB) => {
+        const pctA = attA ? Math.round(100 * madeA / attA) : 0;
+        const pctB = attB ? Math.round(100 * madeB / attB) : 0;
+        const winA = pctA >= pctB;
         return `<tr>
-          <td class="td-muted" style="font-weight:600">${m.label}</td>
-          <td class="${aWins ? 'winner' : bWins ? 'loser' : ''}" style="text-align:right">${m.fmt(va)}</td>
-          <td class="${bWins ? 'winner' : aWins ? 'loser' : ''}" style="text-align:right">${m.fmt(vb)}</td>
+          <td class="${winA ? 'winner' : 'loser'}">${N1(madeA)}/${N1(attA)} (${pctA}%)</td>
+          <td class="lbl">${label}</td>
+          <td class="${!winA ? 'winner' : 'loser'}">${N1(madeB)}/${N1(attB)} (${pctB}%)</td>
         </tr>`;
-      }).join("");
+      };
+      const rawRow = (label, va, vb, lowerBetter = false) => {
+        const winA = lowerBetter ? va <= vb : va >= vb;
+        return `<tr>
+          <td class="${winA ? 'winner' : 'loser'}">${D1(va)}</td>
+          <td class="lbl">${label}</td>
+          <td class="${!winA ? 'winner' : 'loser'}">${D1(vb)}</td>
+        </tr>`;
+      };
+
+      const pfA = N1(a.pf), pfB = N1(b.pf), oppPfA = N1(a.opp_pf), oppPfB = N1(b.opp_pf);
+      const rows = [
+        shootRow("LC",      a.fgm,  a.fga,  b.fgm,  b.fga),
+        shootRow("2Pts",    a.fgm2, a.fga2, b.fgm2, b.fga2),
+        shootRow("3Pts",    a.fgm3, a.fga3, b.fgm3, b.fga3),
+        shootRow("1Pt",     a.ftm,  a.fta,  b.ftm,  b.fta),
+        rawRow("REB",       a.trb || (a.orb + a.drb), b.trb || (b.orb + b.drb)),
+        rawRow("As",        a.ast,  b.ast),
+        rawRow("ST",        a.stl,  b.stl),
+        rawRow("Blq",       a.blk,  b.blk),
+        rawRow("PER",       a.tov,  b.tov,  true),
+        `<tr>
+          <td class="${pfA <= pfB ? 'winner' : 'loser'}">${pfA} (${oppPfA})</td>
+          <td class="lbl">FP</td>
+          <td class="${pfB <= pfA ? 'winner' : 'loser'}">${pfB} (${oppPfB})</td>
+        </tr>`,
+        rawRow("PeP",       a.paint_pts         || 0, b.paint_pts         || 0),
+        rawRow("PtsSegCh",  a.second_chance_pts || 0, b.second_chance_pts || 0),
+        rawRow("PtPer",     a.pts_from_tov      || 0, b.pts_from_tov      || 0),
+        rawRow("Pts Banca", a.bench_pts         || 0, b.bench_pts         || 0),
+        rawRow("PCA",       a.fast_break_pts    || 0, b.fast_break_pts    || 0),
+      ].join("");
 
       document.getElementById("compare-result").innerHTML = `
         <div class="chart-grid">
@@ -703,13 +734,13 @@ async function renderCompare() {
             </div>
           </div>
           <div class="card">
-            <div class="card-title">Estadísticas — ${dataA.team_name} vs ${dataB.team_name}</div>
+            <div class="card-title">${dataA.team_name} vs ${dataB.team_name}</div>
             <div class="table-wrap">
-              <table class="compare-table">
+              <table class="compare-table fiba-box">
                 <thead><tr>
-                  <th>Métrica</th>
-                  <th style="text-align:right;color:var(--accent)">${dataA.team_name}</th>
-                  <th style="text-align:right;color:var(--blue)">${dataB.team_name}</th>
+                  <th style="color:var(--accent)">${dataA.team_name}</th>
+                  <th class="lbl"></th>
+                  <th style="color:var(--blue)">${dataB.team_name}</th>
                 </tr></thead>
                 <tbody>${rows}</tbody>
               </table>
