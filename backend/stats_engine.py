@@ -195,13 +195,11 @@ def calc_player_stats(p: dict, team_pos: float, team: dict = None, game_minutes:
     peso_2p = _safe_div(2 * p["fgm2"], pts)
     peso_3p = _safe_div(3 * p["fgm3"], pts)
 
-    # USO% = plays / (team_plays × player_min / team_min)
-    player_min = _parse_minutes(p.get("minutes"))
-    if team and player_min > 0:
-        team_fga  = (team.get("fga2", 0) or 0) + (team.get("fga3", 0) or 0)
+    # USO% = (FGA + 0.44×FTA + TOV) / team_possessions
+    if team:
+        team_fga   = (team.get("fga2", 0) or 0) + (team.get("fga3", 0) or 0)
         team_plays = team_fga + 0.44 * (team.get("fta", 0) or 0) + (team.get("tov", 0) or 0)
-        team_min   = 5 * game_minutes
-        uso_pct = _safe_div(plays, team_plays * (player_min / team_min))
+        uso_pct = _safe_div(plays, team_plays)
     else:
         uso_pct = None
 
