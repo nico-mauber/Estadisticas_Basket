@@ -6,3 +6,5 @@ backend/basketball.db
 .env.*
 CLAUDE.md
 .gstack/
+.claude/
+.superpowers/
