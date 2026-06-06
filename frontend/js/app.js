@@ -512,8 +512,8 @@ function _renderTeamContent(main, data, n) {
         ${statBox("OR%", av.or_pct, PCT(av.or_pct), "or_pct", lg)}
         ${statBox("DR%", av.dr_pct, PCT(av.dr_pct), "dr_pct", lg)}
         ${statBox("Reb%", av.trb_pct, PCT(av.trb_pct), "trb_pct", lg)}
-        ${statBox("TO%", av.to_pct, PCT(av.to_pct), "to_pct", lg, false)}
-        ${statBox("AS%", av.as_pct, PCT(av.as_pct), "as_pct", lg)}
+        ${statBox("TO", av.tov, DEC2(av.tov), "to_ratio", lg, false)}
+        ${statBox("AS", av.ast, DEC2(av.ast), "ast_ratio", lg)}
       </div>
     </div>
     <div class="card">
@@ -821,8 +821,8 @@ async function renderPlayer(teamCode, playerName) {
         <div class="stat-grid">
           ${statBox("OR%", av.or_pct, PCT(av.or_pct), "or_pct", lg)}
           ${statBox("DR%", av.dr_pct, PCT(av.dr_pct), "dr_pct", lg)}
-          ${statBox("TO%", av.to_pct, PCT(av.to_pct), "to_pct", lg, false)}
-          ${statBox("AS%", av.as_pct, PCT(av.as_pct), "as_pct", lg)}
+          ${statBox("TO", av.tov, DEC2(av.tov), "to_ratio", lg, false)}
+          ${statBox("AS", av.ast, DEC2(av.ast), "ast_ratio", lg)}
           ${statBox("AST/TO", av.ast_to, DEC2(av.ast_to), "ast_ratio", lg)}
           ${statBox("% Reb Equipo", av.reb_share, PCT(av.reb_share), "reb_share", lg)}
           ${statBox("% RebOf Equipo", av.oreb_share, PCT(av.oreb_share), "oreb_share", lg)}
