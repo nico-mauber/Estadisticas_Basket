@@ -29,11 +29,16 @@ services:
 |----------|--------------------|----|
 | `DB_PATH` | `/data/basketball.db` | Ruta a SQLite. Sin esta var usa `backend/basketball.db` |
 | `PORT` | (asignado por Render) | Gunicorn lo lee automáticamente |
+| `ADMIN_TOKEN` | (opcional) | Si está definida, `DELETE /api/games` exige header `X-Admin-Token`. Sin ella, el borrado queda abierto |
 
 ### Plan
 
-- **Web Service:** Starter ($7/mes)
-- **Persistent Disk:** 1GB — el disco persiste entre deploys y reinicios; la DB no se pierde
+- **Web Service:** Starter ($7/mes) — requerido para usar disco persistente (el tier Free no lo soporta)
+- **Persistent Disk:** 1GB ($0.25/mes) — el disco persiste entre deploys y reinicios; la DB no se pierde. 1GB ≈ 45.000 partidos con tiros
+
+### Entornos dev y prod
+
+Cada servicio Render tiene su **propio disco persistente independiente**. Un servicio `*-dev` y uno de producción no comparten DB ni entran en conflicto — no se necesita PostgreSQL ni configuración especial. El disco se agrega **después** de crear el servicio: dashboard → servicio → tab **Disk** → mount path `/data`, 1GB.
 
 ### Python version
 
@@ -76,6 +81,7 @@ python backend/database.py
 |---------|---------|-----|
 | `flask` | 3.0.3 | Framework web + serving de estáticos |
 | `flask-cors` | 4.0.1 | CORS headers (dev con frontend separado) |
+| `flask-sqlalchemy` | 3.1.1 | ORM sobre SQLite |
 | `playwright` | 1.44.0 | Fallback headless para FIBA URLs bloqueadas |
 | `gunicorn` | latest | WSGI server para producción |
 

@@ -32,7 +32,7 @@ Importa un partido desde FIBA LiveStats.
 - `400` — campo `url` ausente o vacío
 - `502` — FIBA LiveStats no respondió o datos inválidos
 
-**Comportamiento:** `INSERT OR REPLACE` — importar el mismo partido dos veces es idempotente.
+**Comportamiento:** upsert (`ON CONFLICT DO UPDATE`) — importar el mismo partido dos veces es idempotente.
 
 ---
 
@@ -187,6 +187,7 @@ Stats completas del jugador.
     "ppp": 0.88,
     "fg2_uso": 0.60,
     "fg3_uso": 0.40,
+    "uso_pct": 0.22,
     "ast_to": 2.1,
     "stocks": 2.3,
     "def_playmaking": 0.8,
@@ -208,26 +209,38 @@ Stats completas del jugador.
 
 ## GET `/api/shots/<team_code>/<player_name>`
 
-Shot chart por zonas del jugador vs promedios de liga.
+Shot chart de **11 zonas** del jugador (ver clasificación en [database.md](database.md#clasificación-de-zonas-de-tiro)).
 
 **Response:**
 ```json
 {
   "zones": {
-    "paint":         { "made": 45, "attempts": 80, "pct": 0.5625 },
-    "mid_range":     { "made": 12, "attempts": 30, "pct": 0.40 },
-    "corner_3":      { "made": 8,  "attempts": 20, "pct": 0.40 },
-    "above_break_3": { "made": 15, "attempts": 45, "pct": 0.333 }
+    "restricted_area": { "made": 45, "attempts": 80, "pct": 0.5625, "pf": 1.125 },
+    "mid_left_close":  { "made": 4,  "attempts": 10, "pct": 0.40,   "pf": 0.80 },
+    "mid_top":         { "made": 6,  "attempts": 15, "pct": 0.40,   "pf": 0.80 },
+    "left_corner_3":   { "made": 8,  "attempts": 20, "pct": 0.40,   "pf": 1.20 },
+    "top_key_3":       { "made": 15, "attempts": 45, "pct": 0.333,  "pf": 1.00 },
+    "...": "11 zonas en total (ZONE_KEYS_11)"
   },
-  "league_zones": {
-    "paint":         { "made": 1200, "attempts": 2400, "pct": 0.50 },
-    "...": "..."
-  },
-  "total_shots": 175
+  "total_shots": 175,
+  "summary": {
+    "global_pf": 1.05,
+    "efg_pct":   0.512,
+    "ppp":       0.98,
+    "games":     10
+  }
 }
 ```
 
-Si el jugador no tiene datos de coordenadas (partido sin array `shot` en FIBA), `x=0, y=0` — todos los tiros caen en `mid_range` o `above_break_3` según tipo.
+Por zona: `made`, `attempts`, `pct` (% acierto) y `pf` (puntos por intento = made × valor zona / attempts; `null` si 0 intentos).
+
+`summary`:
+- `global_pf` — puntos por tiro global
+- `efg_pct` — eFG% derivado de los tiros con zona
+- `ppp` — puntos por posesión del jugador (de `player_game_stats`, no solo tiros)
+- `games` — partidos con datos de tiro
+
+Tiros sin coordenadas (`x=0, y=0`, partido sin array `shot` en FIBA) caen en `top_key_3` (3PT) o `mid_top` (2PT).
 
 ---
 
@@ -255,3 +268,25 @@ Ranking de todos los equipos ordenado por OER descendente.
   }
 ]
 ```
+
+---
+
+## DELETE `/api/games`
+
+Borra uno o más partidos por `game_id`. El borrado es en cascada: elimina también sus `team_game_stats`, `player_game_stats` y `shots`.
+
+**Request body:**
+```json
+{ "game_ids": ["12345", "12346"] }
+```
+
+**Headers:** si la variable de entorno `ADMIN_TOKEN` está definida, se exige `X-Admin-Token: <token>`. Sin la variable, el endpoint queda abierto (uso local).
+
+**Response 200:**
+```json
+{ "ok": true, "deleted": 2 }
+```
+
+**Errores:**
+- `400` — `game_ids[]` ausente o no es lista
+- `401` — `X-Admin-Token` faltante o incorrecto (solo si `ADMIN_TOKEN` está seteado)

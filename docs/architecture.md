@@ -75,10 +75,10 @@ Ver [database.md](database.md) para esquema completo.
         ▼
 3. fiba_fetcher.fetch_game_data(url)
    ├─ fetch data.json (urllib o Playwright)
-   └─ _parse_fiba_json() → normaliza teams[], players[], shots[]
+   └─ _parse_game() → normaliza teams[], players[], shots[]
         │
         ▼
-4. database.py → INSERT OR REPLACE en games, team_game_stats,
+4. app.py → upsert (ON CONFLICT DO UPDATE) en games, team_game_stats,
                   player_game_stats, shots
         │
         ▼
@@ -101,4 +101,5 @@ Ver [database.md](database.md) para esquema completo.
 | SQLite en lugar de Postgres | Suficiente para escala FUBB; cero configuración de servidor |
 | Monolito Flask sirviendo frontend | Deploy single-service en Render; sin CORS cross-origin en producción |
 | Playwright opcional | Render.com no tiene Chromium instalado por defecto |
-| `INSERT OR REPLACE` | Importar el mismo partido dos veces es idempotente |
+| Upsert (`ON CONFLICT DO UPDATE`) | Importar el mismo partido dos veces es idempotente |
+| Migración vía `upgrade_db()` | `ALTER TABLE ADD COLUMN` idempotente al arranque; evita dependencia de Alembic |

@@ -29,9 +29,13 @@ La navegación es por `#hash` o botones de tab. No hay routing del servidor.
 |-------|-----------|-------------|
 | **Importar** | `#import` | Input URL FIBA LiveStats + botón importar |
 | **Liga** | `#league` | Tabla ranking de equipos, columnas ordenables |
-| **Equipo** | `#team` | Record, Four Factors, métricas avanzadas, shot chart (si hay datos), game log |
-| **Jugador** | `#player` | Métricas individuales, shot chart por zonas, game log |
-| **Comparar** | `#compare` | Radar chart overlay de dos equipos + tabla comparativa |
+| **Equipo** | `#team` | Record, Four Factors, métricas avanzadas, desglose ofensivo, shot chart (si hay datos), game log |
+| **Jugador** | `#player` | Métricas individuales, shot chart de 11 zonas, game log |
+| **Comparar** | `#compare` | Radar de tres polígonos (equipo A, equipo B, promedio liga) + box score FIBA |
+
+**Vista Equipo — card "Desglose ofensivo":** se renderiza solo si hay datos (>0) en PeP / Seg. Op. / Ptos/PER / Banca / PCA (columnas `paint_pts`, `second_chance_pts`, `pts_from_tov`, `bench_pts`, `fast_break_pts`).
+
+**Vista Comparar — box score FIBA:** tabla de 3 columnas (`valor A | etiqueta | valor B`) con el ganador de cada fila resaltado en verde. Filas: LC, 2Pts, 3Pts, 1Pt (con %), REB, As, ST, Blq, PER, FP (formato `faltas (recibidas)`), PeP, PtsSegCh, PtPer, Pts Banca, PCA. Clase CSS `.fiba-box`.
 
 ## `api.js`
 
@@ -50,8 +54,11 @@ Wrappers sobre Chart.js v4.
 
 | Función | Tipo | Descripción |
 |---------|------|-------------|
-| `drawLeagueScatter(canvasId, data, xKey, yKey, ...)` | Scatter | Mapa ofensivo/defensivo con zoom+pan (wheel + pinch) |
-| `drawCompareRadar(canvasId, avgA, avgB, league, labelA, labelB)` | Radar | Dos equipos superpuestos (naranja + azul) |
+| `drawLeagueScatter(canvasId, teams)` | Scatter | Mapa ofensivo/defensivo con zoom+pan (wheel + pinch) |
+| `drawRadar(canvasId, averages, league, label)` | Radar | Equipo vs promedio de liga (vista equipo) |
+| `drawCompareRadar(canvasId, avgA, avgB, league, labelA, labelB)` | Radar | **Tres polígonos**: equipo A (naranja), equipo B (azul), promedio liga (gris punteado) |
+| `drawEvolution(canvasId, gameLog, leagueOerAvg)` | Línea | Evolución de OER del equipo partido a partido vs media liga |
+| `drawPlayerEvolution(canvasId, gameLog)` | Línea | Evolución de métricas del jugador partido a partido |
 | `resetZoom(canvasId)` | Util | Reset zoom del scatter |
 
 **Plugins cargados desde CDN en `index.html`:**
@@ -74,7 +81,7 @@ Lógica principal. Funciones clave:
 
 ## Service Worker (`sw.js`)
 
-Cache name: `courtiq-v9`
+Cache name: `courtiq-v19`
 
 **Estrategia:**
 - `install`: pre-cachea los archivos estáticos listados en `STATIC[]`
