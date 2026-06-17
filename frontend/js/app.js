@@ -1023,7 +1023,7 @@ async function boot() {
 
   document.getElementById("app").innerHTML = `
     <header>
-      <span class="header-logo">🏀 CourtIQ</span>
+      <span class="header-logo">🏀 Smart-Basket</span>
       <span class="header-sub">Basketball Advanced Analytics</span>
     </header>
     <nav>

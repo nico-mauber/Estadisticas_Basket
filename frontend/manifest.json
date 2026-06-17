@@ -1,6 +1,6 @@
 {
-  "name": "CourtIQ — Basketball Analytics",
-  "short_name": "CourtIQ",
+  "name": "Smart-Basket — Basketball Analytics",
+  "short_name": "Smart-Basket",
   "description": "Advanced basketball statistics dashboard",
   "start_url": "/",
   "display": "standalone",

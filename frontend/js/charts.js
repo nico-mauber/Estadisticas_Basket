@@ -1,5 +1,5 @@
 /**
- * CourtIQ chart helpers — Chart.js v4
+ * Smart-Basket chart helpers — Chart.js v4
  * All functions destroy previous instance before re-creating.
  */
 

@@ -1,4 +1,4 @@
-# CourtIQ — Documentación
+# Smart-Basket — Documentación
 
 Plataforma de analítica avanzada de básquetbol para la liga FUBB (Uruguay).
 

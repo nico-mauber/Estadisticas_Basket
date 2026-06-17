@@ -2,7 +2,7 @@
 
 ## Visión general
 
-CourtIQ es un monolito full-stack: Flask sirve tanto la API REST como los archivos estáticos del frontend.
+Smart-Basket es un monolito full-stack: Flask sirve tanto la API REST como los archivos estáticos del frontend.
 
 ```
 ┌─────────────────────────────────────────────────────────┐

@@ -81,14 +81,14 @@ Lógica principal. Funciones clave:
 
 ## Service Worker (`sw.js`)
 
-Cache name: `courtiq-v20`
+Cache name: `smart-basket-v1`
 
 **Estrategia:**
 - `install`: pre-cachea los archivos estáticos listados en `STATIC[]`
 - `activate`: elimina todas las caches anteriores (versiones viejas)
 - `fetch`: rutas `/api/*` siempre van a red (nunca caché). Todo lo demás: cache-first con fallback a red.
 
-**Para forzar actualización del SW:** incrementar la versión en `const CACHE = "courtiq-vN"`.
+**Para forzar actualización del SW:** incrementar la versión en `const CACHE = "smart-basket-vN"`.
 
 **Assets cacheados:**
 ```js

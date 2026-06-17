@@ -169,4 +169,4 @@ Los cuatro factores que determinan victorias/derrotas:
 | Rebote ofensivo | OR% | 20% |
 | Ir a la línea | FT Rate | 15% |
 
-CourtIQ muestra los Four Factors del equipo vs rival en la vista de equipo.
+Smart-Basket muestra los Four Factors del equipo vs rival en la vista de equipo.
