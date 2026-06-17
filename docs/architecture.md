@@ -75,7 +75,7 @@ Ver [database.md](database.md) para esquema completo.
         ▼
 3. fiba_fetcher.fetch_game_data(url)
    ├─ fetch data.json (urllib o Playwright)
-   └─ _parse_game() → normaliza teams[], players[], shots[]
+   └─ _parse_fiba_json() → normaliza teams[], players[], shots[]
         │
         ▼
 4. app.py → upsert (ON CONFLICT DO UPDATE) en games, team_game_stats,

@@ -81,7 +81,7 @@ Lógica principal. Funciones clave:
 
 ## Service Worker (`sw.js`)
 
-Cache name: `courtiq-v19`
+Cache name: `courtiq-v20`
 
 **Estrategia:**
 - `install`: pre-cachea los archivos estáticos listados en `STATIC[]`

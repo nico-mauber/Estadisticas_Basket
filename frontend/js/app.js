@@ -20,21 +20,23 @@ function statClass(value, avg, higherIsBetter = true) {
 }
 
 function statBox(label, value, display, leagueKey, league, higherIsBetter = true) {
-  const lg    = league?.[leagueKey];
+  const lg    = leagueKey ? league?.[leagueKey] : null;
   const avg   = lg?.avg;
   const best  = lg?.best;
   const cls   = statClass(value, avg, higherIsBetter);
-  const isPct = leagueKey.includes("pct") || leagueKey.includes("or_") || leagueKey.includes("dr_") || leagueKey.includes("to_") || leagueKey.includes("as_");
+  const isPct = !!leagueKey && (leagueKey.includes("pct") || leagueKey.includes("or_") || leagueKey.includes("dr_") || leagueKey.includes("to_") || leagueKey.includes("as_"));
   const fmt   = v => v != null ? (isPct ? PCT(v) : DEC2(v)) : "—";
-  return `
-    <div class="stat-box">
-      <div class="stat-label">${label}</div>
-      <div class="stat-value ${cls}">${display}</div>
+  const context = lg ? `
       <div class="stat-context">
         <span class="avg">Ø ${fmt(avg)}</span>
         &nbsp;
         <span class="best">↑ ${fmt(best)}</span>
-      </div>
+      </div>` : "";
+  return `
+    <div class="stat-box">
+      <div class="stat-label">${label}</div>
+      <div class="stat-value ${cls}">${display}</div>
+      ${context}
     </div>`;
 }
 
