@@ -322,18 +322,31 @@ export function drawPlayerEvolution(canvasId, gameLog) {
 }
 
 // ── Scatter OER vs DER (league map) ────────────────────────────────────────
-export function drawLeagueScatter(canvasId, teams) {
+// Default axis config (Eficiencia) — keeps old call sites working.
+const _DEFAULT_AXIS = {
+  xKey: "oer", xName: "OER", xTitle: "OER  (↑ mejor ataque)", xPct: false,
+  yKey: "der", yName: "DER", yTitle: "DER  (↓ mejor defensa)", yPct: false,
+};
+
+export function drawLeagueScatter(canvasId, teams, axis = _DEFAULT_AXIS) {
   _applyDefaults();
   _destroy(canvasId);
   const canvas = document.getElementById(canvasId);
   if (!canvas || !teams?.length) return;
 
-  const avgOer = teams.reduce((s, t) => s + t.oer, 0) / teams.length;
-  const avgDer = teams.reduce((s, t) => s + t.der, 0) / teams.length;
+  const { xKey, yKey, xName, yName, xTitle, yTitle, xPct, yPct } = axis;
+  const fx = v => v == null ? "—" : (xPct ? (v * 100).toFixed(1) + "%" : (+v).toFixed(2));
+  const fy = v => v == null ? "—" : (yPct ? (v * 100).toFixed(1) + "%" : (+v).toFixed(2));
 
-  const points = teams.map(t => ({
-    x: +t.oer.toFixed(3),
-    y: +t.der.toFixed(3),
+  const valid = teams.filter(t => t[xKey] != null && t[yKey] != null);
+  if (!valid.length) return;
+
+  const avgX = valid.reduce((s, t) => s + t[xKey], 0) / valid.length;
+  const avgY = valid.reduce((s, t) => s + t[yKey], 0) / valid.length;
+
+  const points = valid.map(t => ({
+    x: t[xKey],
+    y: t[yKey],
     label: t.team_name || t.team,
   }));
 
@@ -358,7 +371,7 @@ export function drawLeagueScatter(canvasId, teams) {
           callbacks: {
             label: ctx => {
               const p = ctx.raw;
-              return `${p.label}  OER ${p.x}  DER ${p.y}`;
+              return `${p.label}   ${xName} ${fx(p.x)}   ${yName} ${fy(p.y)}`;
             },
           },
         },
@@ -377,13 +390,13 @@ export function drawLeagueScatter(canvasId, teams) {
       scales: {
         x: {
           grid: { color: C.grid },
-          title: { display: true, text: "OER  (↑ mejor ataque)", color: C.muted },
-          ticks: { color: C.muted },
+          title: { display: true, text: xTitle, color: C.muted },
+          ticks: { color: C.muted, callback: v => xPct ? (v * 100).toFixed(0) + "%" : v },
         },
         y: {
           grid: { color: C.grid },
-          title: { display: true, text: "DER  (↓ mejor defensa)", color: C.muted },
-          ticks: { color: C.muted },
+          title: { display: true, text: yTitle, color: C.muted },
+          ticks: { color: C.muted, callback: v => yPct ? (v * 100).toFixed(0) + "%" : v },
           reverse: false,
         },
       },
@@ -396,8 +409,8 @@ export function drawLeagueScatter(canvasId, teams) {
         const yScale = chart.scales.y;
 
         // Quadrant lines at league avg
-        const xAvg = xScale.getPixelForValue(avgOer);
-        const yAvg = yScale.getPixelForValue(avgDer);
+        const xAvg = xScale.getPixelForValue(avgX);
+        const yAvg = yScale.getPixelForValue(avgY);
         ctx.save();
         ctx.strokeStyle = "rgba(139,148,158,0.3)";
         ctx.setLineDash([6, 4]);
@@ -405,11 +418,11 @@ export function drawLeagueScatter(canvasId, teams) {
         ctx.beginPath(); ctx.moveTo(xAvg, chart.chartArea.top); ctx.lineTo(xAvg, chart.chartArea.bottom); ctx.stroke();
         ctx.beginPath(); ctx.moveTo(chart.chartArea.left, yAvg); ctx.lineTo(chart.chartArea.right, yAvg); ctx.stroke();
 
-        // Quadrant labels
+        // Quadrant labels (generic: axis names near the avg lines)
         ctx.font = "10px Inter, system-ui";
         ctx.fillStyle = "rgba(139,148,158,0.5)";
-        ctx.fillText("↑ Ofensivo", xAvg + 4, chart.chartArea.top + 14);
-        ctx.fillText("↓ Defensivo", chart.chartArea.left + 4, yAvg - 6);
+        ctx.fillText(`↑ ${xName}`, xAvg + 4, chart.chartArea.top + 14);
+        ctx.fillText(`${yName}`, chart.chartArea.left + 4, yAvg - 6);
 
         // Team name labels
         ctx.font = "11px Inter, system-ui";

@@ -369,6 +369,29 @@ async function renderImport(allGames) {
 let _leagueTeams    = [];
 let _leagueSortKey  = "oer";
 let _leagueSortDir  = -1; // -1 desc, 1 asc
+let _leagueMap      = "ef";
+
+// Scatter map presets — each defines the X/Y axes for el mapa de liga.
+const LEAGUE_MAPS = [
+  {
+    id: "ef", label: "Eficiencia (OER / DER)",
+    axis: { xKey: "oer", xName: "OER", xTitle: "OER  (↑ mejor ataque)", xPct: false,
+            yKey: "der", yName: "DER", yTitle: "DER  (↓ mejor defensa)", yPct: false },
+    hint: "Derecha = mejor ataque (OER alto) &nbsp;|&nbsp; Abajo = mejor defensa (DER bajo) &nbsp;|&nbsp; Abajo-derecha = elite",
+  },
+  {
+    id: "reb", label: "Rebotes (OR% / DR%)",
+    axis: { xKey: "or_pct", xName: "OR%", xTitle: "OR%  (↑ mejor)", xPct: true,
+            yKey: "dr_pct", yName: "DR%", yTitle: "DR%  (↑ mejor)", yPct: true },
+    hint: "Arriba-derecha = domina ambos tableros (ofensivo y defensivo)",
+  },
+  {
+    id: "rec", label: "Recuperos / Puntos",
+    axis: { xKey: "stl", xName: "Recuperos", xTitle: "Recuperos por partido  (↑)", xPct: false,
+            yKey: "pts", yName: "Puntos", yTitle: "Puntos por partido  (↑)", yPct: false },
+    hint: "Derecha = más robos &nbsp;|&nbsp; Arriba = más puntos &nbsp;|&nbsp; Arriba-derecha = elite",
+  },
+];
 
 const LEAGUE_COLS = [
   { key: null,           label: "#" },
@@ -454,6 +477,17 @@ function _bindLeagueRowClicks(tableEl) {
   });
 }
 
+function _drawLeagueMap() {
+  const map = LEAGUE_MAPS.find(m => m.id === _leagueMap) || LEAGUE_MAPS[0];
+  const hintEl = document.getElementById("map-hint");
+  if (hintEl) {
+    hintEl.innerHTML = `${map.hint}
+      &nbsp;&nbsp;·&nbsp;&nbsp;
+      <span style="color:var(--muted)">🖱 rueda = zoom &nbsp;·&nbsp; arrastrar = mover &nbsp;·&nbsp; pellizcar = zoom táctil</span>`;
+  }
+  drawLeagueScatter("chart-scatter", _leagueTeams, map.axis);
+}
+
 async function renderLeague() {
   const sec = document.getElementById("sec-league");
   sec.innerHTML = '<p class="empty"><span class="spinner"></span>Cargando...</p>';
@@ -475,20 +509,26 @@ async function renderLeague() {
     _bindLeagueRowClicks(tableEl);
 
     if (_leagueTeams.length >= 2) {
+      const mapOpts = LEAGUE_MAPS.map(m =>
+        `<option value="${m.id}" ${m.id === _leagueMap ? "selected" : ""}>${m.label}</option>`
+      ).join("");
       sec.insertAdjacentHTML("beforeend", `
         <div class="card">
-          <div class="card-title">Mapa ofensivo / defensivo</div>
-          <p class="chart-hint">
-            Derecha = mejor ataque (OER alto) &nbsp;|&nbsp; Abajo = mejor defensa (DER bajo) &nbsp;|&nbsp; Abajo-derecha = elite
-            &nbsp;&nbsp;·&nbsp;&nbsp;
-            <span style="color:var(--muted)">🖱 rueda = zoom &nbsp;·&nbsp; arrastrar = mover &nbsp;·&nbsp; pellizcar = zoom táctil</span>
-          </p>
+          <div class="map-header">
+            <div class="card-title" style="margin:0">Mapa de liga</div>
+            <select id="map-select" class="map-select">${mapOpts}</select>
+          </div>
+          <p class="chart-hint" id="map-hint"></p>
           <canvas id="chart-scatter"></canvas>
           <div style="text-align:right;margin-top:8px">
             <button class="btn btn-ghost btn-sm" id="btn-reset-scatter">↺ Resetear zoom</button>
           </div>
         </div>`);
-      drawLeagueScatter("chart-scatter", _leagueTeams);
+      _drawLeagueMap();
+      document.getElementById("map-select").addEventListener("change", e => {
+        _leagueMap = e.target.value;
+        _drawLeagueMap();
+      });
       document.getElementById("btn-reset-scatter").addEventListener("click", () => resetZoom("chart-scatter"));
     }
   } catch (e) {

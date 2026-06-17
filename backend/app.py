@@ -660,6 +660,7 @@ def league_overview():
             "to_pct":     _avg("to_pct"),
             "pace":       _avg("pace"),
             "pts":        _avg("pts"),
+            "stl":        _avg("stl"),
         })
 
     result.sort(key=lambda x: x["oer"], reverse=True)

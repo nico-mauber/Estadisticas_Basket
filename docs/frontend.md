@@ -28,7 +28,7 @@ La navegación es por `#hash` o botones de tab. No hay routing del servidor.
 | Vista | ID sección | Descripción |
 |-------|-----------|-------------|
 | **Importar** | `#import` | Input URL FIBA LiveStats + botón importar |
-| **Liga** | `#league` | Tabla ranking de equipos, columnas ordenables |
+| **Liga** | `#league` | Tabla ranking de equipos (columnas ordenables) + mapa de dispersión con ejes X/Y seleccionables (`LEAGUE_MAPS`) |
 | **Equipo** | `#team` | Record, Four Factors, métricas avanzadas, desglose ofensivo, shot chart (si hay datos), game log |
 | **Jugador** | `#player` | Métricas individuales, shot chart de 11 zonas, game log |
 | **Comparar** | `#compare` | Radar de tres polígonos (equipo A, equipo B, promedio liga) + box score FIBA |
@@ -54,7 +54,7 @@ Wrappers sobre Chart.js v4.
 
 | Función | Tipo | Descripción |
 |---------|------|-------------|
-| `drawLeagueScatter(canvasId, teams)` | Scatter | Mapa ofensivo/defensivo con zoom+pan (wheel + pinch) |
+| `drawLeagueScatter(canvasId, teams, axis)` | Scatter | Mapa de liga con ejes X/Y configurables (`axis` = `{xKey,yKey,xName,yName,xTitle,yTitle,xPct,yPct}`); zoom+pan. Presets en `LEAGUE_MAPS` (Eficiencia, Rebotes, Recuperos/Puntos) |
 | `drawRadar(canvasId, averages, league, label)` | Radar | Equipo vs promedio de liga (vista equipo) |
 | `drawCompareRadar(canvasId, avgA, avgB, league, labelA, labelB)` | Radar | **Tres polígonos**: equipo A (naranja), equipo B (azul), promedio liga (gris punteado) |
 | `drawEvolution(canvasId, gameLog, leagueOerAvg)` | Línea | Evolución de OER del equipo partido a partido vs media liga |
@@ -81,7 +81,7 @@ Lógica principal. Funciones clave:
 
 ## Service Worker (`sw.js`)
 
-Cache name: `smart-basket-v1`
+Cache name: `smart-basket-v2`
 
 **Estrategia:**
 - `install`: pre-cachea los archivos estáticos listados en `STATIC[]`
