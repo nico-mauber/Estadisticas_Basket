@@ -169,6 +169,7 @@ const PAGE_SIZE = 10;
 let importPage    = 0;
 let selectMode    = false;
 let selectedGames = new Set();
+let _seedEnabled  = false;  // dev-only seed button (set from /api/config at boot)
 
 function _fmtDate(d) {
   if (!d) return "—";
@@ -302,6 +303,11 @@ async function renderImport(allGames) {
         <button class="btn" id="btn-import">Importar</button>
       </div>
       <p class="import-hint">El sistema captura los datos automáticamente desde la URL de FIBA LiveStats.</p>
+      ${_seedEnabled ? `
+      <div class="seed-panel">
+        <button class="btn btn-seed" id="btn-seed">⚡ Agregar partidos (dev)</button>
+        <span class="seed-hint">Importa el set fijo de partidos de prueba (solo entorno dev).</span>
+      </div>` : ""}
     </div>
     <div class="card">
       <div class="games-header">
@@ -335,6 +341,28 @@ async function renderImport(allGames) {
       btn.textContent = "Importar";
     }
   });
+
+  const seedBtn = document.getElementById("btn-seed");
+  if (seedBtn) {
+    seedBtn.addEventListener("click", async () => {
+      seedBtn.disabled = true;
+      seedBtn.innerHTML = '<span class="spinner"></span>Importando partidos...';
+      try {
+        const res = await api.seed();
+        toast(`Seed: ${res.imported} importados, ${res.failed} fallidos`,
+              res.failed ? "err" : "ok");
+        importPage = 0;
+        renderImport();
+        refreshTeamSelector();
+        refreshCompareSelectors();
+      } catch (e) {
+        toast(e.message, "err");
+      } finally {
+        seedBtn.disabled = false;
+        seedBtn.textContent = "⚡ Agregar partidos (dev)";
+      }
+    });
+  }
 }
 
 // ── League section — sortable table ───────────────────────────────────────
@@ -990,6 +1018,9 @@ const NAV_ITEMS = {
 };
 
 async function boot() {
+  try { _seedEnabled = (await api.config()).seed_enabled === true; }
+  catch { _seedEnabled = false; }
+
   document.getElementById("app").innerHTML = `
     <header>
       <span class="header-logo">🏀 CourtIQ</span>

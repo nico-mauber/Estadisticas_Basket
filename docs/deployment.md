@@ -30,6 +30,7 @@ services:
 | `DB_PATH` | `/data/basketball.db` | Ruta a SQLite. Sin esta var usa `backend/basketball.db` |
 | `PORT` | (asignado por Render) | Gunicorn lo lee automáticamente |
 | `ADMIN_TOKEN` | (opcional) | Si está definida, `DELETE /api/games` exige header `X-Admin-Token`. Sin ella, el borrado queda abierto |
+| `SEED_ENABLED` | **solo dev** | `true` habilita `POST /api/seed` y el botón "Agregar partidos" (carga el set fijo `SEED_URLS`). **No definir en producción** — sin la var, el endpoint responde 403 |
 
 ### Plan
 

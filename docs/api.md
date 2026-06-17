@@ -290,3 +290,39 @@ Borra uno o más partidos por `game_id`. El borrado es en cascada: elimina tambi
 **Errores:**
 - `400` — `game_ids[]` ausente o no es lista
 - `401` — `X-Admin-Token` faltante o incorrecto (solo si `ADMIN_TOKEN` está seteado)
+
+---
+
+## GET `/api/config`
+
+Feature flags para el frontend.
+
+**Response:**
+```json
+{ "seed_enabled": false }
+```
+
+`seed_enabled` refleja la variable de entorno `SEED_ENABLED`. El frontend muestra el botón "Agregar partidos" solo si es `true`.
+
+---
+
+## POST `/api/seed` — solo dev
+
+Importa el set fijo de partidos `SEED_URLS` (definido en `app.py`) en una sola operación. Pensado para repoblar el entorno dev sin disco persistente.
+
+**Gating:** requiere `SEED_ENABLED=true`. Sin la variable (producción) responde `403`.
+
+**Response 200:**
+```json
+{
+  "ok": true,
+  "imported": 12,
+  "failed": 1,
+  "results": [
+    { "url": "...", "ok": true,  "game_id": "2849328", "teams": "A vs B" },
+    { "url": "...", "ok": false, "error": "mensaje" }
+  ]
+}
+```
+
+**Errores:** `403` — `SEED_ENABLED` no está habilitado.

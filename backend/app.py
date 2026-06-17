@@ -25,6 +25,33 @@ def _require_admin():
     return None
 
 
+def _seed_enabled() -> bool:
+    """Seed endpoint is dev-only — gated by the SEED_ENABLED env var.
+
+    Set SEED_ENABLED=true ONLY on the dev Render service. Production never
+    has the variable, so POST /api/seed returns 403 there.
+    """
+    return os.environ.get("SEED_ENABLED", "").strip().lower() in ("1", "true", "yes")
+
+
+# Fixed roster of FIBA LiveStats games for one-click dev seeding.
+SEED_URLS = [
+    "https://fibalivestats.dcd.shared.geniussports.com/u/FUBB/2849328/",
+    "https://fibalivestats.dcd.shared.geniussports.com/u/FUBB/2849331/",
+    "https://fibalivestats.dcd.shared.geniussports.com/u/FUBB/2849329/",
+    "https://fibalivestats.dcd.shared.geniussports.com/u/FUBB/2849327/",
+    "https://fibalivestats.dcd.shared.geniussports.com/u/FUBB/2849353/",
+    "https://fibalivestats.dcd.shared.geniussports.com/u/FUBB/2849347/",
+    "https://fibalivestats.dcd.shared.geniussports.com/u/FUBB/2849340/bs.html",
+    "https://fibalivestats.dcd.shared.geniussports.com/u/FUBB/2849343/",
+    "https://fibalivestats.dcd.shared.geniussports.com/u/FUBB/2849337/",
+    "https://fibalivestats.dcd.shared.geniussports.com/u/FUBB/2849334/bs.html",
+    "https://fibalivestats.dcd.shared.geniussports.com/u/FUBB/2849350/",
+    "https://fibalivestats.dcd.shared.geniussports.com/u/FUBB/2849332/bs.html",
+    "https://fibalivestats.dcd.shared.geniussports.com/u/FUBB/2849330/bs.html",
+]
+
+
 def _to_dict(obj) -> dict:
     return {c.name: getattr(obj, c.name) for c in obj.__table__.columns}
 
@@ -154,6 +181,17 @@ def import_game():
         app.logger.error("Import failed: %s", e)
         return jsonify({"error": "No se pudo obtener datos de FIBA LiveStats. Verifica la URL."}), 502
 
+    game_id        = game["game_id"]
+    teams_imported = _persist_game(game)
+    return jsonify({"ok": True, "game_id": game_id, "teams": teams_imported})
+
+
+def _persist_game(game: dict) -> list[dict]:
+    """Upsert a parsed game (game + team/player/shot rows) and commit.
+
+    Shared by POST /api/import and POST /api/seed. Returns the list of
+    imported teams ({code, name}). Raises on DB error (caller handles).
+    """
     game_id = game["game_id"]
 
     # Upsert game
@@ -289,11 +327,10 @@ def import_game():
 
     db.session.commit()
 
-    teams_imported = [
+    return [
         {"code": t["team_code"], "name": t["team_name"]}
         for t in game.get("teams", [])
     ]
-    return jsonify({"ok": True, "game_id": game_id, "teams": teams_imported})
 
 
 # ── Games ──────────────────────────────────────────────────────────────────
@@ -647,6 +684,46 @@ def delete_games():
     db.session.commit()
 
     return jsonify({"ok": True, "deleted": len(games)})
+
+
+# ── Config / Seed (dev-only) ─────────────────────────────────────────────────
+
+@app.route("/api/config")
+def config():
+    """Frontend feature flags. seed_enabled drives the dev-only seed button."""
+    return jsonify({"seed_enabled": _seed_enabled()})
+
+
+@app.route("/api/seed", methods=["POST"])
+def seed_games():
+    """Import the fixed SEED_URLS roster in one shot. Dev-only.
+
+    Gated by SEED_ENABLED — returns 403 in production where the var is unset.
+    """
+    if not _seed_enabled():
+        return jsonify({"error": "Seed deshabilitado en este entorno."}), 403
+
+    results = []
+    for url in SEED_URLS:
+        try:
+            game  = fetch_game_data(url)
+            teams = _persist_game(game)
+            results.append({
+                "url": url, "ok": True, "game_id": game["game_id"],
+                "teams": " vs ".join(t["name"] for t in teams),
+            })
+        except Exception as e:
+            db.session.rollback()
+            app.logger.warning("Seed failed for %s: %s", url, e)
+            results.append({"url": url, "ok": False, "error": str(e)})
+
+    imported = sum(1 for r in results if r["ok"])
+    return jsonify({
+        "ok": True,
+        "imported": imported,
+        "failed":   len(results) - imported,
+        "results":  results,
+    })
 
 
 # ── PWA ────────────────────────────────────────────────────────────────────

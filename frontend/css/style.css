@@ -324,6 +324,21 @@ tbody td { padding: 9px 10px; white-space: nowrap; }
 
 .import-hint { color: var(--muted); font-size: 11px; margin-top: var(--sp-2); }
 
+/* Seed panel — dev-only */
+.seed-panel {
+  margin-top: var(--sp-3);
+  padding-top: var(--sp-3);
+  border-top: 1px dashed var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.btn-seed { background: var(--green); align-self: flex-start; }
+.seed-hint { color: var(--muted); font-size: 11px; }
+@media (min-width: 600px) {
+  .seed-panel { flex-direction: row; align-items: center; }
+}
+
 /* ── Buttons ─────────────────────────────────────────── */
 .btn {
   display: inline-flex;

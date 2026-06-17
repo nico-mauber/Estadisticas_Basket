@@ -23,4 +23,6 @@ export const api = {
   playerShots:   (code, name) => apiFetch(`/api/shots/${encodeURIComponent(code)}/${encodeURIComponent(name)}`),
   league:        ()   => apiFetch("/api/league"),
   deleteGames:   (ids) => apiFetch("/api/games", { method: "DELETE", headers: { "Content-Type": "application/json", "X-Admin-Token": _adminToken() }, body: JSON.stringify({ game_ids: ids }) }),
+  config:        ()   => apiFetch("/api/config"),
+  seed:          ()   => apiFetch("/api/seed", { method: "POST" }),
 };
