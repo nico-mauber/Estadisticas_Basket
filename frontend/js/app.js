@@ -830,7 +830,7 @@ async function renderCompare() {
   });
 }
 
-// ── Shot chart SVG — half court, 11 zones (PPT color coding) ──────────────
+// ── Shot chart SVG — half court, 11 zones (heatmap por P/F, estilo "El Metro") ──
 function _shotChartSVG(zones, totalShots, summary) {
   const W = 340, H = 320;
   const cx = 170, cy = 256;
@@ -839,95 +839,92 @@ function _shotChartSVG(zones, totalShots, summary) {
   const pbX1 = 121, pbX2 = 219, pbTop = 140;
   const c3xL = 38, c3xR = 302;
   const c3yJoin = Math.round(cy - Math.sqrt(r3 * r3 - (cx - c3xL) ** 2));
-  const wingX = 75;
-  const courtBg = "#162032", line = "#374151";
 
-  function zFill(key) {
-    const z = zones?.[key];
-    if (!z?.attempts) return courtBg;
-    const pf = z.pf;
-    if (pf >= 1.05) return "rgba(22,163,74,0.80)";
-    if (pf >= 0.90) return "rgba(101,163,13,0.72)";
-    if (pf >= 0.70) return "rgba(234,88,12,0.72)";
-    return "rgba(220,38,38,0.82)";
-  }
+  // Light court palette (igual a la imagen de referencia)
+  const courtBg = "#f3f6fa", paintBg = "#c7d8ec", restrictBg = "#b4c8e6",
+        cornerBg = "#efe9c4", line = "#46566a", boxText = "#1f2937";
+
+  // Heatmap por P/F (puntos por finalización), umbrales calcados de la imagen
+  const boxFill = pf => pf >= 1.00 ? "#79b13f" : pf >= 0.85 ? "#ef8b3a" : "#df574c";
+
+  const dec2 = v => v.toFixed(2).replace(".", ",");
+  const dec1 = v => v.toFixed(1).replace(".", ",");
 
   const hCirc = r => `M${cx - r},${cy} A${r},${r} 0 0,0 ${cx + r},${cy} Z`;
-  const hRing = (r1, r2) =>
-    `M${cx-r2},${cy} A${r2},${r2} 0 0,0 ${cx+r2},${cy} L${cx+r1},${cy} A${r1},${r1} 0 0,1 ${cx-r1},${cy} Z`;
+
+  // Spokes (líneas que abren desde el aro separando los sectores)
+  const spoke = deg => {
+    const t = deg * Math.PI / 180;
+    const x1 = cx + rP * Math.cos(t),  y1 = cy - rP * Math.sin(t);
+    const x2 = cx + 250 * Math.cos(t), y2 = cy - 250 * Math.sin(t);
+    return `<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="${line}" stroke-width="1.2" clip-path="url(#sc-clip)"/>`;
+  };
 
   function lbl(key, lx, ly) {
     const z = zones?.[key];
     if (!z?.attempts) return '';
-    const pct = (z.pct * 100).toFixed(1) + '%';
-    const pf  = z.pf.toFixed(2);
-    const bg  = zFill(key);
-    const w = 58, h = 38, r = 4;
+    const share = dec1((z.attempts / totalShots) * 100);
+    const pf    = dec2(z.pf);
+    const fg    = dec1(z.pct * 100) + '%';
+    const bg    = boxFill(z.pf);
+    const w = 54, h = 33, r = 4;
     const x0 = lx - w / 2, y0 = ly - h / 2;
     return `
-      <rect x="${x0}" y="${y0}" width="${w}" height="${h}" rx="${r}" fill="${bg}" stroke="rgba(255,255,255,0.12)" stroke-width="0.8"/>
-      <text x="${lx - 6}" y="${ly - 5}" text-anchor="end"   fill="rgba(255,255,255,0.75)" font-size="9" font-family="Inter,sans-serif">${z.attempts}</text>
-      <text x="${lx + 4}" y="${ly - 5}" text-anchor="start" fill="rgba(255,255,255,0.75)" font-size="9" font-family="Inter,sans-serif">PPT ${pf}</text>
-      <text x="${lx}"     y="${ly + 11}" text-anchor="middle" fill="#fff" font-size="14" font-weight="800" font-family="Inter,sans-serif">${pct}</text>`;
+      <rect x="${x0}" y="${y0}" width="${w}" height="${h}" rx="${r}" fill="${bg}" stroke="rgba(0,0,0,0.25)" stroke-width="0.8"/>
+      <text x="${lx - 5}" y="${ly - 6}" text-anchor="end"   fill="rgba(0,0,0,0.70)" font-size="7.5" font-family="Inter,sans-serif">${share}%</text>
+      <text x="${lx + 4}" y="${ly - 6}" text-anchor="start" fill="rgba(0,0,0,0.70)" font-size="7.5" font-family="Inter,sans-serif">P/F ${pf}</text>
+      <text x="${lx}"     y="${ly + 9}" text-anchor="middle" fill="${boxText}" font-size="14" font-weight="800" font-family="Inter,sans-serif">${fg}</text>`;
   }
 
   function badge() {
     if (!summary) return '';
-    const ppt = summary.global_pf != null ? summary.global_pf.toFixed(2) : '—';
-    const ppp = summary.ppp       != null ? summary.ppp.toFixed(2)       : '—';
-    const efg = summary.efg_pct   != null ? (summary.efg_pct * 100).toFixed(1)+'%' : '—';
-    const g   = summary.games ?? 0;
+    const pf  = summary.global_pf != null ? dec2(summary.global_pf) : '—';
+    const efg = summary.efg_pct   != null ? dec1(summary.efg_pct * 100) + ' %' : '—';
+    const cw = 70, ch = 38, bx = cR - 2 * cw, by = cT + 2;
     return `
-      <rect x="${cR - 172}" y="${cT}"    width="54" height="22" rx="3" fill="rgba(99,102,241,0.90)"/>
-      <text x="${cR - 145}"  y="${cT+14}" text-anchor="middle" fill="#fff" font-size="10" font-weight="700" font-family="Inter,sans-serif">PPP ${ppp}</text>
-      <rect x="${cR - 116}" y="${cT}"    width="54" height="22" rx="3" fill="rgba(234,88,12,0.90)"/>
-      <text x="${cR - 89}"  y="${cT+14}" text-anchor="middle" fill="#fff" font-size="10" font-weight="700" font-family="Inter,sans-serif">PPT ${ppt}</text>
-      <rect x="${cR - 60}"  y="${cT}"    width="54" height="22" rx="3" fill="rgba(101,163,13,0.90)"/>
-      <text x="${cR - 33}"  y="${cT+14}" text-anchor="middle" fill="#fff" font-size="10" font-weight="700" font-family="Inter,sans-serif">eFG ${efg}</text>
-      <circle cx="${cR - 4}" cy="${cT+11}" r="11" fill="#374151"/>
-      <text   x="${cR - 4}"  y="${cT+15}" text-anchor="middle" fill="#e2e8f0" font-size="9" font-weight="700" font-family="Inter,sans-serif">${g}P</text>`;
+      <rect x="${bx}"      y="${by}" width="${cw}" height="${ch}" rx="4" fill="#ef8b3a"/>
+      <rect x="${bx + cw}" y="${by}" width="${cw}" height="${ch}" rx="4" fill="#9aa83a"/>
+      <text x="${bx + cw/2}"        y="${by + 14}" text-anchor="middle" fill="rgba(0,0,0,0.65)" font-size="9"  font-family="Inter,sans-serif">P/F</text>
+      <text x="${bx + cw/2}"        y="${by + 31}" text-anchor="middle" fill="${boxText}" font-size="15" font-weight="800" font-family="Inter,sans-serif">${pf}</text>
+      <text x="${bx + cw + cw/2}"   y="${by + 14}" text-anchor="middle" fill="rgba(0,0,0,0.65)" font-size="9"  font-family="Inter,sans-serif">eFG%</text>
+      <text x="${bx + cw + cw/2}"   y="${by + 31}" text-anchor="middle" fill="${boxText}" font-size="15" font-weight="800" font-family="Inter,sans-serif">${efg}</text>`;
   }
 
   return `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg"
-    style="width:100%;max-width:420px;margin:0 auto;display:block;border-radius:8px">
+    style="width:100%;max-width:440px;margin:0 auto;display:block;border-radius:8px">
     <defs>
       <clipPath id="sc-clip"><rect x="${cL}" y="${cT}" width="${cR-cL}" height="${cB-cT}"/></clipPath>
-      <clipPath id="sc-left"><rect x="${cL}" y="${cT}" width="${cx-cL}" height="${cB-cT}"/></clipPath>
-      <clipPath id="sc-right"><rect x="${cx}" y="${cT}" width="${cR-cx}" height="${cB-cT}"/></clipPath>
-      <clipPath id="sc-ctr"><rect x="${cx-wingX}" y="${cT}" width="${wingX*2}" height="${cB-cT}"/></clipPath>
     </defs>
-    <rect width="${W}" height="${H}" fill="#0d1117" rx="8"/>
+    <rect width="${W}" height="${H}" fill="${courtBg}" rx="8"/>
     <rect x="${cL}" y="${cT}" width="${cR-cL}" height="${cB-cT}" fill="${courtBg}" rx="3"/>
-    <rect x="${cx-wingX}" y="${cT}" width="${wingX*2}"  height="${cB-cT}" fill="${zFill('top_key_3')}"    clip-path="url(#sc-clip)"/>
-    <rect x="${cL}"        y="${cT}" width="${cx-cL}"    height="${cB-cT}" fill="${zFill('left_wing_3')}"  clip-path="url(#sc-left)"/>
-    <rect x="${cx}"        y="${cT}" width="${cR-cx}"    height="${cB-cT}" fill="${zFill('right_wing_3')}" clip-path="url(#sc-right)"/>
-    <rect x="${cL}"   y="${c3yJoin}" width="${c3xL-cL}"   height="${cB-c3yJoin}" fill="${zFill('left_corner_3')}"  clip-path="url(#sc-clip)"/>
-    <rect x="${c3xR}" y="${c3yJoin}" width="${cR-c3xR}"   height="${cB-c3yJoin}" fill="${zFill('right_corner_3')}" clip-path="url(#sc-clip)"/>
-    <path d="${hRing(rP, r3)}" fill="${zFill('mid_left_far')}"  clip-path="url(#sc-left)"/>
-    <path d="${hRing(rP, r3)}" fill="${zFill('mid_right_far')}" clip-path="url(#sc-right)"/>
-    <path d="${hRing(rP, r3)}" fill="${zFill('mid_top')}"       clip-path="url(#sc-ctr)"/>
-    <rect x="${c3xL}" y="${cy}" width="${pbX1-c3xL}" height="${cB-cy}" fill="${zFill('mid_left_close')}"  clip-path="url(#sc-clip)"/>
-    <rect x="${pbX2}" y="${cy}" width="${c3xR-pbX2}" height="${cB-cy}" fill="${zFill('mid_right_close')}" clip-path="url(#sc-clip)"/>
-    <path d="${hCirc(rP)}"                                                                         fill="${zFill('restricted_area')}" clip-path="url(#sc-clip)"/>
-    <rect x="${pbX1}" y="${pbTop}" width="${pbX2-pbX1}" height="${cB-pbTop}"                       fill="${zFill('restricted_area')}" clip-path="url(#sc-clip)"/>
-    <rect  x="${cL}" y="${cT}" width="${cR-cL}" height="${cB-cT}" fill="none" stroke="${line}" stroke-width="1.5" rx="3"/>
-    <rect  x="${pbX1}" y="${pbTop}" width="${pbX2-pbX1}" height="${cB-pbTop}" fill="none" stroke="#4b5563" stroke-width="1.5"/>
-    <path  d="M${pbX1},${pbTop} A49,49 0 0,0 ${pbX2},${pbTop}" fill="none" stroke="#4b5563" stroke-width="1.5" stroke-dasharray="4,3"/>
-    <path  d="M${c3xL},${cB} L${c3xL},${c3yJoin} A${r3},${r3} 0 0,0 ${c3xR},${c3yJoin} L${c3xR},${cB}" fill="none" stroke="#4b5563" stroke-width="1.5"/>
-    <path  d="M${cx-rP},${cy} A${rP},${rP} 0 0,0 ${cx+rP},${cy}" fill="none" stroke="#4b5563" stroke-width="1" stroke-dasharray="3,3" opacity="0.6"/>
-    <circle cx="${cx}" cy="${cy}" r="9"  fill="none" stroke="#9ca3af" stroke-width="2"/>
-    <line   x1="${cx-26}" y1="${cB-3}" x2="${cx+26}" y2="${cB-3}" stroke="#9ca3af" stroke-width="3"/>
-    ${lbl('top_key_3',       cx,          75)}
-    ${lbl('left_wing_3',     cL + 36,    200)}
-    ${lbl('right_wing_3',    cR - 36,    200)}
-    ${lbl('left_corner_3',   cL + 22,    266)}
-    ${lbl('right_corner_3',  cR - 22,    266)}
-    ${lbl('mid_top',         cx,         168)}
-    ${lbl('mid_left_far',    cx - 102,   172)}
-    ${lbl('mid_right_far',   cx + 102,   172)}
-    ${lbl('mid_left_close',  cx - 68,    268)}
-    ${lbl('mid_right_close', cx + 68,    268)}
-    ${lbl('restricted_area', cx,         222)}
+    <!-- Esquinas amarillas (fuera de la línea de 3 lateral) -->
+    <rect x="${cL}"   y="${c3yJoin}" width="${c3xL-cL}" height="${cB-c3yJoin}" fill="${cornerBg}" clip-path="url(#sc-clip)"/>
+    <rect x="${c3xR}" y="${c3yJoin}" width="${cR-c3xR}" height="${cB-c3yJoin}" fill="${cornerBg}" clip-path="url(#sc-clip)"/>
+    <!-- Pintura + zona restringida (azul) -->
+    <rect x="${pbX1}" y="${pbTop}" width="${pbX2-pbX1}" height="${cB-pbTop}" fill="${paintBg}" clip-path="url(#sc-clip)"/>
+    <path d="${hCirc(rP)}" fill="${restrictBg}" clip-path="url(#sc-clip)"/>
+    <!-- Spokes (sectores) -->
+    ${spoke(150)}${spoke(108)}${spoke(72)}${spoke(30)}
+    <!-- Líneas de cancha -->
+    <rect x="${cL}" y="${cT}" width="${cR-cL}" height="${cB-cT}" fill="none" stroke="${line}" stroke-width="1.5" rx="3"/>
+    <rect x="${pbX1}" y="${pbTop}" width="${pbX2-pbX1}" height="${cB-pbTop}" fill="none" stroke="${line}" stroke-width="1.5"/>
+    <path d="M${pbX1},${pbTop} A49,49 0 0,0 ${pbX2},${pbTop}" fill="none" stroke="${line}" stroke-width="1.5" stroke-dasharray="4,3"/>
+    <path d="M${c3xL},${cB} L${c3xL},${c3yJoin} A${r3},${r3} 0 0,0 ${c3xR},${c3yJoin} L${c3xR},${cB}" fill="none" stroke="${line}" stroke-width="1.5"/>
+    <path d="M${cx-rP},${cy} A${rP},${rP} 0 0,0 ${cx+rP},${cy}" fill="none" stroke="${line}" stroke-width="1.2"/>
+    <circle cx="${cx}" cy="${cy}" r="9" fill="none" stroke="#c2611f" stroke-width="2"/>
+    <line x1="${cx-26}" y1="${cB-3}" x2="${cx+26}" y2="${cB-3}" stroke="${line}" stroke-width="3"/>
+    <!-- Cajas de estadística por zona (heatmap) -->
+    ${lbl('top_key_3',       cx,         70)}
+    ${lbl('left_wing_3',     cL + 34,   150)}
+    ${lbl('right_wing_3',    cR - 34,   150)}
+    ${lbl('mid_top',         cx,        162)}
+    ${lbl('mid_left_far',    cx - 64,   206)}
+    ${lbl('mid_right_far',   cx + 64,   206)}
+    ${lbl('restricted_area', cx,        236)}
+    ${lbl('mid_left_close',  cx - 64,   263)}
+    ${lbl('mid_right_close', cx + 64,   263)}
+    ${lbl('left_corner_3',   cL + 30,   263)}
+    ${lbl('right_corner_3',  cR - 30,   263)}
     ${badge()}
   </svg>`;
 }
