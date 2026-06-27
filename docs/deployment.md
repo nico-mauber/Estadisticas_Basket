@@ -36,6 +36,41 @@ services:
 
 **Login:** ver diseño en [superpowers/specs/2026-06-06-login-auth-design.md](superpowers/specs/2026-06-06-login-auth-design.md). Se retiró `ADMIN_TOKEN` — el borrado ahora exige login como el resto.
 
+### Configurar el login en Render (paso a paso)
+
+> **Ojo con las ramas:** el servicio **dev** deploya de `dev`, el de **prod** de `main`. El código de login debe estar en la rama que el servicio deploya. Si seteás `AUTH_USERS` en prod pero `main` todavía no tiene el login, la app sigue abierta (el código viejo ignora la variable). Mergear `dev → main` **antes** de configurar prod.
+
+**Dónde se ponen las variables:**
+1. dashboard.render.com → clic en el servicio (`estadisticas-basket-dev` o `estadisticas-basket`).
+2. Menú izquierdo → **Environment**.
+3. Sección **Environment Variables** → **Add Environment Variable** (campos Key + Value).
+4. Repetir por cada variable → **Save Changes** (redeploy automático ~1-2 min).
+
+**Generar los valores** (en local, una vez):
+```bash
+# SECRET_KEY (uno distinto por servicio)
+python -c "import secrets;print(secrets.token_hex(32))"
+
+# Hash de cada contraseña (1 por cuenta) — pegar SOLO el hash, nunca la clave
+python -c "from werkzeug.security import generate_password_hash as g;print(g('LA_CLAVE'))"
+```
+
+**Variables a setear:**
+
+| Servicio | Variables |
+|----------|-----------|
+| **dev** (`estadisticas-basket-dev`) | `SECRET_KEY=<random>` · `SESSION_SECURE=true` · `AUTH_USERS={"dev":"<hash clave simple>"}` · (`SEED_ENABLED=true` ya existente) |
+| **prod** (`estadisticas-basket`) | `SECRET_KEY=<otro random>` · `SESSION_SECURE=true` · `AUTH_USERS={"nico":"<hash1>","juan":"<hash2>"}` · (sin `SEED_ENABLED`) |
+
+`AUTH_USERS` va en **una sola línea**, JSON válido. Los `$` y `:` del hash se pegan tal cual en el dashboard (no hay problema de shell ahí).
+
+**Verificar:**
+1. Esperar el redeploy (pestaña **Events**).
+2. Abrir la URL → debe aparecer la **pantalla de login**.
+3. Entrar con usuario + clave → carga la app. Botón **Salir** → vuelve al login.
+
+**Secretos:** los valores reales de `SECRET_KEY` y `AUTH_USERS` viven **solo** en el dashboard de Render, nunca en el repo. Sin `AUTH_USERS`, la app queda abierta (uso local).
+
 ### Plan
 
 - **Web Service:** Starter ($7/mes) — requerido para usar disco persistente (el tier Free no lo soporta)
