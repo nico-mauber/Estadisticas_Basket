@@ -2,7 +2,7 @@
 
 ## Visión general
 
-Smart-Basket es un monolito full-stack: Flask sirve tanto la API REST como los archivos estáticos del frontend.
+Smart-Basket es un monolito full-stack: Flask sirve tanto la API REST como los archivos estáticos del frontend. Cuando hay credenciales configuradas (`AUTH_USERS`), toda la app queda detrás de un login con sesión por cookie (ver [auth.py](#authpy)).
 
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -14,6 +14,7 @@ Smart-Basket es un monolito full-stack: Flask sirve tanto la API REST como los a
 │  │   /api/*  ──→  routes Flask                      │   │
 │  │   /*       ──→  frontend/index.html (static)     │   │
 │  │                                                  │   │
+│  │   auth.py          (login + sesión, env-gated)   │   │
 │  │   fiba_fetcher.py  (scraping FIBA LiveStats)     │   │
 │  │   stats_engine.py  (métricas avanzadas)          │   │
 │  │   database.py      (SQLite vía /data/basketball.db)│  │
@@ -26,7 +27,7 @@ Smart-Basket es un monolito full-stack: Flask sirve tanto la API REST como los a
          ▼
 ┌──────────────────────┐
 │  Browser / PWA       │
-│  frontend/js/app.js  │  SPA, 4 vistas
+│  frontend/js/app.js  │  SPA, 5 vistas (+ login)
 │  frontend/sw.js      │  Service Worker (cache offline)
 └──────────────────────┘
 ```
@@ -35,6 +36,15 @@ Smart-Basket es un monolito full-stack: Flask sirve tanto la API REST como los a
 
 ### `app.py`
 Punto de entrada Flask. Registra todas las rutas `/api/*`. Llama a los otros módulos; no contiene lógica de negocio.
+
+### `auth.py`
+Autenticación, aislada de `app.py`. Credenciales en la variable de entorno `AUTH_USERS` (JSON `usuario→hash`); sin tabla de usuarios (sobrevive redeploys en dev y prod por igual). Provee:
+- `load_users()` / `auth_enabled()` — parseo cacheado, fail-closed si el JSON es inválido.
+- `verify(user, password)` — valida con `werkzeug.check_password_hash`.
+- `login_required` — decorador que exige sesión; gatea todas las rutas de datos.
+- rate-limit en memoria (5 fallos/IP/60s).
+
+La sesión es una cookie firmada (`SECRET_KEY`), `HttpOnly` + `SameSite=Lax` + `Secure` en prod. Ver [api.md → Autenticación](api.md#autenticación).
 
 ### `fiba_fetcher.py`
 Extrae datos de FIBA LiveStats.
@@ -103,3 +113,5 @@ Ver [database.md](database.md) para esquema completo.
 | Playwright opcional | Render.com no tiene Chromium instalado por defecto |
 | Upsert (`ON CONFLICT DO UPDATE`) | Importar el mismo partido dos veces es idempotente |
 | Migración vía `upgrade_db()` | `ALTER TABLE ADD COLUMN` idempotente al arranque; evita dependencia de Alembic |
+| Credenciales en env var (no tabla `users`) | Sobreviven redeploys en dev (disco efímero) y prod por igual; sin schema nuevo |
+| Login gateado por entorno | Mismo código en dev/prod; la fuerza del login = qué `AUTH_USERS` se configura por servicio |

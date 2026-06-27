@@ -18,4 +18,5 @@ Plataforma de analítica avanzada de básquetbol para la liga FUBB (Uruguay).
 ```
 Python 3.11 + Flask 3.0  →  SQLite  →  Vanilla JS SPA (PWA)
 Desplegado en Render.com (Web Service + persistent disk 1GB)
+Login con sesión por cookie, gateado por entorno (AUTH_USERS)
 ```

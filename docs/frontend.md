@@ -27,7 +27,7 @@ La navegación es por `#hash` o botones de tab. No hay routing del servidor.
 
 | Vista | ID sección | Descripción |
 |-------|-----------|-------------|
-| **Importar** | `#import` | Input URL FIBA LiveStats + botón importar |
+| **Importar** | `#import` | Input URL FIBA LiveStats + botón importar; botón "Agregar partidos" (seed) solo si `seed_enabled` (dev) |
 | **Liga** | `#league` | Tabla ranking de equipos (columnas ordenables) + mapa de dispersión con ejes X/Y seleccionables (`LEAGUE_MAPS`) |
 | **Equipo** | `#team` | Record, Four Factors, métricas avanzadas, desglose ofensivo, shot chart (si hay datos), game log |
 | **Jugador** | `#player` | Métricas individuales, shot chart de 11 zonas, game log |
@@ -39,13 +39,18 @@ La navegación es por `#hash` o botones de tab. No hay routing del servidor.
 
 ## `api.js`
 
-Capa delgada de fetch. Cada función llama a un endpoint y retorna el JSON parseado. No tiene lógica de presentación. Ejemplo:
+Capa delgada de fetch. Exporta el objeto `api` (un método por endpoint) y `setUnauthorizedHandler(fn)`. Cada request usa `credentials: "same-origin"` (envía la cookie de sesión). Un `401` global dispara el handler → el SPA vuelve a la pantalla de login.
 
 ```js
-export async function fetchTeam(code)   // GET /api/team/<code>
-export async function fetchPlayer(...)  // GET /api/player/<code>/<name>
-export async function fetchShots(...)   // GET /api/shots/<code>/<name>
-export async function importGame(url)   // POST /api/import
+api.login(user, password)   // POST   /api/login
+api.logout()                // POST   /api/logout
+api.me()                    // GET    /api/me  (auth + feature flags)
+api.importGame(url)         // POST   /api/import
+api.team(code)              // GET    /api/team/<code>
+api.players(code) / api.player(code, name) / api.playerShots(code, name)
+api.league() / api.teams() / api.games()
+api.deleteGames(ids)        // DELETE /api/games
+api.seed()                  // POST   /api/seed  (dev)
 ```
 
 ## `charts.js`
@@ -71,6 +76,9 @@ Lógica principal. Funciones clave:
 
 | Función | Descripción |
 |---------|-------------|
+| `boot()` | Consulta `api.me()`; decide pantalla de login vs app |
+| `showLogin(msg)` | Renderiza la pantalla de login y cablea el submit |
+| `renderApp()` | Construye el layout completo (header, nav, secciones) |
 | `_renderLeague()` | Renderiza tabla de liga con sort clickeable |
 | `_renderTeamContent(data)` | Record card + Four Factors + métricas + shot chart + game log |
 | `_renderPlayerContent(data)` | Métricas jugador + shot chart por zonas + game log |
@@ -79,9 +87,16 @@ Lógica principal. Funciones clave:
 | `_recordCard(record, name)` | Display W/L con porcentaje, local, visitante |
 | `_colorCell(val, avg, invert)` | Color verde/rojo relativo al promedio de liga |
 
+## Login (frontend)
+
+- `boot()` llama `api.me()` al arrancar. Si `auth_required && !authenticated` → renderiza la **pantalla de login** (`showLogin()`) y no construye la app.
+- `renderApp()` arma la app normal; el header muestra el usuario + botón **Salir** cuando hay auth.
+- `setUnauthorizedHandler` → ante un `401` (sesión expirada) vuelve a `showLogin()` con aviso.
+- Sin auth (local sin `AUTH_USERS`), `boot()` va directo a la app. Ver [api.md → Autenticación](api.md#autenticación) y [deployment.md](deployment.md#configurar-el-login-en-render-paso-a-paso).
+
 ## Service Worker (`sw.js`)
 
-Cache name: `smart-basket-v2`
+Cache name: `smart-basket-v3`
 
 **Estrategia:**
 - `install`: pre-cachea los archivos estáticos listados en `STATIC[]`
