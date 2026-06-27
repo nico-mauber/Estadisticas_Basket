@@ -280,8 +280,6 @@ Borra uno o más partidos por `game_id`. El borrado es en cascada: elimina tambi
 { "game_ids": ["12345", "12346"] }
 ```
 
-**Headers:** si la variable de entorno `ADMIN_TOKEN` está definida, se exige `X-Admin-Token: <token>`. Sin la variable, el endpoint queda abierto (uso local).
-
 **Response 200:**
 ```json
 { "ok": true, "deleted": 2 }
@@ -289,20 +287,38 @@ Borra uno o más partidos por `game_id`. El borrado es en cascada: elimina tambi
 
 **Errores:**
 - `400` — `game_ids[]` ausente o no es lista
-- `401` — `X-Admin-Token` faltante o incorrecto (solo si `ADMIN_TOKEN` está seteado)
+- `401` — sin sesión iniciada (ver [Autenticación](#autenticación))
 
 ---
 
-## GET `/api/config`
+## Autenticación
 
-Feature flags para el frontend.
+Ver diseño completo en [superpowers/specs/2026-06-06-login-auth-design.md](superpowers/specs/2026-06-06-login-auth-design.md).
+
+Cuando hay credenciales configuradas (`AUTH_USERS`), **todas las rutas de datos exigen sesión iniciada** (cookie de sesión firmada, HttpOnly). Sin sesión → `401`. Abiertas siempre: `/` (SPA), estáticos, `POST /api/login`, `GET /api/me`.
+
+### POST `/api/login`
+
+**Request:** `{ "user": "nico", "password": "..." }`
+
+**Response 200:** `{ "ok": true, "user": "nico" }` + cookie de sesión.
+
+**Errores:** `401` credenciales inválidas · `429` demasiados intentos (5 fallos/IP/60s).
+
+### POST `/api/logout`
+
+Limpia la sesión. **Response:** `{ "ok": true }`.
+
+### GET `/api/me`
+
+Estado de auth + feature flags. Llamada por el SPA al arrancar. Siempre abierta.
 
 **Response:**
 ```json
-{ "seed_enabled": false }
+{ "authenticated": false, "user": null, "auth_required": true, "seed_enabled": false }
 ```
 
-`seed_enabled` refleja la variable de entorno `SEED_ENABLED`. El frontend muestra el botón "Agregar partidos" solo si es `true`.
+`seed_enabled` refleja `SEED_ENABLED` (reemplaza al antiguo `/api/config`).
 
 ---
 
@@ -310,7 +326,7 @@ Feature flags para el frontend.
 
 Importa el set fijo de partidos `SEED_URLS` (definido en `app.py`) en una sola operación. Pensado para repoblar el entorno dev sin disco persistente.
 
-**Gating:** requiere `SEED_ENABLED=true`. Sin la variable (producción) responde `403`.
+**Gating:** requiere sesión iniciada **y** `SEED_ENABLED=true`. Sin la variable (producción) responde `403`; sin sesión, `401`.
 
 **Response 200:**
 ```json

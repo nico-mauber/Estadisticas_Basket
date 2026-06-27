@@ -1,4 +1,4 @@
-import { api } from "./api.js";
+import { api, setUnauthorizedHandler } from "./api.js";
 import { drawRadar, drawEvolution, drawPlayerEvolution, drawLeagueScatter, drawCompareRadar, resetZoom } from "./charts.js";
 
 // ── Toast ──────────────────────────────────────────────────────────────────
@@ -169,7 +169,9 @@ const PAGE_SIZE = 10;
 let importPage    = 0;
 let selectMode    = false;
 let selectedGames = new Set();
-let _seedEnabled  = false;  // dev-only seed button (set from /api/config at boot)
+let _seedEnabled  = false;  // dev-only seed button (set from /api/me at boot)
+let _authRequired = false;  // whether the backend requires login
+let _authUser     = null;   // logged-in username (when auth required)
 
 function _fmtDate(d) {
   if (!d) return "—";
@@ -1057,14 +1059,12 @@ const NAV_ITEMS = {
   player:  { icon: "👤", label: "Jugador" },
 };
 
-async function boot() {
-  try { _seedEnabled = (await api.config()).seed_enabled === true; }
-  catch { _seedEnabled = false; }
-
+function renderApp() {
   document.getElementById("app").innerHTML = `
     <header>
       <span class="header-logo">🏀 Smart-Basket</span>
       <span class="header-sub">Basketball Advanced Analytics</span>
+      ${_authRequired ? `<span class="header-user">${_authUser || ""} · <button class="header-logout" id="btn-logout">Salir</button></span>` : ""}
     </header>
     <nav>
       ${sections.map(s => `
@@ -1193,12 +1193,72 @@ async function boot() {
     document.getElementById("games-table").innerHTML = _gamesTable(games, importPage);
   });
 
-  if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("/sw.js").catch(() => {});
+  const logoutBtn = document.getElementById("btn-logout");
+  if (logoutBtn) {
+    logoutBtn.addEventListener("click", async () => {
+      try { await api.logout(); } catch {}
+      showLogin("Sesión cerrada.");
+    });
   }
 
   setSection("import");
   renderImport();
+}
+
+// ── Login screen ─────────────────────────────────────────────────────────────
+function showLogin(message = "") {
+  document.getElementById("app").innerHTML = `
+    <div class="login-wrap">
+      <form class="login-card" id="login-form">
+        <div class="login-logo">🏀 Smart-Basket</div>
+        <div class="login-sub">Ingresá para continuar</div>
+        ${message ? `<div class="login-msg">${message}</div>` : ""}
+        <input id="login-user" type="text" placeholder="Usuario" autocomplete="username" required />
+        <input id="login-pass" type="password" placeholder="Contraseña" autocomplete="current-password" required />
+        <button class="btn" type="submit" id="login-btn">Entrar</button>
+        <div class="login-err" id="login-err"></div>
+      </form>
+    </div>`;
+  const form  = document.getElementById("login-form");
+  const errEl = document.getElementById("login-err");
+  form.addEventListener("submit", async e => {
+    e.preventDefault();
+    const user     = document.getElementById("login-user").value.trim();
+    const password = document.getElementById("login-pass").value;
+    const btn      = document.getElementById("login-btn");
+    errEl.textContent = "";
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span>Entrando...';
+    try {
+      await api.login(user, password);
+      boot();  // re-check session and build the app
+    } catch (err) {
+      errEl.textContent = err.message;
+      btn.disabled = false;
+      btn.textContent = "Entrar";
+    }
+  });
+  document.getElementById("login-user").focus();
+}
+
+async function boot() {
+  setUnauthorizedHandler(() => showLogin("Sesión expirada. Iniciá sesión de nuevo."));
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.register("/sw.js").catch(() => {});
+  }
+
+  let me;
+  try { me = await api.me(); }
+  catch { me = { authenticated: false, auth_required: false, seed_enabled: false }; }
+  _authRequired = me.auth_required === true;
+  _authUser     = me.user || null;
+  _seedEnabled  = me.seed_enabled === true;
+
+  if (_authRequired && !me.authenticated) {
+    showLogin();
+  } else {
+    renderApp();
+  }
 }
 
 boot();

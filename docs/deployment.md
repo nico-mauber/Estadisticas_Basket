@@ -29,8 +29,12 @@ services:
 |----------|--------------------|----|
 | `DB_PATH` | `/data/basketball.db` | Ruta a SQLite. Sin esta var usa `backend/basketball.db` |
 | `PORT` | (asignado por Render) | Gunicorn lo lee automáticamente |
-| `ADMIN_TOKEN` | (opcional) | Si está definida, `DELETE /api/games` exige header `X-Admin-Token`. Sin ella, el borrado queda abierto |
-| `SEED_ENABLED` | **solo dev** | `true` habilita `POST /api/seed` y el botón "Agregar partidos" (carga el set fijo `SEED_URLS`). **No definir en producción** — sin la var, el endpoint responde 403 |
+| `SECRET_KEY` | `<random fuerte>` | Firma la cookie de sesión. Estable entre deploys (si cambia, se invalidan las sesiones). Generar: `python -c "import secrets;print(secrets.token_hex(32))"` |
+| `SESSION_SECURE` | `true` | Marca la cookie de sesión como `Secure` (solo HTTPS). `true` en Render; sin setear en local (para probar login sobre http) |
+| `AUTH_USERS` | `{"nico":"<hash>", ...}` | JSON usuario→hash. **Presencia activa el login** en toda la app. Prod: 2 cuentas fuertes. Dev: 1 clave simple. Local: sin setear → app abierta. Generar hash: `python -c "from werkzeug.security import generate_password_hash as g;print(g('miclave'))"` |
+| `SEED_ENABLED` | **solo dev** | `true` habilita `POST /api/seed` y el botón "Agregar partidos". **No definir en producción** — sin la var, el endpoint responde 403. (También exige sesión iniciada.) |
+
+**Login:** ver diseño en [superpowers/specs/2026-06-06-login-auth-design.md](superpowers/specs/2026-06-06-login-auth-design.md). Se retiró `ADMIN_TOKEN` — el borrado ahora exige login como el resto.
 
 ### Plan
 

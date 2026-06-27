@@ -1,29 +1,40 @@
 import os
-from flask import Flask, jsonify, request
+import secrets
+from datetime import timedelta
+from flask import Flask, jsonify, request, session
 from flask_cors import CORS
 from sqlalchemy import func
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from database import db, init_db, upgrade_db, Game, TeamGameStats, PlayerGameStats, Shot, DB_PATH
 from stats_engine import calc_team_stats, calc_player_stats, league_averages
 from fiba_fetcher import fetch_game_data
+from auth import (
+    login_required, auth_enabled, verify,
+    check_rate_limit, register_fail, clear_fails, client_ip,
+)
 
 app = Flask(__name__, static_folder="../frontend", static_url_path="/")
 app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{DB_PATH}"
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
-CORS(app)
+
+# Session / cookie security
+app.secret_key = os.environ.get("SECRET_KEY") or secrets.token_hex(32)
+if not os.environ.get("SECRET_KEY"):
+    app.logger.warning("SECRET_KEY no seteada — clave efímera (las sesiones se reinician al reiniciar).")
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=os.environ.get("SESSION_SECURE", "").lower() in ("1", "true", "yes"),
+    PERMANENT_SESSION_LIFETIME=timedelta(days=30),
+)
+
+CORS(app, supports_credentials=True)
 
 init_db(app)
 upgrade_db(app)
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────
-
-def _require_admin():
-    token = os.environ.get("ADMIN_TOKEN")
-    if token and request.headers.get("X-Admin-Token") != token:
-        return jsonify({"error": "No autorizado"}), 401
-    return None
-
 
 def _seed_enabled() -> bool:
     """Seed endpoint is dev-only — gated by the SEED_ENABLED env var.
@@ -164,6 +175,7 @@ def _opp_dict(opp: TeamGameStats) -> dict:
 # ── Import ─────────────────────────────────────────────────────────────────
 
 @app.route("/api/import", methods=["POST"])
+@login_required
 def import_game():
     body = request.get_json(force=True)
     url  = (body or {}).get("url", "").strip()
@@ -336,6 +348,7 @@ def _persist_game(game: dict) -> list[dict]:
 # ── Games ──────────────────────────────────────────────────────────────────
 
 @app.route("/api/games")
+@login_required
 def list_games():
     games = Game.query.order_by(Game.date.desc(), Game.imported_at.desc()).all()
     return jsonify([_to_dict(g) for g in games])
@@ -344,6 +357,7 @@ def list_games():
 # ── Teams ─────────────────────────────────────────────────────────────────
 
 @app.route("/api/teams")
+@login_required
 def list_teams():
     rows = (
         db.session.query(
@@ -359,6 +373,7 @@ def list_teams():
 
 
 @app.route("/api/team/<team_code>")
+@login_required
 def team_stats(team_code: str):
     team_code = team_code.upper()
     rows = TeamGameStats.query.filter_by(team_code=team_code).all()
@@ -448,6 +463,7 @@ def team_stats(team_code: str):
 # ── Players ────────────────────────────────────────────────────────────────
 
 @app.route("/api/players/<team_code>")
+@login_required
 def team_players(team_code: str):
     team_code = team_code.upper()
     names = [
@@ -489,6 +505,7 @@ def team_players(team_code: str):
 
 
 @app.route("/api/player/<team_code>/<player_name>")
+@login_required
 def player_stats(team_code: str, player_name: str):
     team_code = team_code.upper()
     rows = PlayerGameStats.query.filter_by(
@@ -570,6 +587,7 @@ def player_stats(team_code: str, player_name: str):
 # ── Player shots ───────────────────────────────────────────────────────────
 
 @app.route("/api/shots/<team_code>/<player_name>")
+@login_required
 def player_shots(team_code: str, player_name: str):
     team_code = team_code.upper()
     rows = Shot.query.filter_by(team_code=team_code, player_name=player_name).all()
@@ -623,6 +641,7 @@ def player_shots(team_code: str, player_name: str):
 # ── League ─────────────────────────────────────────────────────────────────
 
 @app.route("/api/league")
+@login_required
 def league_overview():
     codes    = db.session.query(TeamGameStats.team_code).distinct().all()
     all_rows = TeamGameStats.query.all()
@@ -670,10 +689,8 @@ def league_overview():
 # ── Delete games ──────────────────────────────────────────────────────────
 
 @app.route("/api/games", methods=["DELETE"])
+@login_required
 def delete_games():
-    err = _require_admin()
-    if err:
-        return err
     body = request.get_json(force=True) or {}
     ids  = body.get("game_ids", [])
     if not ids or not isinstance(ids, list):
@@ -687,15 +704,46 @@ def delete_games():
     return jsonify({"ok": True, "deleted": len(games)})
 
 
-# ── Config / Seed (dev-only) ─────────────────────────────────────────────────
+# ── Auth ─────────────────────────────────────────────────────────────────────
 
-@app.route("/api/config")
-def config():
-    """Frontend feature flags. seed_enabled drives the dev-only seed button."""
-    return jsonify({"seed_enabled": _seed_enabled()})
+@app.route("/api/login", methods=["POST"])
+def login():
+    ip = client_ip()
+    if not check_rate_limit(ip):
+        return jsonify({"error": "Demasiados intentos. Esperá 1 minuto."}), 429
+    body = request.get_json(force=True) or {}
+    user = (body.get("user") or "").strip()
+    password = body.get("password") or ""
+    if verify(user, password):
+        session.permanent = True
+        session["user"] = user
+        clear_fails(ip)
+        return jsonify({"ok": True, "user": user})
+    register_fail(ip)
+    return jsonify({"error": "Usuario o contraseña incorrectos"}), 401
 
+
+@app.route("/api/logout", methods=["POST"])
+def logout():
+    session.clear()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/me")
+def me():
+    """Auth + feature flags. Llamada por el SPA al arrancar. Siempre abierta."""
+    return jsonify({
+        "authenticated": "user" in session,
+        "user":          session.get("user"),
+        "auth_required": auth_enabled(),
+        "seed_enabled":  _seed_enabled(),
+    })
+
+
+# ── Seed (dev-only) ──────────────────────────────────────────────────────────
 
 @app.route("/api/seed", methods=["POST"])
+@login_required
 def seed_games():
     """Import the fixed SEED_URLS roster in one shot. Dev-only.
 
