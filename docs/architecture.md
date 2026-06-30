@@ -58,6 +58,8 @@ Extrae datos de FIBA LiveStats.
 
 **Salida:** dict normalizado con claves `game_id`, `competition`, `date`, `teams[]`, `players[]`, `shots[]`.
 
+`competition` y `date` **no vienen en el `data.json`** de FIBA — se scrapean de la página `bs.html` (`_fetch_page_info`: `span#competitionName` para la competencia, patrón de fecha para la fecha).
+
 ### `stats_engine.py`
 Calcula métricas avanzadas on-the-fly en cada request (no se persisten en DB).
 

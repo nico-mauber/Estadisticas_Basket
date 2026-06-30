@@ -69,24 +69,38 @@ def _fetch_direct(data_url: str, referer: str) -> dict:
     return json.loads(raw)
 
 
-def _fetch_game_date(page_url: str) -> str:
-    """Extract game date from the bs.html page (DD/MM/YY or DD/MM/YYYY pattern)."""
+def _fetch_page_info(page_url: str) -> dict:
+    """Scrape bs.html for fields NOT present in data.json: game date + competition.
+
+    FIBA LiveStats does not include the competition name in data.json — it only
+    lives in the HTML page (e.g. <span id="competitionName">Liga de Ascenso 2026</span>).
+    """
+    info = {"date": "", "competition": ""}
     m_host = re.match(r"https?://([^/]+)", page_url)
     if not m_host or m_host.group(1) != _ALLOWED_HOST:
-        return ""
+        return info
     try:
         req = urllib.request.Request(page_url, headers=_HEADERS)
         with urllib.request.urlopen(req, timeout=10) as resp:
             html = resp.read().decode("utf-8", errors="replace")
-        m = re.search(r"(\d{1,2})[./](\d{1,2})[./](\d{2,4})", html)
-        if m:
-            d, mo, y = m.group(1), m.group(2), m.group(3)
-            if len(y) == 2:
-                y = "20" + y
-            return f"{y}-{mo.zfill(2)}-{d.zfill(2)}"
     except Exception:
-        pass
-    return ""
+        return info
+
+    # Date — DD/MM/YY(YY) → ISO
+    m = re.search(r"(\d{1,2})[./](\d{1,2})[./](\d{2,4})", html)
+    if m:
+        d, mo, y = m.group(1), m.group(2), m.group(3)
+        if len(y) == 2:
+            y = "20" + y
+        info["date"] = f"{y}-{mo.zfill(2)}-{d.zfill(2)}"
+
+    # Competition — primary: span#competitionName; fallback: "Competición" block
+    m = re.search(r'id="competitionName"[^>]*>([^<]+)</span>', html)
+    if not m:
+        m = re.search(r'<h6>\s*Competici[oó]n\s*</h6>\s*<p>\s*([^<]+?)\s*</p>', html, re.IGNORECASE)
+    if m:
+        info["competition"] = re.sub(r"\s+", " ", m.group(1)).strip()
+    return info
 
 
 def _fetch_playwright(data_url: str) -> dict:
@@ -216,9 +230,13 @@ def fetch_game_data(url: str) -> dict:
     game = _parse_fiba_json(raw, url)
     _validate_game(game)                   # value guard (catches silent key drift)
 
-    # Date not in JSON — extract from HTML page
-    if not game.get("date"):
-        game["date"] = _fetch_game_date(url)
+    # Date + competition aren't in data.json — scrape them from the HTML page
+    if not game.get("date") or not game.get("competition"):
+        info = _fetch_page_info(url)
+        if not game.get("date"):
+            game["date"] = info["date"]
+        if not game.get("competition"):
+            game["competition"] = info["competition"]
 
     return game
 
