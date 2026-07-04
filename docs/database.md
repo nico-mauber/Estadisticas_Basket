@@ -2,11 +2,11 @@
 
 ## Configuración
 
-- Motor: **SQLite 3**
+- Motor: **SQLite 3** vía **Flask-SQLAlchemy 3.1** (ORM, no SQL crudo)
 - Archivo local: `backend/basketball.db`
 - Archivo producción: `/data/basketball.db` (disco persistente Render.com)
 - Configurado via variable de entorno `DB_PATH`
-- `PRAGMA foreign_keys = ON` activo en cada conexión
+- Integridad referencial mediante `cascade="all, delete-orphan"` en las relaciones del ORM (borrar un `Game` elimina sus stats y tiros)
 
 ## Esquema
 
@@ -56,8 +56,16 @@ Stats de box score por equipo por partido. Incluye stats del rival pre-calculada
 | `opp_fta` | INTEGER | Tiros libres intentados del rival |
 | `opp_orb` / `opp_drb` | INTEGER | Rebotes del rival |
 | `opp_tov` | INTEGER | Pérdidas del rival |
+| `opp_pf` | INTEGER | Faltas del rival (faltas recibidas) |
+| `paint_pts` | INTEGER | Puntos en la pintura (PeP) |
+| `second_chance_pts` | INTEGER | Puntos de segunda oportunidad (PtsSegCh) |
+| `pts_from_tov` | INTEGER | Puntos tras pérdida rival (PtPer) |
+| `bench_pts` | INTEGER | Puntos del banco |
+| `fast_break_pts` | INTEGER | Puntos de contraataque (PCA) |
 
 **Restricción única:** `(game_id, team_code)`
+
+> Las 6 columnas de desglose (`opp_pf` … `fast_break_pts`) provienen del box score FIBA. Partidos importados antes de su incorporación las muestran en `0` hasta reimportar.
 
 ---
 
@@ -106,19 +114,24 @@ Registro de cada tiro por partido. Tiene coordenadas `x/y` si vienen del array `
 
 ## Clasificación de zonas de tiro
 
-`app.py::_classify_zone()` asigna cada tiro a una de 4 zonas:
+`app.py::_classify_zone_11()` asigna cada tiro a una de **11 zonas** (sistema de coordenadas FIBA normalizado: `x` 0–100 centro=50, `y` 0–100 línea de fondo=0):
 
-| Zona | Criterio |
-|------|----------|
-| `paint` | 2PT con sub_type que contenga: layup, dunk, alley, tip, hook, putback, driving |
-| `mid_range` | 2PT que no sea paint |
-| `corner_3` | 3PT con `y < 15` o `y > 85` (esquinas según coordenadas FIBA) |
-| `above_break_3` | 3PT restante (arco superior) |
+| Zona | Puntos | Criterio |
+|------|--------|----------|
+| `restricted_area` | 2 | Pintura (sub_type de pintura, o `34 ≤ x ≤ 66`) |
+| `mid_left_close` / `mid_right_close` | 2 | Fuera de pintura, cerca del fondo (`y < 25`) |
+| `mid_left_far` / `mid_right_far` | 2 | Media distancia, codos/alas (`y ≥ 25`) |
+| `mid_top` | 2 | Poste alto central (`x 42–58`, `y ≥ 25`) |
+| `left_corner_3` / `right_corner_3` | 3 | Triple de esquina (`y < 14`) |
+| `left_wing_3` / `right_wing_3` | 3 | Triple de ala (`x < 38` o `x ≥ 62`) |
+| `top_key_3` | 3 | Triple frontal / sin coordenadas |
 
-## Inicialización
+Constantes asociadas en `app.py`: `ZONE_KEYS_11`, `ZONE_POINTS`, `_2PT_ZONES`, `_3PT_ZONES`. Tiros sin coordenadas (`x=0, y=0`) caen en `top_key_3` (3PT) o `mid_top` (2PT sin keyword de pintura).
+
+## Inicialización y migración
 
 ```bash
 python backend/database.py
 ```
 
-Crea todas las tablas con `CREATE TABLE IF NOT EXISTS` — es idempotente y seguro de correr múltiples veces.
+`init_db(app)` crea todas las tablas con `db.create_all()` (idempotente). Al arrancar `app.py` también corre `upgrade_db(app)`, que aplica `ALTER TABLE ADD COLUMN` para las columnas nuevas sobre DBs existentes — silencioso e idempotente (ignora columnas ya presentes). No requiere herramienta de migración externa.

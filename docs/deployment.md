@@ -29,11 +29,56 @@ services:
 |----------|--------------------|----|
 | `DB_PATH` | `/data/basketball.db` | Ruta a SQLite. Sin esta var usa `backend/basketball.db` |
 | `PORT` | (asignado por Render) | Gunicorn lo lee automáticamente |
+| `SECRET_KEY` | `<random fuerte>` | Firma la cookie de sesión. Estable entre deploys (si cambia, se invalidan las sesiones). Generar: `python -c "import secrets;print(secrets.token_hex(32))"` |
+| `SESSION_SECURE` | `true` | Marca la cookie de sesión como `Secure` (solo HTTPS). `true` en Render; sin setear en local (para probar login sobre http) |
+| `AUTH_USERS` | `{"nico":"<hash>", ...}` | JSON usuario→hash. **Presencia activa el login** en toda la app. Prod: 2 cuentas fuertes. Dev: 1 clave simple. Local: sin setear → app abierta. Generar hash: `python -c "from werkzeug.security import generate_password_hash as g;print(g('miclave'))"` |
+| `SEED_ENABLED` | **solo dev** | `true` habilita `POST /api/seed` y el botón "Agregar partidos". **No definir en producción** — sin la var, el endpoint responde 403. (También exige sesión iniciada.) |
+
+**Login:** ver diseño en [superpowers/specs/2026-06-06-login-auth-design.md](superpowers/specs/2026-06-06-login-auth-design.md). Se retiró `ADMIN_TOKEN` — el borrado ahora exige login como el resto.
+
+### Configurar el login en Render (paso a paso)
+
+> **Ojo con las ramas:** el servicio **dev** deploya de `dev`, el de **prod** de `main`. El código de login debe estar en la rama que el servicio deploya. Si seteás `AUTH_USERS` en prod pero `main` todavía no tiene el login, la app sigue abierta (el código viejo ignora la variable). Mergear `dev → main` **antes** de configurar prod.
+
+**Dónde se ponen las variables:**
+1. dashboard.render.com → clic en el servicio (`estadisticas-basket-dev` o `estadisticas-basket`).
+2. Menú izquierdo → **Environment**.
+3. Sección **Environment Variables** → **Add Environment Variable** (campos Key + Value).
+4. Repetir por cada variable → **Save Changes** (redeploy automático ~1-2 min).
+
+**Generar los valores** (en local, una vez):
+```bash
+# SECRET_KEY (uno distinto por servicio)
+python -c "import secrets;print(secrets.token_hex(32))"
+
+# Hash de cada contraseña (1 por cuenta) — pegar SOLO el hash, nunca la clave
+python -c "from werkzeug.security import generate_password_hash as g;print(g('LA_CLAVE'))"
+```
+
+**Variables a setear:**
+
+| Servicio | Variables |
+|----------|-----------|
+| **dev** (`estadisticas-basket-dev`) | `SECRET_KEY=<random>` · `SESSION_SECURE=true` · `AUTH_USERS={"dev":"<hash clave simple>"}` · (`SEED_ENABLED=true` ya existente) |
+| **prod** (`estadisticas-basket`) | `SECRET_KEY=<otro random>` · `SESSION_SECURE=true` · `AUTH_USERS={"nico":"<hash1>","juan":"<hash2>"}` · (sin `SEED_ENABLED`) |
+
+`AUTH_USERS` va en **una sola línea**, JSON válido. Los `$` y `:` del hash se pegan tal cual en el dashboard (no hay problema de shell ahí).
+
+**Verificar:**
+1. Esperar el redeploy (pestaña **Events**).
+2. Abrir la URL → debe aparecer la **pantalla de login**.
+3. Entrar con usuario + clave → carga la app. Botón **Salir** → vuelve al login.
+
+**Secretos:** los valores reales de `SECRET_KEY` y `AUTH_USERS` viven **solo** en el dashboard de Render, nunca en el repo. Sin `AUTH_USERS`, la app queda abierta (uso local).
 
 ### Plan
 
-- **Web Service:** Starter ($7/mes)
-- **Persistent Disk:** 1GB — el disco persiste entre deploys y reinicios; la DB no se pierde
+- **Web Service:** Starter ($7/mes) — requerido para usar disco persistente (el tier Free no lo soporta)
+- **Persistent Disk:** 1GB ($0.25/mes) — el disco persiste entre deploys y reinicios; la DB no se pierde. 1GB ≈ 45.000 partidos con tiros
+
+### Entornos dev y prod
+
+Cada servicio Render tiene su **propio disco persistente independiente**. Un servicio `*-dev` y uno de producción no comparten DB ni entran en conflicto — no se necesita PostgreSQL ni configuración especial. El disco se agrega **después** de crear el servicio: dashboard → servicio → tab **Disk** → mount path `/data`, 1GB.
 
 ### Python version
 
@@ -76,6 +121,7 @@ python backend/database.py
 |---------|---------|-----|
 | `flask` | 3.0.3 | Framework web + serving de estáticos |
 | `flask-cors` | 4.0.1 | CORS headers (dev con frontend separado) |
+| `flask-sqlalchemy` | 3.1.1 | ORM sobre SQLite |
 | `playwright` | 1.44.0 | Fallback headless para FIBA URLs bloqueadas |
 | `gunicorn` | latest | WSGI server para producción |
 

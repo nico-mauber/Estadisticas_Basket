@@ -1,16 +1,34 @@
 import os
-from flask import Flask, jsonify, request
+import secrets
+from datetime import timedelta
+from flask import Flask, jsonify, request, session
 from flask_cors import CORS
 from sqlalchemy import func
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from database import db, init_db, upgrade_db, Game, TeamGameStats, PlayerGameStats, Shot, DB_PATH
 from stats_engine import calc_team_stats, calc_player_stats, league_averages
 from fiba_fetcher import fetch_game_data
+from auth import (
+    login_required, auth_enabled, verify,
+    check_rate_limit, register_fail, clear_fails, client_ip,
+)
 
 app = Flask(__name__, static_folder="../frontend", static_url_path="/")
 app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{DB_PATH}"
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
-CORS(app)
+
+# Session / cookie security
+app.secret_key = os.environ.get("SECRET_KEY") or secrets.token_hex(32)
+if not os.environ.get("SECRET_KEY"):
+    app.logger.warning("SECRET_KEY no seteada — clave efímera (las sesiones se reinician al reiniciar).")
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=os.environ.get("SESSION_SECURE", "").lower() in ("1", "true", "yes"),
+    PERMANENT_SESSION_LIFETIME=timedelta(days=30),
+)
+
+CORS(app, supports_credentials=True)
 
 init_db(app)
 upgrade_db(app)
@@ -18,11 +36,31 @@ upgrade_db(app)
 
 # ── Helpers ────────────────────────────────────────────────────────────────
 
-def _require_admin():
-    token = os.environ.get("ADMIN_TOKEN")
-    if token and request.headers.get("X-Admin-Token") != token:
-        return jsonify({"error": "No autorizado"}), 401
-    return None
+def _seed_enabled() -> bool:
+    """Seed endpoint is dev-only — gated by the SEED_ENABLED env var.
+
+    Set SEED_ENABLED=true ONLY on the dev Render service. Production never
+    has the variable, so POST /api/seed returns 403 there.
+    """
+    return os.environ.get("SEED_ENABLED", "").strip().lower() in ("1", "true", "yes")
+
+
+# Fixed roster of FIBA LiveStats games for one-click dev seeding.
+SEED_URLS = [
+    "https://fibalivestats.dcd.shared.geniussports.com/u/FUBB/2849328/",
+    "https://fibalivestats.dcd.shared.geniussports.com/u/FUBB/2849331/",
+    "https://fibalivestats.dcd.shared.geniussports.com/u/FUBB/2849329/",
+    "https://fibalivestats.dcd.shared.geniussports.com/u/FUBB/2849327/",
+    "https://fibalivestats.dcd.shared.geniussports.com/u/FUBB/2849353/",
+    "https://fibalivestats.dcd.shared.geniussports.com/u/FUBB/2849347/",
+    "https://fibalivestats.dcd.shared.geniussports.com/u/FUBB/2849340/bs.html",
+    "https://fibalivestats.dcd.shared.geniussports.com/u/FUBB/2849343/",
+    "https://fibalivestats.dcd.shared.geniussports.com/u/FUBB/2849337/",
+    "https://fibalivestats.dcd.shared.geniussports.com/u/FUBB/2849334/bs.html",
+    "https://fibalivestats.dcd.shared.geniussports.com/u/FUBB/2849350/",
+    "https://fibalivestats.dcd.shared.geniussports.com/u/FUBB/2849332/bs.html",
+    "https://fibalivestats.dcd.shared.geniussports.com/u/FUBB/2849330/bs.html",
+]
 
 
 def _to_dict(obj) -> dict:
@@ -137,6 +175,7 @@ def _opp_dict(opp: TeamGameStats) -> dict:
 # ── Import ─────────────────────────────────────────────────────────────────
 
 @app.route("/api/import", methods=["POST"])
+@login_required
 def import_game():
     body = request.get_json(force=True)
     url  = (body or {}).get("url", "").strip()
@@ -154,6 +193,17 @@ def import_game():
         app.logger.error("Import failed: %s", e)
         return jsonify({"error": "No se pudo obtener datos de FIBA LiveStats. Verifica la URL."}), 502
 
+    game_id        = game["game_id"]
+    teams_imported = _persist_game(game)
+    return jsonify({"ok": True, "game_id": game_id, "teams": teams_imported})
+
+
+def _persist_game(game: dict) -> list[dict]:
+    """Upsert a parsed game (game + team/player/shot rows) and commit.
+
+    Shared by POST /api/import and POST /api/seed. Returns the list of
+    imported teams ({code, name}). Raises on DB error (caller handles).
+    """
     game_id = game["game_id"]
 
     # Upsert game
@@ -289,16 +339,16 @@ def import_game():
 
     db.session.commit()
 
-    teams_imported = [
+    return [
         {"code": t["team_code"], "name": t["team_name"]}
         for t in game.get("teams", [])
     ]
-    return jsonify({"ok": True, "game_id": game_id, "teams": teams_imported})
 
 
 # ── Games ──────────────────────────────────────────────────────────────────
 
 @app.route("/api/games")
+@login_required
 def list_games():
     games = Game.query.order_by(Game.date.desc(), Game.imported_at.desc()).all()
     return jsonify([_to_dict(g) for g in games])
@@ -307,6 +357,7 @@ def list_games():
 # ── Teams ─────────────────────────────────────────────────────────────────
 
 @app.route("/api/teams")
+@login_required
 def list_teams():
     rows = (
         db.session.query(
@@ -322,6 +373,7 @@ def list_teams():
 
 
 @app.route("/api/team/<team_code>")
+@login_required
 def team_stats(team_code: str):
     team_code = team_code.upper()
     rows = TeamGameStats.query.filter_by(team_code=team_code).all()
@@ -411,6 +463,7 @@ def team_stats(team_code: str):
 # ── Players ────────────────────────────────────────────────────────────────
 
 @app.route("/api/players/<team_code>")
+@login_required
 def team_players(team_code: str):
     team_code = team_code.upper()
     names = [
@@ -452,6 +505,7 @@ def team_players(team_code: str):
 
 
 @app.route("/api/player/<team_code>/<player_name>")
+@login_required
 def player_stats(team_code: str, player_name: str):
     team_code = team_code.upper()
     rows = PlayerGameStats.query.filter_by(
@@ -533,6 +587,7 @@ def player_stats(team_code: str, player_name: str):
 # ── Player shots ───────────────────────────────────────────────────────────
 
 @app.route("/api/shots/<team_code>/<player_name>")
+@login_required
 def player_shots(team_code: str, player_name: str):
     team_code = team_code.upper()
     rows = Shot.query.filter_by(team_code=team_code, player_name=player_name).all()
@@ -586,6 +641,7 @@ def player_shots(team_code: str, player_name: str):
 # ── League ─────────────────────────────────────────────────────────────────
 
 @app.route("/api/league")
+@login_required
 def league_overview():
     codes    = db.session.query(TeamGameStats.team_code).distinct().all()
     all_rows = TeamGameStats.query.all()
@@ -623,6 +679,7 @@ def league_overview():
             "to_pct":     _avg("to_pct"),
             "pace":       _avg("pace"),
             "pts":        _avg("pts"),
+            "stl":        _avg("stl"),
         })
 
     result.sort(key=lambda x: x["oer"], reverse=True)
@@ -632,10 +689,8 @@ def league_overview():
 # ── Delete games ──────────────────────────────────────────────────────────
 
 @app.route("/api/games", methods=["DELETE"])
+@login_required
 def delete_games():
-    err = _require_admin()
-    if err:
-        return err
     body = request.get_json(force=True) or {}
     ids  = body.get("game_ids", [])
     if not ids or not isinstance(ids, list):
@@ -647,6 +702,77 @@ def delete_games():
     db.session.commit()
 
     return jsonify({"ok": True, "deleted": len(games)})
+
+
+# ── Auth ─────────────────────────────────────────────────────────────────────
+
+@app.route("/api/login", methods=["POST"])
+def login():
+    ip = client_ip()
+    if not check_rate_limit(ip):
+        return jsonify({"error": "Demasiados intentos. Esperá 1 minuto."}), 429
+    body = request.get_json(force=True) or {}
+    user = (body.get("user") or "").strip()
+    password = body.get("password") or ""
+    if verify(user, password):
+        session.permanent = True
+        session["user"] = user
+        clear_fails(ip)
+        return jsonify({"ok": True, "user": user})
+    register_fail(ip)
+    return jsonify({"error": "Usuario o contraseña incorrectos"}), 401
+
+
+@app.route("/api/logout", methods=["POST"])
+def logout():
+    session.clear()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/me")
+def me():
+    """Auth + feature flags. Llamada por el SPA al arrancar. Siempre abierta."""
+    return jsonify({
+        "authenticated": "user" in session,
+        "user":          session.get("user"),
+        "auth_required": auth_enabled(),
+        "seed_enabled":  _seed_enabled(),
+    })
+
+
+# ── Seed (dev-only) ──────────────────────────────────────────────────────────
+
+@app.route("/api/seed", methods=["POST"])
+@login_required
+def seed_games():
+    """Import the fixed SEED_URLS roster in one shot. Dev-only.
+
+    Gated by SEED_ENABLED — returns 403 in production where the var is unset.
+    """
+    if not _seed_enabled():
+        return jsonify({"error": "Seed deshabilitado en este entorno."}), 403
+
+    results = []
+    for url in SEED_URLS:
+        try:
+            game  = fetch_game_data(url)
+            teams = _persist_game(game)
+            results.append({
+                "url": url, "ok": True, "game_id": game["game_id"],
+                "teams": " vs ".join(t["name"] for t in teams),
+            })
+        except Exception as e:
+            db.session.rollback()
+            app.logger.warning("Seed failed for %s: %s", url, e)
+            results.append({"url": url, "ok": False, "error": str(e)})
+
+    imported = sum(1 for r in results if r["ok"])
+    return jsonify({
+        "ok": True,
+        "imported": imported,
+        "failed":   len(results) - imported,
+        "results":  results,
+    })
 
 
 # ── PWA ────────────────────────────────────────────────────────────────────

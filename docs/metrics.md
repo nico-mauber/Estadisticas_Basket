@@ -79,6 +79,14 @@ Similar a posesiones pero sin descuento de rebotes ofensivos. Representa el tota
 | **Uso 2P** | `2PA / FGA` | Proporción de ataques con tiro de 2 |
 | **Uso 3P** | `3PA / FGA` | Proporción de ataques con tiro de 3 |
 
+### USO% (Usage Rate) — solo jugador
+
+```
+USO% = (FGA + 0.44 × FTA + TOV) / (FGA_equipo + 0.44 × FTA_equipo + TOV_equipo)
+```
+
+Proporción de las finalizaciones del equipo (plays) consumidas por el jugador mientras está en cancha. Identifica a los jugadores más influyentes en el ataque. `null` si no se dispone de los totales del equipo.
+
 ---
 
 ## Distribución de puntos
@@ -161,4 +169,4 @@ Los cuatro factores que determinan victorias/derrotas:
 | Rebote ofensivo | OR% | 20% |
 | Ir a la línea | FT Rate | 15% |
 
-CourtIQ muestra los Four Factors del equipo vs rival en la vista de equipo.
+Smart-Basket muestra los Four Factors del equipo vs rival en la vista de equipo.
