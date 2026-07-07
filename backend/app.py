@@ -345,22 +345,30 @@ def _persist_game(game: dict) -> list[dict]:
             ).on_conflict_do_nothing()
         )
 
-    for ev in game.get("pbp", []):
+    pbp = game.get("pbp", [])
+    if pbp:
+        # executemany en un solo statement (no un round-trip por evento) — con
+        # ~500 eventos/partido, insertar uno por uno hace que importar/sembrar
+        # varios partidos en un solo request exceda el timeout del worker.
         db.session.execute(
-            sqlite_insert(PbpEvent).values(
-                game_id       = game_id,
-                team_code     = ev["team_code"],
-                player_name   = ev["player_name"],
-                period        = ev["period"],
-                period_type   = ev["period_type"],
-                clock_secs    = ev["clock_secs"],
-                s1            = ev["s1"],
-                s2            = ev["s2"],
-                action_type   = ev["action_type"],
-                sub_type      = ev["sub_type"],
-                success       = ev["success"],
-                action_number = ev["action_number"],
-            ).on_conflict_do_nothing()
+            sqlite_insert(PbpEvent).on_conflict_do_nothing(),
+            [
+                dict(
+                    game_id       = game_id,
+                    team_code     = ev["team_code"],
+                    player_name   = ev["player_name"],
+                    period        = ev["period"],
+                    period_type   = ev["period_type"],
+                    clock_secs    = ev["clock_secs"],
+                    s1            = ev["s1"],
+                    s2            = ev["s2"],
+                    action_type   = ev["action_type"],
+                    sub_type      = ev["sub_type"],
+                    success       = ev["success"],
+                    action_number = ev["action_number"],
+                )
+                for ev in pbp
+            ],
         )
 
     db.session.commit()
