@@ -28,10 +28,11 @@ La navegación es por `#hash` o botones de tab. No hay routing del servidor.
 | Vista | ID sección | Descripción |
 |-------|-----------|-------------|
 | **Importar** | `#import` | Input URL FIBA LiveStats + botón importar; botón "Agregar partidos" (seed) solo si `seed_enabled` (dev) |
-| **Liga** | `#league` | Tabla ranking de equipos (columnas ordenables) + mapa de dispersión con ejes X/Y seleccionables (`LEAGUE_MAPS`) |
-| **Equipo** | `#team` | Record, Four Factors, métricas avanzadas, desglose ofensivo, shot chart (si hay datos), game log |
-| **Jugador** | `#player` | Métricas individuales, shot chart de 11 zonas, game log |
+| **Liga** | `#league` | Tabla ranking de equipos (columnas ordenables) + mapa de dispersión con ejes X/Y seleccionables (`LEAGUE_MAPS`) + apartado **Cierres (últimos 5 min)**: tabla tipo game log del cierre, una fila por equipo-partido, ordenable, filtrable por equipo (`_renderClutch`, `api.clutch`) |
+| **Equipo** | `#team` | Record, Four Factors, métricas avanzadas, desglose ofensivo, shot chart (si hay datos), game log. Botón **"Ver mapa de tiro"**: shot chart por zonas del jugador seleccionado dentro de Equipo (`#team-shotmap`). Botón **"Ver ON/OFF"**: tabla `ON \| OFF \| Δ` del jugador seleccionado (`#team-onoff`, `_renderTeamOnOff`, Feature 04). Apartado **"Combinaciones (Lineups)"**: multi-select de 3-5 jugadores del equipo + botón "Analizar combinación" → tarjeta de métricas y líderes (`#team-lineup-picker`/`#team-lineup`, `renderTeamLineup`, Feature 03) |
+| **Jugador** | `#player` | Métricas individuales, shot chart (11 zonas o 3 zonas según disponibilidad de coordenadas), game log |
 | **Comparar** | `#compare` | Radar de tres polígonos (equipo A, equipo B, promedio liga) + box score FIBA |
+| **Buscar** | `#search` | Buscador avanzado de jugadores: filtros combinables (nombre, equipo, competencia, posición, rangos mín/máx de métricas) sobre todos los jugadores de la base; tabla ordenable; fila → vista Jugador |
 
 **Vista Equipo — card "Desglose ofensivo":** se renderiza solo si hay datos (>0) en PeP / Seg. Op. / Ptos/PER / Banca / PCA (columnas `paint_pts`, `second_chance_pts`, `pts_from_tov`, `bench_pts`, `fast_break_pts`).
 
@@ -48,6 +49,10 @@ api.me()                    // GET    /api/me  (auth + feature flags)
 api.importGame(url)         // POST   /api/import
 api.team(code)              // GET    /api/team/<code>
 api.players(code) / api.player(code, name) / api.playerShots(code, name)
+api.searchPlayers()         // GET /api/search/players (buscador avanzado)
+api.clutch(team?)           // GET /api/clutch (cierres; ?team opcional)
+api.lineup(team, players[]) // GET /api/lineup/<team>?players=A|B|C (combinaciones 3-5)
+api.onoff(team, player)     // GET /api/onoff/<team>/<player>
 api.league() / api.teams() / api.games()
 api.deleteGames(ids)        // DELETE /api/games
 api.seed()                  // POST   /api/seed  (dev)
@@ -87,6 +92,17 @@ Lógica principal. Funciones clave:
 | `_recordCard(record, name)` | Display W/L con porcentaje, local, visitante |
 | `_colorCell(val, avg, invert)` | Color verde/rojo relativo al promedio de liga |
 
+## Shot chart
+
+SVG de cancha clara estilo "El Metro" (`frontend/js/app.js`), generado por `_shotChartSVG(zones, totalShots, summary, hasCoordinates)`:
+
+- `hasCoordinates=true` → `_shotChart11SVG`: 11 casilleros (restricted_area, mid_left/right_close, mid_left/right_far, mid_top, left/right_corner_3, left/right_wing_3, top_key_3).
+- `hasCoordinates=false` → `_shotChart3SVG`: 3 casilleros (Triple/top_key_3, Media/mid_top, Pintura/restricted_area) — caso real de la competencia FUBB, cuyo feed de FIBA LiveStats no expone coordenadas de tiro (ver [api.md → GET /api/shots](api.md#get-apishotsteam_codeplayer_name)).
+
+Ambos modos comparten geometría de cancha, paleta y heatmap por P/F (`_courtLinesSVG`, `_scLbl`, `_scBadge`, constantes `SC_*`) — sin duplicación de estilo entre modos.
+
+El mismo mapa se muestra en dos lugares: en la vista **Jugador** (`renderPlayer`) y dentro de la vista **Equipo** vía el botón "Ver mapa de tiro" (`renderTeamShotmap` → contenedor `#team-shotmap`). Ambos reusan `api.playerShots(...)` + `_shotChartSVG(...)`.
+
 ## Login (frontend)
 
 - `boot()` llama `api.me()` al arrancar. Si `auth_required && !authenticated` → renderiza la **pantalla de login** (`showLogin()`) y no construye la app.
@@ -96,7 +112,7 @@ Lógica principal. Funciones clave:
 
 ## Service Worker (`sw.js`)
 
-Cache name: `smart-basket-v4`
+Cache name: `smart-basket-v7`
 
 **Estrategia:**
 - `install`: pre-cachea los archivos estáticos listados en `STATIC[]`

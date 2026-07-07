@@ -34,6 +34,7 @@ class Game(db.Model):
     team_stats   = db.relationship("TeamGameStats",   backref="game", cascade="all, delete-orphan")
     player_stats = db.relationship("PlayerGameStats", backref="game", cascade="all, delete-orphan")
     shots        = db.relationship("Shot",            backref="game", cascade="all, delete-orphan")
+    pbp_events   = db.relationship("PbpEvent",        backref="game", cascade="all, delete-orphan")
 
 
 class TeamGameStats(db.Model):
@@ -91,6 +92,9 @@ class PlayerGameStats(db.Model):
     player_name = db.Column(db.String,  nullable=False)
     jersey      = db.Column(db.String)
     minutes     = db.Column(db.String)
+    position    = db.Column(db.String,  default="")   # playingPosition FIBA (G/F/C...)
+    plus_minus  = db.Column(db.Integer, default=0)    # sPlusMinusPoints FIBA (por partido)
+    starter     = db.Column(db.Integer, default=0)    # 1=titular (FIBA `starter`)
 
     pts  = db.Column(db.Integer, default=0)
     fgm  = db.Column(db.Integer, default=0)
@@ -128,6 +132,31 @@ class Shot(db.Model):
     action_number = db.Column(db.Integer)
 
 
+class PbpEvent(db.Model):
+    """Play-by-play: un registro por evento de FIBA (subs, tiros, rebotes, faltas...).
+
+    Base de lineups (Feature 03), on/off (Feature 04) y clutch (Feature 05).
+    `clock_secs` = segundos restantes en el período (de `gt`). Se guardan todos
+    los eventos; el análisis filtra por `action_type`.
+    """
+    __tablename__  = "pbp_events"
+    __table_args__ = (db.UniqueConstraint("game_id", "action_number"),)
+
+    id            = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    game_id       = db.Column(db.String,  db.ForeignKey("games.game_id"), nullable=False)
+    team_code     = db.Column(db.String,  default="")   # "" en eventos no-equipo (game/period)
+    player_name   = db.Column(db.String,  default="")   # "" en eventos no-jugador
+    period        = db.Column(db.Integer)
+    period_type   = db.Column(db.String)                # REGULAR / OT
+    clock_secs    = db.Column(db.Integer)               # segundos restantes en el período
+    s1            = db.Column(db.Integer, default=0)     # marcador local corrido
+    s2            = db.Column(db.Integer, default=0)     # marcador visitante corrido
+    action_type   = db.Column(db.String)
+    sub_type      = db.Column(db.String)
+    success       = db.Column(db.Integer, default=0)
+    action_number = db.Column(db.Integer)
+
+
 def init_db(app):
     db.init_app(app)
     with app.app_context():
@@ -144,6 +173,9 @@ def upgrade_db(app):
         ("team_game_stats", "pts_from_tov",       "INTEGER DEFAULT 0"),
         ("team_game_stats", "bench_pts",          "INTEGER DEFAULT 0"),
         ("team_game_stats", "fast_break_pts",     "INTEGER DEFAULT 0"),
+        ("player_game_stats", "position",          "TEXT DEFAULT ''"),
+        ("player_game_stats", "plus_minus",        "INTEGER DEFAULT 0"),
+        ("player_game_stats", "starter",           "INTEGER DEFAULT 0"),
     ]
     with app.app_context():
         conn = db.engine.raw_connection()

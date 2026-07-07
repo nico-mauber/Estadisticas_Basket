@@ -5,6 +5,8 @@ Base URL local: `http://localhost:5000`
 
 Todas las rutas bajo `/api/`. Respuestas en JSON. Errores retornan `{"error": "mensaje"}` con código HTTP apropiado.
 
+> **Nulo vs cero en métricas de tasa.** Los campos de tasa (porcentajes, ratios, puntos por posesión: `oer`, `der`, `net_rating`, `efg_pct`, `ts_pct`, `fg2_pct`, `fg3_pct`, `ft_pct`, `ft_rate`, `pps`, `ppp`, `or_pct`, `dr_pct`, `trb_pct`, `to_pct`, `as_pct`, `uso_pct`, etc.) valen **`null`** cuando su denominador es 0 en ese partido (ej. un partido sin tiros libres → `ft_pct: null`, no `0`). En `averages`, esos partidos se **excluyen** del promedio (no cuentan como 0). Las stats de conteo (`pts`, `fta`, `ast`, ...) conservan su 0 real. `null` = "sin dato / sin intentos"; `0` = "valor real cero". Ver `sdd/specs/08-nulos-vs-cero/`.
+
 ---
 
 ## POST `/api/import`
@@ -223,6 +225,7 @@ Shot chart de **11 zonas** del jugador (ver clasificación en [database.md](data
     "...": "11 zonas en total (ZONE_KEYS_11)"
   },
   "total_shots": 175,
+  "has_coordinates": true,
   "summary": {
     "global_pf": 1.05,
     "efg_pct":   0.512,
@@ -234,13 +237,148 @@ Shot chart de **11 zonas** del jugador (ver clasificación en [database.md](data
 
 Por zona: `made`, `attempts`, `pct` (% acierto) y `pf` (puntos por intento = made × valor zona / attempts; `null` si 0 intentos).
 
+`has_coordinates` — `true` si al menos un tiro del jugador tiene coordenadas reales (`x!=0` o `y!=0`); `false` si todos son `x=0,y=0` (partido importado sin array `shot` de FIBA, caso típico de la competencia FUBB). El frontend usa este flag para elegir entre el chart de 11 zonas y el chart simplificado de 3 zonas (ver [frontend.md](frontend.md#shot-chart)).
+
 `summary`:
 - `global_pf` — puntos por tiro global
 - `efg_pct` — eFG% derivado de los tiros con zona
 - `ppp` — puntos por posesión del jugador (de `player_game_stats`, no solo tiros)
 - `games` — partidos con datos de tiro
 
-Tiros sin coordenadas (`x=0, y=0`, partido sin array `shot` en FIBA) caen en `top_key_3` (3PT) o `mid_top` (2PT).
+Tiros sin coordenadas (`x=0, y=0`, partido sin array `shot` en FIBA) caen en `top_key_3` (3PT) o `mid_top` (2PT) o `restricted_area` (2PT con keyword de pintura) — en la práctica, si ningún tiro del jugador tiene coordenadas, solo esas 3 claves de `zones` tendrán `attempts>0` (ver `has_coordinates` arriba).
+
+---
+
+## GET `/api/pbp/<game_id>`
+
+Verificación del play-by-play persistido de un partido (Feature 02). Solo lectura.
+
+**Response 200:**
+```json
+{
+  "game_id": "2741559",
+  "events": 577,
+  "by_action_type": { "2pt": 89, "3pt": 48, "rebound": 71, "substitution": 112, "assist": 38, "steal": 19, "block": 3, "freethrow": 50, "turnover": 29, "...": "..." },
+  "first": { "action_number": 1, "action_type": "game", "period": 1, "clock_secs": 600, "...": "..." },
+  "last":  { "action_number": 999, "...": "..." }
+}
+```
+
+**Errores:** `404` — `{"error": "Partido sin play-by-play. Reimportá el partido."}` (partido inexistente o importado antes de la Feature 02).
+
+---
+
+## GET `/api/search/players`
+
+Todos los jugadores de la base con sus promedios, para el buscador avanzado (una entrada por `(team_code, player_name)`). El filtrado y el orden se hacen en el frontend.
+
+**Response:**
+```json
+[
+  {
+    "player": "A. Varela",
+    "team_code": "AGU",
+    "team_name": "Aguada",
+    "competitions": ["Liga Uruguaya de Basquetbol 2025/2026"],
+    "games": 3,
+    "position": "G",
+    "minutes": 27.4,
+    "plus_minus": 4.5,
+    "efg_pct": 0.55, "ts_pct": 0.58, "oer": 1.08, "uso_pct": 0.24,
+    "ppp": 1.02, "pps": 1.10, "fg2_pct": 0.50, "fg3_pct": 0.37, "ft_pct": 0.80,
+    "reb_share": 0.15, "oreb_share": 0.10, "dreb_share": 0.20,
+    "physical_impact": 8.0, "stocks": 2.3, "def_playmaking": 0.9,
+    "pts": 14.2, "ast": 6.1, "tov": 2.0, "stl": 1.2, "blk": 0.4
+  }
+]
+```
+
+- `position` — última posición no vacía observada (`playingPosition` FIBA); `""` si nunca hubo dato.
+- `plus_minus` / `minutes` — promedio por partido (`plus_minus` puede ser negativo).
+- Las tasas siguen la regla de nulos (ver nota al inicio): `null` si no hay dato, excluidas del promedio.
+- Un jugador que jugó en dos equipos aparece una vez por equipo.
+
+---
+
+## GET `/api/clutch`
+
+Cierres de partido: rendimiento en los **últimos 5 minutos** (último período REGULAR con reloj ≤ 5:00 + prórrogas completas). Una fila por equipo-partido (Feature 05). Filtro opcional `?team=<code>`.
+
+**Response:**
+```json
+[
+  {
+    "game_id": "2820500", "date": "2026-04-28",
+    "team_code": "AGU", "team_name": "Aguada",
+    "opponent_code": "DSC", "home_away": "V",
+    "pts": 11, "opp_pts": 1, "point_diff": 10,
+    "off_rating": 1.375, "def_rating": 0.127,
+    "efg_pct": 0.7857, "ts_pct": 0.7857,
+    "tov": 1, "ast": 2, "reb": 6,
+    "fouls_committed": 1, "fouls_drawn": 2,
+    "possessions": 8.0,
+    "top_finisher": { "name": "E. Clark", "pts": 6 },
+    "top_creator":  { "name": "J. Osimani", "ast": 1 }
+  }
+]
+```
+
+- `off_rating`/`def_rating` = OER/DER (docs/metrics.md) sobre las posesiones del cierre; `null` si 0 posesiones.
+- `point_diff` = `pts − opp_pts` en la ventana clutch.
+- `top_finisher`/`top_creator` = jugador con más puntos / asistencias **dentro del cierre** (`null` si no hubo).
+- Faltas desde `pbp_events`: `fouls_committed` (`foul`), `fouls_drawn` (`foulon`).
+- `[]` si ningún partido tiene play-by-play (ver [Feature 02](database.md#pbp_events)).
+
+---
+
+## GET `/api/lineup/<team_code>?players=A|B|C`
+
+Rendimiento del equipo mientras los jugadores indicados (3 a 5, separados por `|`) comparten cancha, agregado sobre todos los partidos del equipo con play-by-play (Feature 03). Motor de reconstrucción de quintetos: `backend/lineups.py`.
+
+**Response 200:**
+```json
+{
+  "team_code": "CNF", "players": ["P. Prieto", "E. Oglivie", "J. Feldeine"], "size": 3,
+  "games_used": 2, "games_excluded": 0,
+  "sample": { "possessions": 43.96, "seconds": 1311.0 },
+  "metrics": { "oer": 1.2056, "der": 0.7546, "net_rating": 0.451, "efg_pct": 0.5465, "ts_pct": 0.5643 },
+  "raw": { "fga": 46, "fgm": 25, "fga3": 12, "fgm3": 6, "fta": 8, "ftm": 6, "orb": 7, "drb": 14, "ast": 9, "tov": 5, "stl": 8, "blk": 2 },
+  "leaders": {
+    "scorer":    { "name": "J. Feldeine", "pts": 15 },
+    "assister":  { "name": "J. Feldeine", "ast": 2 },
+    "rebounder": { "name": "E. Oglivie",  "trb": 9 }
+  }
+}
+```
+
+- `games_used`/`games_excluded` — partidos con quinteto inicial válido (5 titulares) vs. descartados por datos de pbp inconsistentes (RF-1/RF-7).
+- `sample.seconds` es aproximado (asume 600s por cuarto, 300s por prórroga; no modela reloj detenido).
+- Tasas `null` si su denominador es 0 (regla de nulos, ver nota al inicio).
+
+**Errores:** `400` — `{"error": "Elegí entre 3 y 5 jugadores"}` (menos de 3 o más de 5 nombres) · `404` — equipo sin partidos con play-by-play.
+
+---
+
+## GET `/api/onoff/<team_code>/<player_name>`
+
+Rendimiento del equipo con el jugador en cancha (**ON**) vs. en el banco (**OFF**), agregado sobre todos los partidos del equipo con play-by-play (Feature 04). Reusa el motor de `backend/lineups.py` (Feature 03) — ON/OFF nacen de los mismos tramos, partición exhaustiva y disjunta.
+
+**Response 200:**
+```json
+{
+  "team_code": "CNF", "player": "E. Oglivie", "usg_pct": 0.0947,
+  "games_used": 2, "games_excluded": 0,
+  "on":  { "possessions": 87.0, "seconds": 2682.0, "pts_for": 103, "pts_against": 63, "oer": 1.1839, "der": 0.7475, "net_rating": 0.4364, "efg_pct": 0.5513, "ts_pct": 0.5787 },
+  "off": { "possessions": 77.0, "seconds": 2201.0, "pts_for": 104, "pts_against": 91, "oer": 1.3506, "der": 1.1837, "net_rating": 0.1669, "efg_pct": 0.6692, "ts_pct": 0.6842 },
+  "diff": { "oer": -0.1667, "der": -0.4362, "net_rating": 0.2695, "efg_pct": -0.1179, "ts_pct": -0.1055 }
+}
+```
+
+- `usg_pct` — USO% promedio del jugador (`calc_player_stats`, mismo cálculo que `/api/search/players`).
+- `diff = ON − OFF`; `null` si cualquiera de los dos lados no tiene dato (denominador 0, ver CA-2 en `sdd/specs/04-on-off/spec.md`).
+- Si ON u OFF tienen `possessions: 0` (jugador jugó 0 o el 100% de los minutos), sus métricas de tasa son `null` (no `NaN`/`Infinity`).
+
+**Errores:** `404` — `{"error": "Sin datos ON/OFF para este jugador"}` (jugador o equipo sin datos) / `{"error": "Equipo no encontrado o sin play-by-play"}`.
 
 ---
 

@@ -5,9 +5,11 @@ from flask import Flask, jsonify, request, session
 from flask_cors import CORS
 from sqlalchemy import func
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
-from database import db, init_db, upgrade_db, Game, TeamGameStats, PlayerGameStats, Shot, DB_PATH
-from stats_engine import calc_team_stats, calc_player_stats, league_averages
+from database import db, init_db, upgrade_db, Game, TeamGameStats, PlayerGameStats, Shot, PbpEvent, DB_PATH
+from stats_engine import calc_team_stats, calc_player_stats, league_averages, _parse_minutes
 from fiba_fetcher import fetch_game_data
+from clutch import clutch_rows
+import lineups
 from auth import (
     login_required, auth_enabled, verify,
     check_rate_limit, register_fail, clear_fails, client_ip,
@@ -297,6 +299,9 @@ def _persist_game(game: dict) -> list[dict]:
                 player_name = p["player_name"],
                 jersey      = p.get("jersey"),
                 minutes     = p.get("minutes"),
+                position    = p.get("position", ""),
+                plus_minus  = p.get("plus_minus", 0),
+                starter     = p.get("starter", 0),
                 pts  = p["pts"],  fgm  = p["fgm"],  fga  = p["fga"],
                 fgm2 = p["fgm2"], fga2 = p["fga2"],
                 fgm3 = p["fgm3"], fga3 = p["fga3"],
@@ -310,6 +315,9 @@ def _persist_game(game: dict) -> list[dict]:
                     team_name = p["team_name"],
                     jersey    = p.get("jersey"),
                     minutes   = p.get("minutes"),
+                    position   = p.get("position", ""),
+                    plus_minus = p.get("plus_minus", 0),
+                    starter    = p.get("starter", 0),
                     pts  = p["pts"],  fgm  = p["fgm"],  fga  = p["fga"],
                     fgm2 = p["fgm2"], fga2 = p["fga2"],
                     fgm3 = p["fgm3"], fga3 = p["fga3"],
@@ -334,6 +342,24 @@ def _persist_game(game: dict) -> list[dict]:
                 sub_type      = s["sub_type"],
                 period        = s["period"],
                 action_number = s["action_number"],
+            ).on_conflict_do_nothing()
+        )
+
+    for ev in game.get("pbp", []):
+        db.session.execute(
+            sqlite_insert(PbpEvent).values(
+                game_id       = game_id,
+                team_code     = ev["team_code"],
+                player_name   = ev["player_name"],
+                period        = ev["period"],
+                period_type   = ev["period_type"],
+                clock_secs    = ev["clock_secs"],
+                s1            = ev["s1"],
+                s2            = ev["s2"],
+                action_type   = ev["action_type"],
+                sub_type      = ev["sub_type"],
+                success       = ev["success"],
+                action_number = ev["action_number"],
             ).on_conflict_do_nothing()
         )
 
@@ -416,8 +442,9 @@ def team_stats(team_code: str):
     league = league_averages(all_adv)
 
     def _avg(key):
-        vals = [g[key] for g in game_stats if key in g]
-        return round(sum(vals) / len(vals), 4) if vals else 0
+        # Excluye None (tasas sin dato): un partido sin intentos no cuenta como 0.
+        vals = [g[key] for g in game_stats if key in g and g[key] is not None]
+        return round(sum(vals) / len(vals), 4) if vals else None
 
     keys = [
         "oer", "der", "net_rating", "efg_pct", "ts_pct",
@@ -557,8 +584,9 @@ def player_stats(team_code: str, player_name: str):
     league = league_averages(all_adv)
 
     def _avg(key):
-        vals = [g[key] for g in game_log if key in g]
-        return round(sum(vals) / len(vals), 4) if vals else 0
+        # Excluye None (tasas sin dato): un partido sin intentos no cuenta como 0.
+        vals = [g[key] for g in game_log if key in g and g[key] is not None]
+        return round(sum(vals) / len(vals), 4) if vals else None
 
     keys = [
         "oer", "efg_pct", "ts_pct", "fg2_pct", "fg3_pct",
@@ -591,6 +619,8 @@ def player_stats(team_code: str, player_name: str):
 def player_shots(team_code: str, player_name: str):
     team_code = team_code.upper()
     rows = Shot.query.filter_by(team_code=team_code, player_name=player_name).all()
+
+    has_coordinates = any((row.x or 0) != 0 or (row.y or 0) != 0 for row in rows)
 
     zones = {k: {"made": 0, "attempts": 0} for k in ZONE_KEYS_11}
     for row in rows:
@@ -635,7 +665,234 @@ def player_shots(team_code: str, player_name: str):
         "games":     games,
     }
 
-    return jsonify({"zones": zones, "total_shots": total_fga, "summary": summary})
+    return jsonify({
+        "zones": zones,
+        "total_shots": total_fga,
+        "has_coordinates": has_coordinates,
+        "summary": summary,
+    })
+
+
+# ── Player search ────────────────────────────────────────────────────────────
+
+@app.route("/api/search/players")
+@login_required
+def search_players():
+    """Todos los jugadores de la base con sus promedios, para el buscador.
+
+    Una entrada por (team_code, player_name). Tasas promediadas excluyendo None
+    (Feature 08); conteos incluyen 0. Filtrado y orden se hacen en el frontend.
+    """
+    games     = {g.game_id: g for g in Game.query.all()}
+    team_rows = {(tr.game_id, tr.team_code): tr for tr in TeamGameStats.query.all()}
+
+    groups = {}
+    for pr in PlayerGameStats.query.all():
+        groups.setdefault((pr.team_code, pr.player_name), []).append(pr)
+
+    metric_keys = [
+        "efg_pct", "ts_pct", "oer", "uso_pct", "ppp", "pps",
+        "fg2_pct", "fg3_pct", "ft_pct",
+        "reb_share", "oreb_share", "dreb_share",
+        "physical_impact", "stocks", "def_playmaking",
+    ]
+    count_keys = ["pts", "ast", "tov", "stl", "blk"]
+
+    result = []
+    for (team_code, player_name), rows in groups.items():
+        per_game, comps, pm_vals, min_vals = [], set(), [], []
+        position = ""
+        for pr in rows:
+            p = _to_dict(pr)
+            p.setdefault("trb", p["orb"] + p["drb"])
+            team_row = team_rows.get((pr.game_id, team_code))
+            t_dict   = _to_dict(team_row) if team_row else None
+            adv = calc_player_stats(p, team_pos=0, team=t_dict)
+            if team_row:
+                t_orb = team_row.orb or 0
+                t_drb = team_row.drb or 0
+                t_trb = team_row.trb or (t_orb + t_drb)
+                adv["reb_share"]  = round(adv["trb"] / t_trb, 4) if t_trb else None
+                adv["oreb_share"] = round(adv["orb"] / t_orb, 4) if t_orb else None
+                adv["dreb_share"] = round(adv["drb"] / t_drb, 4) if t_drb else None
+            else:
+                adv["reb_share"] = adv["oreb_share"] = adv["dreb_share"] = None
+            per_game.append(adv)
+            g = games.get(pr.game_id)
+            if g and g.competition:
+                comps.add(g.competition)
+            pm_vals.append(pr.plus_minus if pr.plus_minus is not None else 0)
+            min_vals.append(_parse_minutes(pr.minutes))
+            if getattr(pr, "position", "") :
+                position = pr.position
+
+        def _avg_metric(k):
+            vals = [gm[k] for gm in per_game if gm.get(k) is not None]
+            return round(sum(vals) / len(vals), 4) if vals else None
+
+        def _avg_count(k):
+            vals = [gm.get(k, 0) or 0 for gm in per_game]
+            return round(sum(vals) / len(vals), 2) if vals else None
+
+        rec = {
+            "player":       player_name,
+            "team_code":    team_code,
+            "team_name":    rows[-1].team_name,
+            "competitions": sorted(comps),
+            "games":        len(rows),
+            "position":     position,
+            "minutes":      round(sum(min_vals) / len(min_vals), 1) if min_vals else 0,
+            "plus_minus":   round(sum(pm_vals) / len(pm_vals), 1) if pm_vals else 0,
+        }
+        for k in metric_keys:
+            rec[k] = _avg_metric(k)
+        for k in count_keys:
+            rec[k] = _avg_count(k)
+        result.append(rec)
+
+    result.sort(key=lambda r: r["player"])
+    return jsonify(result)
+
+
+# ── Play-by-play (verificación) ──────────────────────────────────────────────
+
+@app.route("/api/pbp/<game_id>")
+@login_required
+def game_pbp(game_id: str):
+    """Verificación del pbp persistido de un partido (Feature 02)."""
+    rows = (
+        PbpEvent.query.filter_by(game_id=game_id)
+        .order_by(PbpEvent.action_number)
+        .all()
+    )
+    if not rows:
+        return jsonify({"error": "Partido sin play-by-play. Reimportá el partido."}), 404
+
+    by_action = {}
+    for r in rows:
+        by_action[r.action_type] = by_action.get(r.action_type, 0) + 1
+
+    return jsonify({
+        "game_id":        game_id,
+        "events":         len(rows),
+        "by_action_type": by_action,
+        "first":          _to_dict(rows[0]),
+        "last":           _to_dict(rows[-1]),
+    })
+
+
+# ── Clutch (últimos 5 min) ───────────────────────────────────────────────────
+
+@app.route("/api/clutch")
+@login_required
+def clutch_overview():
+    """Cierres de partido: una fila por equipo-partido (Feature 05).
+
+    Filtro opcional ?team=<code>. `[]` si ningún partido tiene pbp.
+    """
+    events_by_game = {}
+    for ev in PbpEvent.query.all():
+        events_by_game.setdefault(ev.game_id, []).append(_to_dict(ev))
+
+    game_info = {
+        g.game_id: {
+            "date":      g.date,
+            "home_code": g.home_code,
+            "away_code": g.away_code,
+            "home_team": g.home_team,
+            "away_team": g.away_team,
+        }
+        for g in Game.query.all()
+    }
+
+    rows = clutch_rows(events_by_game, game_info)
+
+    team = request.args.get("team")
+    if team:
+        rows = [r for r in rows if r["team_code"] == team.upper()]
+
+    rows.sort(key=lambda r: (r.get("date") or "", r["game_id"]), reverse=True)
+    return jsonify(rows)
+
+
+# ── Lineups / ON-OFF (motor de quintetos) ────────────────────────────────────
+
+def _team_pbp_games(team_code: str) -> list[dict]:
+    """Partidos del equipo con pbp: [{game_id, events, player_rows, opp_code}, ...].
+
+    Base compartida por Feature 03 (lineups) y Feature 04 (on/off).
+    """
+    game_ids = {
+        tr.game_id for tr in TeamGameStats.query.filter_by(team_code=team_code).all()
+    }
+    games = []
+    for gid in game_ids:
+        events = [
+            _to_dict(e) for e in
+            PbpEvent.query.filter_by(game_id=gid).order_by(PbpEvent.action_number).all()
+        ]
+        if not events:
+            continue
+        g = Game.query.filter_by(game_id=gid).first()
+        if not g:
+            continue
+        opp_code = g.away_code if g.home_code == team_code else g.home_code
+        if not opp_code:
+            continue
+        games.append({
+            "game_id":     gid,
+            "events":      events,
+            "player_rows": PlayerGameStats.query.filter_by(game_id=gid).all(),
+            "opp_code":    opp_code,
+        })
+    return games
+
+
+@app.route("/api/lineup/<team_code>")
+@login_required
+def lineup_route(team_code: str):
+    """Rendimiento del equipo con una combinación de 3-5 jugadores en cancha (Feature 03)."""
+    team_code = team_code.upper()
+    players = [p for p in request.args.get("players", "").split("|") if p.strip()]
+    if not (3 <= len(players) <= 5):
+        return jsonify({"error": "Elegí entre 3 y 5 jugadores"}), 400
+
+    games = _team_pbp_games(team_code)
+    if not games:
+        return jsonify({"error": "Equipo no encontrado o sin play-by-play"}), 404
+
+    result = lineups.lineup_stats(games, team_code, players)
+    result.update({"team_code": team_code, "players": players, "size": len(players)})
+    return jsonify(result)
+
+
+@app.route("/api/onoff/<team_code>/<player_name>")
+@login_required
+def onoff_route(team_code: str, player_name: str):
+    """Rendimiento del equipo con un jugador en cancha (ON) vs en el banco (OFF) (Feature 04)."""
+    team_code = team_code.upper()
+    games = _team_pbp_games(team_code)
+    if not games:
+        return jsonify({"error": "Equipo no encontrado o sin play-by-play"}), 404
+
+    if not PlayerGameStats.query.filter_by(team_code=team_code, player_name=player_name).first():
+        return jsonify({"error": "Sin datos ON/OFF para este jugador"}), 404
+
+    result = lineups.onoff_stats(games, team_code, player_name)
+
+    uso_vals = []
+    for pr in PlayerGameStats.query.filter_by(team_code=team_code, player_name=player_name).all():
+        p = _to_dict(pr)
+        p.setdefault("trb", p["orb"] + p["drb"])
+        team_row = TeamGameStats.query.filter_by(game_id=pr.game_id, team_code=team_code).first()
+        t_dict = _to_dict(team_row) if team_row else None
+        adv = calc_player_stats(p, team_pos=0, team=t_dict)
+        if adv.get("uso_pct") is not None:
+            uso_vals.append(adv["uso_pct"])
+    result["usg_pct"] = round(sum(uso_vals) / len(uso_vals), 4) if uso_vals else None
+    result["team_code"] = team_code
+    result["player"] = player_name
+    return jsonify(result)
 
 
 # ── League ─────────────────────────────────────────────────────────────────

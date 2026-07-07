@@ -260,6 +260,7 @@ def _parse_fiba_json(raw: dict, source_url: str = "") -> dict:
         "teams":       [],
         "players":     [],
         "shots":       [],
+        "pbp":         [],
     }
 
     teams_raw = raw.get("tm") or {}
@@ -344,6 +345,9 @@ def _parse_fiba_json(raw: dict, source_url: str = "") -> dict:
                     "player_name": full_name,
                     "jersey":      str(p.get("shirtNumber") or ""),
                     "minutes":     str(p.get("sMinutes") or p.get("Min") or "0:00"),
+                    "position":    (p.get("playingPosition") or "").strip(),
+                    "plus_minus":  _i(p, ["sPlusMinusPoints"]),
+                    "starter":     int(p.get("starter") or 0),
                     "pts":  pi(["Points"]),
                     "fgm2": pi(["TwoPointersMade"]),
                     "fga2": pi(["TwoPointersAttempted"]),
@@ -422,6 +426,28 @@ def _parse_fiba_json(raw: dict, source_url: str = "") -> dict:
                 "action_number": int(shot.get("actionNumber") or 0),
             })
 
+    # Full play-by-play (ALL events) — base for lineups/on-off/clutch (Feature 02).
+    # Independent of the shots extraction above (which only pulls 2pt/3pt).
+    for ev in raw.get("pbp", []):
+        if not isinstance(ev, dict):
+            continue
+        e_tno   = int(ev.get("tno") or 0)
+        e_shirt = str(ev.get("shirtNumber") or "")
+        e_player = shirt_to_name.get((e_tno, e_shirt)) or ev.get("player") or ""
+        game["pbp"].append({
+            "team_code":     tno_to_code.get(e_tno, ""),
+            "player_name":   e_player,
+            "period":        int(ev.get("period") or 0),
+            "period_type":   ev.get("periodType") or "",
+            "clock_secs":    _gt_to_secs(ev.get("gt")),
+            "s1":            _i(ev, ["s1"]),
+            "s2":            _i(ev, ["s2"]),
+            "action_type":   ev.get("actionType") or "",
+            "sub_type":      ev.get("subType") or "",
+            "success":       _i(ev, ["success"]),
+            "action_number": _i(ev, ["actionNumber"]),
+        })
+
     # Cross-fill opponent stats
     if len(game["teams"]) == 2:
         a, b = game["teams"]
@@ -446,6 +472,20 @@ def _parse_fiba_json(raw: dict, source_url: str = "") -> dict:
 def _has_stat_keys(d: dict) -> bool:
     stat_keys = {"Pts", "pts", "Fg2M", "fg2m", "Fg3M", "fg3m", "Ftm", "ftm"}
     return bool(stat_keys & d.keys())
+
+
+def _gt_to_secs(gt) -> int:
+    """'MM:SS' (tiempo restante en el período) → segundos enteros. Vacío/None → 0."""
+    if not gt:
+        return 0
+    s = str(gt).strip()
+    try:
+        if ":" in s:
+            m, sec = s.split(":", 1)
+            return int(m) * 60 + int(float(sec))
+        return int(float(s))
+    except (ValueError, TypeError):
+        return 0
 
 
 def _i(d: dict, keys: list, default: int = 0) -> int:

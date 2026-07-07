@@ -17,6 +17,8 @@ Smart-Basket es un monolito full-stack: Flask sirve tanto la API REST como los a
 │  │   auth.py          (login + sesión, env-gated)   │   │
 │  │   fiba_fetcher.py  (scraping FIBA LiveStats)     │   │
 │  │   stats_engine.py  (métricas avanzadas)          │   │
+│  │   clutch.py        (cierres, sobre pbp_events)   │
+│   lineups.py       (quintetos: lineups + on/off) │   │
 │  │   database.py      (SQLite vía /data/basketball.db)│  │
 │  └──────────────────────────────────────────────────┘   │
 │                                                         │
@@ -68,6 +70,12 @@ Calcula métricas avanzadas on-the-fly en cada request (no se persisten en DB).
 - `league_averages(all_stats)` — media y mejor valor de la liga para cada métrica.
 
 Ver [metrics.md](metrics.md) para fórmulas completas.
+
+### `clutch.py`
+Agrega el play-by-play (`pbp_events`) para los **últimos 5 minutos** del partido (último período REGULAR con reloj ≤ 5:00 + prórrogas). `clutch_rows(events_by_game, game_info)` retorna una fila por equipo-partido con métricas del cierre (usa las fórmulas de `stats_engine`). Alimenta `GET /api/clutch`. Base: Feature 02 (pbp persistido).
+
+### `lineups.py`
+Motor de reconstrucción de quintetos en cancha, compartido por **Feature 03 (lineups)** y **Feature 04 (on/off)**. `build_segments(events, team_code, starters)` camina `pbp_events` de un partido y parte en tramos cada vez que el equipo hace una `substitution`; cada tramo guarda el quinteto en cancha (`on_court`), sus eventos y los segundos transcurridos (aproximado: 600s/cuarto, 300s/prórroga). `lineup_stats()` filtra tramos donde una combinación de 3-5 jugadores está en cancha; `onoff_stats()` parte todos los tramos en ON/OFF para un jugador (partición exhaustiva y disjunta por construcción). Alimenta `GET /api/lineup/<team>` y `GET /api/onoff/<team>/<player>`. Base: Feature 02 (`pbp_events` + `starter`).
 
 ### `database.py`
 SQLite. `DB_PATH` resuelto desde variable de entorno `DB_PATH` (default: `backend/basketball.db`).
