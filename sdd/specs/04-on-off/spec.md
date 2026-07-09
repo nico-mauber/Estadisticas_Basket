@@ -25,6 +25,7 @@ Comparar automáticamente el rendimiento del equipo con un jugador en cancha (ON
 - RF-5: El sistema DEBE reportar la muestra de cada conjunto: posesiones y segundos ON / OFF, para juzgar significancia. · (US-1)
 - RF-6: El sistema DEBE incluir el USO% del jugador (fórmula EXACTA `docs/metrics.md` §USO%) como contexto del ON (ya calculable desde `player_game_stats`; se reutiliza `calc_player_stats`). · (US-1, `docs/metrics.md` §USO%)
 - RF-7: El sistema DEBE exponer estos datos vía endpoint NUEVO `GET /api/onoff/<team_code>/<player_name>`. · (US-1)
+- RF-8: **(REVISIÓN v2, feedback cliente 2026-07-08)** El sistema DEBE exponer, además de las tasas, los **conteos crudos del equipo** en cada conjunto (ON, OFF): puntos a favor, puntos en contra, REB, AST, TOV, STL, BLK. El cliente lo pidió explícito (ej.: *"con un jugador que jugó 20 min el equipo anotó 80 pts, agarró 20 reb y 5 asís y solo le anotaron 10 pts, cuando salió, cómo le fue al equipo"*). Sube desde §8 (estaba diferido). · (US-1, US-2) · Nota: los conteos crudos escalan con los minutos de cada conjunto (ON suele tener más posesiones que OFF); se muestran junto a las tasas, que sí son comparables directamente.
 
 ## 5. Requisitos de datos / API
 | Tabla/Endpoint | Tipo | Campos / Shape | Nuevo? |
@@ -51,7 +52,7 @@ Apartado nuevo dentro de la vista Equipo (`#sec-team`), asociado al `#player-sel
 Indicadores pedidos por el usuario fuera del MVP:
 - **% Rebote ofensivo / defensivo** (OR%/DR%) ON vs OFF — requiere rebotes del rival por partición; diferido (mismo motivo que Feature 03 §8).
 - **Pace** ON/OFF — diferido (derivable de `seconds` pero fuera del MVP).
-- **Pérdidas / Robos / Tapones / Asistencias / Rebotes** ON vs OFF como conteos crudos — el MVP prioriza las tasas de eficiencia; los conteos se agregan en una iteración siguiente (los datos ya están agregados en RF-2, solo falta exponerlos).
+- ~~**Pérdidas / Robos / Tapones / Asistencias / Rebotes** ON vs OFF como conteos crudos~~ → **movido a alcance (RF-8, revisión v2)**.
 - **Offensive Dependency** y **Chaos** — sin fórmula en `docs/metrics.md` (ver §9). No se implementan hasta definirlas.
 - **Impacto por-partido** (ON/OFF de un partido puntual) — el MVP es global multi-partido.
 

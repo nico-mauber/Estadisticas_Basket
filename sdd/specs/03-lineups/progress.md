@@ -27,6 +27,9 @@
 ## Desviaciones respecto a docs/ o plan
 - Ninguna. Las fórmulas de `_metrics()` se reimplementaron localmente en `lineups.py` (no se llamó a `calc_team_stats`, que espera un partido completo) — mismo patrón ya usado por `clutch.py`. Consistencia verificada por unit-test contra datos reales.
 
+## Endurecimiento del motor (2026-07-08)
+Durante la revisión del cliente se auditó `build_segments`: el quinteto en cancha derivaba **transitoriamente** a 4/3/2 dentro de un cluster de cambios simultáneos (mismo reloj), porque se cerraba un tramo por CADA evento de sub. Medición: **0 eventos y 0 segundos** caían en esos tramos parciales en los 6 equipos → los números ya eran correctos, pero la lógica era frágil (un evento intercalado entre dos subs se hubiera mal-atribuido). **Fix:** los `substitution` actualizan `on_court` inline pero ya **no** cortan un tramo; un tramo nuevo solo arranca cuando llega un evento de juego con `on_court` distinto → los cambios simultáneos se fusionan y nunca hay quintetos parciales. Verificado: `on_court != 5` captura 0 eventos, y los números de lineup (combo 3: pos 43.96, net 0.451) quedan idénticos. Beneficia también a Feature 04 (mismo motor).
+
 ## Docs a actualizar
 - [x] `docs/api.md` — endpoint `GET /api/lineup/<team_code>`
 - [x] `docs/frontend.md` — apartado "Combinaciones" en Equipo, `api.lineup()`, cache `v7`

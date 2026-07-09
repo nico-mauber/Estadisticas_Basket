@@ -31,7 +31,7 @@ export const api = {
   player:        (code, name) => apiFetch(`/api/player/${encodeURIComponent(code)}/${encodeURIComponent(name)}`),
   playerShots:   (code, name) => apiFetch(`/api/shots/${encodeURIComponent(code)}/${encodeURIComponent(name)}`),
   searchPlayers: ()   => apiFetch("/api/search/players"),
-  clutch:        team => apiFetch("/api/clutch" + (team ? `?team=${encodeURIComponent(team)}` : "")),
+  clutchTeam:    team => apiFetch(`/api/clutch/${encodeURIComponent(team)}`),
   lineup:        (code, players) => apiFetch(`/api/lineup/${encodeURIComponent(code)}?players=${players.map(encodeURIComponent).join("|")}`),
   onoff:         (code, name) => apiFetch(`/api/onoff/${encodeURIComponent(code)}/${encodeURIComponent(name)}`),
   league:        ()   => apiFetch("/api/league"),

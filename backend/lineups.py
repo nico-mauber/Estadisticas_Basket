@@ -78,9 +78,16 @@ def build_segments(events, team_code, starters):
     """events (de un partido, ordenados por action_number) → lista de tramos.
 
     Cada tramo: {"on_court": frozenset, "events": [...], "seconds": float}.
+
+    Los eventos `substitution` del equipo actualizan `on_court` pero NO cortan un
+    tramo por sí mismos: un tramo nuevo solo arranca cuando llega un evento de
+    juego con un `on_court` distinto. Así, varios cambios simultáneos (mismo
+    reloj) se fusionan en UN solo cambio de quinteto y nunca se generan quintetos
+    parciales transitorios (4/3/2 jugadores) que mal-atribuyan eventos o segundos.
     """
     segments = []
     on_court = set(starters)
+    cur_on = frozenset(on_court)
     bucket, seg_seconds = [], 0.0
     last_period = last_clock = None
 
@@ -96,17 +103,24 @@ def build_segments(events, team_code, starters):
         last_period, last_clock = period, clock
 
         if ev.get("action_type") == "substitution" and ev.get("team_code") == team_code:
-            segments.append({"on_court": frozenset(on_court), "events": bucket, "seconds": seg_seconds})
-            bucket, seg_seconds = [], 0.0
             player, sub = ev.get("player_name"), (ev.get("sub_type") or "").lower()
             if sub == "out":
                 on_court.discard(player)
             elif sub == "in":
                 on_court.add(player)
+            # cambio pendiente: se materializa al llegar el próximo evento de juego
         else:
+            new_on = frozenset(on_court)
+            if new_on != cur_on and bucket:
+                # el quinteto cambió desde el último evento de juego; el tiempo
+                # acumulado (incluido el delta de este evento) transcurrió con el
+                # quinteto viejo → se cierra el tramo con él
+                segments.append({"on_court": cur_on, "events": bucket, "seconds": seg_seconds})
+                bucket, seg_seconds = [], 0.0
+            cur_on = new_on
             bucket.append(ev)
 
-    segments.append({"on_court": frozenset(on_court), "events": bucket, "seconds": seg_seconds})
+    segments.append({"on_court": cur_on, "events": bucket, "seconds": seg_seconds})
     return segments
 
 
@@ -193,6 +207,14 @@ def _side_metrics(boxes, opp_boxes, seconds):
         "seconds":      round(seconds, 1),
         "pts_for":      tb["pts"],
         "pts_against":  ob["pts"],
+        # conteos crudos del equipo (RF-8): escalan con los minutos del conjunto
+        "reb":          tb["orb"] + tb["drb"],
+        "orb":          tb["orb"],
+        "drb":          tb["drb"],
+        "ast":          tb["ast"],
+        "tov":          tb["tov"],
+        "stl":          tb["stl"],
+        "blk":          tb["blk"],
         **metrics,
     }
 

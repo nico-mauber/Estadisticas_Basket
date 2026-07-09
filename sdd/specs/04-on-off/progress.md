@@ -31,8 +31,16 @@
 - [x] `docs/frontend.md` — panel "ON/OFF" en Equipo, `api.onoff()`, cache `v7`
 - [x] `docs/architecture.md` — módulo `lineups.py` (compartido con Feature 03)
 
+## Revisión v2 (2026-07-08) — conteos crudos (RF-8)
+Feedback del cliente: ver la producción cruda del equipo con el jugador ON vs OFF (pts a favor/contra, REB, AST, pérdidas, robos, tapones), no solo tasas.
+- [x] Backend: `_side_metrics` ahora expone `reb/orb/drb/ast/tov/stl/blk` además de `pts_for/pts_against` (`lineups.py`)
+- [x] Frontend: `renderTeamOnOff` con dos tablas — **Eficiencia** (tasas, Δ del backend) y **Producción del equipo** (conteos crudos, Δ = ON−OFF calculado en JS) + nota de que los crudos escalan con minutos
+- [x] Docs: `api.md` (crudos en shape ON/OFF), `frontend.md`
+- Verificación: partición exhaustiva de conteos (`on[k] + off[k] == total del equipo`) OK en los 6 equipos para `pts/reb/ast/tov/stl/blk`; navegador (HYM/J. Canty) muestra ambas tablas, consola limpia.
+- El motor de segmentos se endureció (fusión de cambios simultáneos) — ver [[03-lineups]] progress; números ON/OFF idénticos.
+
 ## Deuda / TODO (spec §8)
-- Conteos crudos (PER/ROB/TAP/AST/REB) ON vs OFF como cifras — ya agregados internamente (`_side_metrics` no los expone todos); agregar en iteración siguiente si se pide.
+- ~~Conteos crudos ON vs OFF~~ → **hecho (RF-8, v2)**.
 - "Chaos" y "Offensive Dependency" — sin fórmula definida (spec §9), no implementados.
 - Impacto por-partido (ON/OFF de un partido puntual) — el MVP es global multi-partido.
-- Evidencia visual: `feat03-04-lineups-onoff.png` (compartida con Feature 03).
+- Evidencia visual: `feat03-04-lineups-onoff.png` (v1); `feat05v2-clutch-onoff-equipo.png` (v2, ON/OFF con producción cruda).

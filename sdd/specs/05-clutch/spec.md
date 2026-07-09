@@ -2,8 +2,12 @@
 
 > **Depende de Feature 02** (pbp con `clock_secs` + `period`). Sin reloj persistido no se puede aislar el cierre. MVP: tabla de cierres en la vista Liga con columnas adaptadas; usage/pace por jugador quedan en §8.
 
+> ⚠️ **REVISIÓN v2 (feedback del cliente, 2026-07-08).** El MVP original puso los cierres en la vista **Liga**, una fila por equipo-partido, sin filtro de margen. El cliente pidió mover el análisis a la vista **Equipo**, agregarlo como un "mini-partido" del equipo (todos sus cierres sumados) **más** un desglose por partido, y filtrar los cierres por **margen ≤ 15 puntos al minuto 5:00** (solo partidos que estaban apretados al entrar al cierre). Ver **§10** para la especificación autoritativa de la v2; las secciones §1-§9 abajo describen el MVP v1 (superado en lo que §10 contradice, vigente en lo demás — ventana temporal, fórmulas, semántica null).
+
 ## 1. Objetivo
-En la sección Liga, agregar un apartado que analiza únicamente los últimos 5 minutos del partido (más prórrogas), para que el entrenador evalúe cómo juega un equipo en situaciones de cierre — con columnas pensadas para ese contexto, no para el partido completo.
+**(v2 — ver §10)** En la vista **Equipo**, mostrar el rendimiento del equipo seleccionado únicamente en los cierres de partido apretados (últimos 5 minutos con diferencia ≤ 15 al entrar), agregado como un "mini-partido" acumulado más un desglose por partido, para que el entrenador evalúe cómo ejecuta su equipo los finales cerrados.
+
+**(v1 — superado)** En la sección Liga, agregar un apartado que analiza únicamente los últimos 5 minutos del partido (más prórrogas), para que el entrenador evalúe cómo juega un equipo en situaciones de cierre — con columnas pensadas para ese contexto, no para el partido completo.
 
 ## 2. Fuentes (trazabilidad)
 - Feature 02 `spec.md` — `pbp_events` con `period`, `period_type` (`REGULAR`/`OT`), `clock_secs` (segundos restantes en el período), `s1`/`s2` (marcador corrido), `action_type`, `sub_type`, `success`, `team_code`, `player_name`.
@@ -69,3 +73,54 @@ Indicadores pedidos por el usuario fuera del MVP:
 - [RESUELTA] "Offensive Rating / Defensive Rating" vs OER/DER → **Decisión:** son OER/DER de `docs/metrics.md` aplicados al subconjunto clutch (mismo criterio que Feature 03 §9). No se inventa fórmula.
 - [RESUELTA] Faltas recibidas/cometidas en clutch → **Decisión:** se cuentan desde `pbp_events` (`foulon` = recibida por el jugador/equipo, `foul` = cometida), no desde el box score `pf`/`opp_pf` (que es del partido completo). Consistente con el resto de agregados clutch.
 - [RESUELTA] Nulo vs cero en el cierre → **Decisión:** las tasas clutch (Off/Def Rating, eFG%, TS%) valen `null` (no 0) si en la ventana clutch el denominador es 0 (ej. un cierre sin ningún tiro de campo del equipo), con la semántica de la **Feature 08** (`spec.md`). La UI muestra `"—"` en esas celdas.
+
+---
+
+## 10. REVISIÓN v2 — cierre por equipo, agregado + margen (autoritativa)
+
+Feedback del cliente (2026-07-08): *"mover la tabla de liga a equipo y ver las estadísticas del equipo faltando 5 minutos y ±15, en vez de por partido, por el mini partido de últimos 5 minutos y diferencia de menos de 15 pts"*. Decisiones confirmadas por el cliente vía preguntas: **filtro ±15 por ventana** y **vista agregado + desglose por partido**.
+
+### 10.1 Ventana clutch calificada
+- La **ventana temporal** no cambia respecto de v1 (RF-1): último período REGULAR con `clock_secs ≤ 300` + todos los eventos `OT`.
+- **NUEVO — calificación por margen (por ventana):** un partido entra al análisis clutch del equipo **solo si** al minuto **5:00** del último período REGULAR (al abrir la ventana) la diferencia absoluta de marcador era **≤ 15 puntos**. La diferencia se toma del `s1`/`s2` corrido del último evento con `clock_secs > 300` del período REGULAR final (marcador al entrar al cierre); si no hay evento previo, se asume 0-0 (califica). Si el partido **no** califica (paliza), **no aporta** nada al clutch del equipo y se cuenta en `games_excluded`.
+- Si el partido llegó a `OT`, califica por definición (estaba empatado al final del 4º) — la calificación se evalúa al 5:00 del REGULAR final igual que el resto.
+- Umbral inclusivo: `abs(margen) <= 15`.
+
+### 10.2 Agregación por equipo ("mini-partido")
+- Para el equipo seleccionado, se **suman** las stats crudas de TODOS sus cierres calificados (todos los partidos) en un único box de equipo + un box de rival → se calculan las mismas métricas de v1 (RF-3) sobre esa suma: `point_diff`, `off_rating` (OER), `def_rating` (DER), `efg_pct`, `ts_pct`, y **conteos crudos** (pts a favor/contra, REB, AST, TOV, STL, BLK, faltas cometidas/recibidas), `possessions`.
+- **NUEVO — récord de cierres:** por cada partido calificado, si el equipo superó al rival en su ventana (`pts > opp_pts`) cuenta como cierre ganado; se reporta `clutch_record` (`ganados-perdidos-empatados`).
+
+### 10.3 Desglose por partido
+- Además del agregado, se devuelve **una fila por partido calificado** del equipo, con las mismas columnas de v1 (fecha, rival, L/V, dif, pts, off/def, eFG%, TS%, TOV, AST, REB, FR, FC, líderes) — pero **solo del equipo seleccionado** (no ambos equipos) y **solo partidos calificados**. Se incluye `entry_margin` (diferencia al 5:00) por transparencia.
+
+### 10.4 API (reemplaza a v1)
+- **NUEVO** `GET /api/clutch/<team_code>` (reemplaza `GET /api/clutch` con `?team=`). `?margin=<n>` opcional (default 15). Shape:
+  ```
+  { "team_code", "team_name", "margin": 15,
+    "games_qualified": int, "games_excluded": int,
+    "clutch_record": "G-P-E",
+    "aggregate": { "pts_for","pts_against","point_diff","off_rating","def_rating",
+                   "efg_pct","ts_pct","possessions",
+                   "reb","ast","tov","stl","blk","fouls_committed","fouls_drawn" },
+    "per_game": [ { "game_id","date","opponent_code","home_away","entry_margin",
+                    "pts","opp_pts","point_diff","off_rating","def_rating","efg_pct","ts_pct",
+                    "tov","ast","reb","fouls_committed","fouls_drawn",
+                    "top_finisher","top_creator" } ] }
+  ```
+  - `404` si el equipo no existe o no tiene pbp. `aggregate` con conteos 0 y tasas `null` si `games_qualified == 0`.
+
+### 10.5 UI (reemplaza §6)
+- Se **quita** el apartado Cierres de la vista Liga (`_renderClutch`/`league-clutch` fuera de `renderLeague`).
+- Se **agrega** a la vista Equipo (`#sec-team`), como una card "Cierres (últimos 5 min, dif ≤ 15)": arriba una **tarjeta agregada** (mini-partido: dif, off/def, eFG%, TS%, conteos, récord de cierres, N partidos calificados/excluidos); abajo la **tabla por partido** (ordenable), scopeada al equipo seleccionado. Se refresca al cambiar de equipo (junto con `team-shotmap`/`team-onoff`/`team-lineup`).
+
+### 10.6 CA v2 (reemplazan/añaden a §7)
+- CA-v2-1: `GET /api/clutch/<team>` → `aggregate.point_diff == pts_for − pts_against` (suma de cierres calificados).
+- CA-v2-2: Un partido con margen > 15 al 5:00 **no** aparece en `per_game` y suma 1 a `games_excluded`.
+- CA-v2-3: Un partido con margen ≤ 15 al 5:00 aparece en `per_game` y sus crudos suman en `aggregate` (verificable: `aggregate.reb == Σ per_game[].reb`).
+- CA-v2-4: `clutch_record` = conteo de partidos calificados con `pts > opp_pts` / `<` / `==`.
+- CA-v2-5: La vista Equipo muestra la tarjeta agregada + la tabla por partido del equipo seleccionado, sin errores de consola; la Liga ya **no** muestra Cierres.
+- CA-v2-6 (hereda CA-4 v1): un partido con OT califica y todos sus eventos OT entran en la ventana.
+
+### 10.7 Backlog v2 (además de §8)
+- Umbral de margen configurable desde la UI (hoy fijo 15, `?margin=` en API).
+- Récord de cierres ponderado por diferencia / "clutch net rating" league-wide para comparar equipos (perdimos la comparación cross-equipo al mover a Equipo; se puede reponer como ranking en Liga en otra iteración).

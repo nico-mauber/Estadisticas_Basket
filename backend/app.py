@@ -8,7 +8,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from database import db, init_db, upgrade_db, Game, TeamGameStats, PlayerGameStats, Shot, PbpEvent, DB_PATH
 from stats_engine import calc_team_stats, calc_player_stats, league_averages, _parse_minutes
 from fiba_fetcher import fetch_game_data
-from clutch import clutch_rows
+from clutch import team_clutch
 import lineups
 from auth import (
     login_required, auth_enabled, verify,
@@ -789,41 +789,7 @@ def game_pbp(game_id: str):
     })
 
 
-# ── Clutch (últimos 5 min) ───────────────────────────────────────────────────
-
-@app.route("/api/clutch")
-@login_required
-def clutch_overview():
-    """Cierres de partido: una fila por equipo-partido (Feature 05).
-
-    Filtro opcional ?team=<code>. `[]` si ningún partido tiene pbp.
-    """
-    events_by_game = {}
-    for ev in PbpEvent.query.all():
-        events_by_game.setdefault(ev.game_id, []).append(_to_dict(ev))
-
-    game_info = {
-        g.game_id: {
-            "date":      g.date,
-            "home_code": g.home_code,
-            "away_code": g.away_code,
-            "home_team": g.home_team,
-            "away_team": g.away_team,
-        }
-        for g in Game.query.all()
-    }
-
-    rows = clutch_rows(events_by_game, game_info)
-
-    team = request.args.get("team")
-    if team:
-        rows = [r for r in rows if r["team_code"] == team.upper()]
-
-    rows.sort(key=lambda r: (r.get("date") or "", r["game_id"]), reverse=True)
-    return jsonify(rows)
-
-
-# ── Lineups / ON-OFF (motor de quintetos) ────────────────────────────────────
+# ── Lineups / ON-OFF / Clutch (motor de quintetos + cierres) ─────────────────
 
 def _team_pbp_games(team_code: str) -> list[dict]:
     """Partidos del equipo con pbp: [{game_id, events, player_rows, opp_code}, ...].
@@ -852,6 +818,7 @@ def _team_pbp_games(team_code: str) -> list[dict]:
             "events":      events,
             "player_rows": PlayerGameStats.query.filter_by(game_id=gid).all(),
             "opp_code":    opp_code,
+            "info":        {"date": g.date, "home_away": "L" if g.home_code == team_code else "V"},
         })
     return games
 
@@ -901,6 +868,29 @@ def onoff_route(team_code: str, player_name: str):
     result["team_code"] = team_code
     result["player"] = player_name
     return jsonify(result)
+
+
+@app.route("/api/clutch/<team_code>")
+@login_required
+def clutch_team(team_code: str):
+    """Cierre del equipo: agregado ("mini-partido") + desglose por partido (Feature 05 v2).
+
+    Solo cuentan los cierres con diferencia ≤ margen (default 15) al minuto 5:00.
+    Ver sdd/specs/05-clutch/spec.md §10.
+    """
+    team_code = team_code.upper()
+    row = TeamGameStats.query.filter_by(team_code=team_code).first()
+    if not row:
+        return jsonify({"error": "Equipo no encontrado"}), 404
+
+    games = _team_pbp_games(team_code)
+    if not games:
+        return jsonify({"error": "Equipo sin play-by-play. Reimportá sus partidos."}), 404
+
+    margin = request.args.get("margin", type=int)
+    if margin is None or margin < 0:
+        margin = 15
+    return jsonify(team_clutch(games, team_code, row.team_name, margin))
 
 
 # ── League ─────────────────────────────────────────────────────────────────

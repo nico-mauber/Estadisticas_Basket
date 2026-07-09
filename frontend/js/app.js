@@ -536,23 +536,20 @@ async function renderLeague() {
       });
       document.getElementById("btn-reset-scatter").addEventListener("click", () => resetZoom("chart-scatter"));
     }
-
-    // Cierres (últimos 5 min) — Feature 05
-    sec.insertAdjacentHTML("beforeend", `<div id="league-clutch"></div>`);
-    _renderClutch();
+    // Cierres se movieron a la vista Equipo (Feature 05 v2).
   } catch (e) {
     sec.innerHTML = `<p class="empty below-avg">${e.message}</p>`;
   }
 }
 
-// ── Clutch (últimos 5 min) — apartado dentro de Liga ─────────────────────────
+// ── Clutch por equipo (últimos 5 min, dif ≤ 15) — dentro de Equipo (Feat 05 v2) ──
 let _clutchData = null;
 let _clutchSort = { key: "date", dir: -1 };
-let _clutchTeam = "";
 
 const CLUTCH_COLS = [
-  { key: "date", label: "Fecha", date: true }, { key: "team_code", label: "Equipo", txt: true },
+  { key: "date", label: "Fecha", date: true },
   { key: "opponent_code", label: "Rival", txt: true }, { key: "home_away", label: "L/V", txt: true },
+  { key: "entry_margin", label: "Δ@5:00", int: true },
   { key: "point_diff", label: "Dif", diff: true }, { key: "pts", label: "Pts", int: true },
   { key: "off_rating", label: "Off" }, { key: "def_rating", label: "Def" },
   { key: "efg_pct", label: "eFG%", pct: true }, { key: "ts_pct", label: "TS%", pct: true },
@@ -562,44 +559,53 @@ const CLUTCH_COLS = [
   { key: "top_finisher", label: "Finaliza", leader: "pts" }, { key: "top_creator", label: "Crea", leader: "ast" },
 ];
 
-async function _renderClutch() {
-  const box = document.getElementById("league-clutch");
+async function renderTeamClutch(teamCode) {
+  const box = document.getElementById("team-clutch");
   if (!box) return;
-  const title = '<div class="card-title">Cierres (últimos 5 min) <span style="color:var(--muted);font-size:10px;font-weight:400;margin-left:8px">Click en columna para ordenar</span></div>';
-  box.innerHTML = `<div class="card">${title}<p class="empty"><span class="spinner"></span>Cargando cierres...</p></div>`;
+  const title = '<div class="card-title">Cierres (últimos 5 min, dif ≤ 15)</div>';
+  box.innerHTML = `<div class="card">${title}<p class="empty"><span class="spinner"></span>Calculando cierres...</p></div>`;
   try {
-    if (!_clutchData) _clutchData = await api.clutch();
+    _clutchData = await api.clutchTeam(teamCode);
   } catch (e) {
-    box.innerHTML = `<div class="card">${title}<p class="empty below-avg">No se pudieron cargar los cierres</p></div>`;
+    box.innerHTML = `<div class="card">${title}<p class="empty below-avg">${e.message || "No se pudieron cargar los cierres"}</p></div>`;
     return;
   }
-  if (!_clutchData.length) {
-    box.innerHTML = `<div class="card">${title}<p class="empty">Sin datos de cierre. Reimportá partidos para traer el play-by-play.</p></div>`;
+  const d = _clutchData;
+  if (!d.games_qualified) {
+    box.innerHTML = `<div class="card">${title}<p class="empty">Sin cierres apretados: los ${d.games_excluded} partido(s) con play-by-play se definieron por más de ${d.margin} al minuto 5:00.</p></div>`;
     return;
   }
-  const teams = [...new Set(_clutchData.map(r => r.team_code))].sort();
+  const a = d.aggregate;
   box.innerHTML = `
     <div class="card">
-      <div class="map-header">
-        <div class="card-title" style="margin:0">Cierres (últimos 5 min) <span style="color:var(--muted);font-size:10px;font-weight:400;margin-left:8px">Click en columna para ordenar</span></div>
-        <select id="clutch-team" class="map-select">
-          <option value="">Todos los equipos</option>
-          ${teams.map(t => `<option value="${t}" ${t === _clutchTeam ? "selected" : ""}>${t}</option>`).join("")}
-        </select>
+      ${title}
+      <p class="td-muted">Agregado del equipo en cierres apretados — récord <strong>${d.clutch_record}</strong> · ${d.games_qualified} calificado(s)${d.games_excluded ? ` · ${d.games_excluded} excluido(s) por paliza` : ""}</p>
+      <div class="stat-grid">
+        ${statBox("Dif", a.point_diff, (a.point_diff > 0 ? "+" : "") + a.point_diff, null, null)}
+        ${statBox("Off", a.off_rating, DEC2(a.off_rating), null, null)}
+        ${statBox("Def", a.def_rating, DEC2(a.def_rating), null, null, false)}
+        ${statBox("eFG%", a.efg_pct, PCT(a.efg_pct), null, null)}
+        ${statBox("TS%", a.ts_pct, PCT(a.ts_pct), null, null)}
       </div>
+      <div class="stat-grid" style="margin-top:8px">
+        <div class="stat-box"><div class="stat-label">Pts F / C</div><div class="stat-value neutral">${a.pts_for} / ${a.pts_against}</div></div>
+        <div class="stat-box"><div class="stat-label">REB</div><div class="stat-value neutral">${a.reb}</div></div>
+        <div class="stat-box"><div class="stat-label">AST</div><div class="stat-value neutral">${a.ast}</div></div>
+        <div class="stat-box"><div class="stat-label">TOV</div><div class="stat-value neutral">${a.tov}</div></div>
+        <div class="stat-box"><div class="stat-label">Robos / Tapones</div><div class="stat-value neutral">${a.stl} / ${a.blk}</div></div>
+      </div>
+      <div class="card-title" style="margin-top:16px">Por partido <span style="color:var(--muted);font-size:10px;font-weight:400;margin-left:8px">Click en columna para ordenar</span></div>
       <div class="table-wrap"><table id="clutch-table" class="search-table"></table></div>
     </div>`;
   _drawClutchTable();
-  document.getElementById("clutch-team").addEventListener("change", e => { _clutchTeam = e.target.value; _drawClutchTable(); });
 }
 
 function _drawClutchTable() {
   const t = document.getElementById("clutch-table");
-  if (!t) return;
-  const rows = _clutchData.filter(r => !_clutchTeam || r.team_code === _clutchTeam);
+  if (!t || !_clutchData) return;
   const k = _clutchSort.key;
   const _val = v => (v && typeof v === "object") ? (v.pts ?? v.ast ?? 0) : v;
-  const sorted = [...rows].sort((a, b) => {
+  const sorted = [..._clutchData.per_game].sort((a, b) => {
     let av = _val(a[k]), bv = _val(b[k]);
     if (typeof av === "string" || typeof bv === "string")
       return _clutchSort.dir * String(av ?? "").localeCompare(String(bv ?? ""));
@@ -623,7 +629,7 @@ function _drawClutchTable() {
   t.querySelectorAll("th").forEach(th => th.addEventListener("click", () => {
     const key = th.dataset.key;
     if (_clutchSort.key === key) _clutchSort.dir *= -1;
-    else _clutchSort = { key, dir: ["date","team_code","opponent_code","home_away","top_finisher","top_creator"].includes(key) ? 1 : -1 };
+    else _clutchSort = { key, dir: ["date","opponent_code","home_away","top_finisher","top_creator"].includes(key) ? 1 : -1 };
     _drawClutchTable();
   }));
 }
@@ -823,6 +829,8 @@ async function renderTeam(teamCode) {
     } else {
       lineupCard.style.display = "none";
     }
+
+    renderTeamClutch(teamCode);   // cierres del equipo (Feature 05 v2)
   } catch (e) {
     main.innerHTML = `<p class="empty below-avg">${e.message}</p>`;
   }
@@ -854,6 +862,7 @@ async function renderTeamOnOff(teamCode, playerName) {
   box.innerHTML = '<div class="card"><p class="empty"><span class="spinner"></span>Calculando ON/OFF...</p></div>';
   try {
     const r = await api.onoff(teamCode, playerName);
+    // Fila de tasas: Δ viene del backend (comparable ON vs OFF)
     const row = (label, key, lowerBetter = false, fmt = DEC2) => {
       const on = r.on[key], off = r.off[key], d = r.diff[key];
       const cls = d == null ? "neutral" : (lowerBetter ? d <= 0 : d >= 0) ? "above-avg" : "below-avg";
@@ -862,6 +871,18 @@ async function renderTeamOnOff(teamCode, playerName) {
         <td class="lbl">${label}</td>
         <td>${off != null ? fmt(off) : "—"}</td>
         <td class="${cls}">${d != null ? (d >= 0 ? "+" : "") + fmt(d) : "—"}</td>
+      </tr>`;
+    };
+    // Fila de conteos crudos: Δ = ON − OFF calculado acá (escala con minutos, no comparable directo)
+    const rawRow = (label, key, lowerBetter = false) => {
+      const on = r.on[key], off = r.off[key];
+      const d = (on != null && off != null) ? on - off : null;
+      const cls = d == null ? "neutral" : (lowerBetter ? d <= 0 : d >= 0) ? "above-avg" : "below-avg";
+      return `<tr>
+        <td>${on != null ? on : "—"}</td>
+        <td class="lbl">${label}</td>
+        <td>${off != null ? off : "—"}</td>
+        <td class="${cls}">${d != null ? (d >= 0 ? "+" : "") + d : "—"}</td>
       </tr>`;
     };
     const sample = (side, data) => data.possessions
@@ -873,7 +894,7 @@ async function renderTeamOnOff(teamCode, playerName) {
         <div class="card-title">ON / OFF <span style="color:var(--muted2);font-weight:400;text-transform:none;letter-spacing:0">— ${playerName} · Uso ${r.usg_pct != null ? PCT(r.usg_pct) : "—"}</span></div>
         <div class="table-wrap">
           <table class="onoff-table">
-            <thead><tr><th>ON</th><th></th><th>OFF</th><th>Δ</th></tr></thead>
+            <thead><tr><th>ON</th><th>Eficiencia</th><th>OFF</th><th>Δ</th></tr></thead>
             <tbody>
               ${row("OER", "oer")}
               ${row("DER", "der", true)}
@@ -883,7 +904,21 @@ async function renderTeamOnOff(teamCode, playerName) {
             </tbody>
           </table>
         </div>
-        <p class="td-muted" style="margin-top:8px">${sample("ON", r.on)} &nbsp;|&nbsp; ${sample("OFF", r.off)}</p>
+        <div class="table-wrap" style="margin-top:12px">
+          <table class="onoff-table">
+            <thead><tr><th>ON</th><th>Producción del equipo</th><th>OFF</th><th>Δ</th></tr></thead>
+            <tbody>
+              ${rawRow("Pts a favor", "pts_for")}
+              ${rawRow("Pts en contra", "pts_against", true)}
+              ${rawRow("REB", "reb")}
+              ${rawRow("AST", "ast")}
+              ${rawRow("Pérdidas", "tov", true)}
+              ${rawRow("Robos", "stl")}
+              ${rawRow("Tapones", "blk")}
+            </tbody>
+          </table>
+        </div>
+        <p class="td-muted" style="margin-top:8px">${sample("ON", r.on)} &nbsp;|&nbsp; ${sample("OFF", r.off)}<br><span style="font-size:11px">Los conteos crudos escalan con los minutos de cada tramo; las tasas de arriba son comparables directas.</span></p>
       </div>`;
     box.scrollIntoView({ behavior: "smooth", block: "nearest" });
   } catch (e) {
@@ -1485,6 +1520,7 @@ function renderApp() {
         </div>
         <div id="team-lineup"></div>
         <div id="team-main"></div>
+        <div id="team-clutch"></div>
         <div id="usage-ranking"></div>
       </div>
 
@@ -1527,8 +1563,8 @@ function renderApp() {
   // Team selector
   const teamSel = document.getElementById("team-select");
   teamSel.addEventListener("change", () => {
-    // limpiar apartados del equipo anterior (mapa de tiro, ON/OFF, lineup)
-    ["team-shotmap", "team-onoff", "team-lineup"].forEach(id => {
+    // limpiar apartados del equipo anterior (mapa de tiro, ON/OFF, lineup, cierres)
+    ["team-shotmap", "team-onoff", "team-lineup", "team-clutch"].forEach(id => {
       const box = document.getElementById(id);
       if (box) box.innerHTML = "";
     });

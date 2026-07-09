@@ -300,34 +300,45 @@ Todos los jugadores de la base con sus promedios, para el buscador avanzado (una
 
 ---
 
-## GET `/api/clutch`
+## GET `/api/clutch/<team_code>`
 
-Cierres de partido: rendimiento en los **últimos 5 minutos** (último período REGULAR con reloj ≤ 5:00 + prórrogas completas). Una fila por equipo-partido (Feature 05). Filtro opcional `?team=<code>`.
+Cierres del equipo (Feature 05 **v2**): rendimiento en los **últimos 5 minutos** (último período REGULAR con reloj ≤ 5:00 + prórrogas) **de partidos apretados** — solo cuentan los partidos con diferencia ≤ `margin` (default 15) al minuto 5:00. Devuelve un **agregado** ("mini-partido" del equipo, todos sus cierres sumados) **más un desglose por partido**. Filtro `?margin=<n>` opcional. Ver `sdd/specs/05-clutch/spec.md §10`.
+
+> Reemplaza al antiguo `GET /api/clutch?team=` (una fila por equipo-partido, en la vista Liga). El análisis se movió a la vista **Equipo**.
 
 **Response:**
 ```json
-[
-  {
-    "game_id": "2820500", "date": "2026-04-28",
-    "team_code": "AGU", "team_name": "Aguada",
-    "opponent_code": "DSC", "home_away": "V",
-    "pts": 11, "opp_pts": 1, "point_diff": 10,
-    "off_rating": 1.375, "def_rating": 0.127,
-    "efg_pct": 0.7857, "ts_pct": 0.7857,
-    "tov": 1, "ast": 2, "reb": 6,
-    "fouls_committed": 1, "fouls_drawn": 2,
-    "possessions": 8.0,
-    "top_finisher": { "name": "E. Clark", "pts": 6 },
-    "top_creator":  { "name": "J. Osimani", "ast": 1 }
-  }
-]
+{
+  "team_code": "HYM", "team_name": "Hebraica Macabi", "margin": 15,
+  "games_qualified": 2, "games_excluded": 0,
+  "clutch_record": "1-1-0",
+  "aggregate": {
+    "pts_for": 21, "pts_against": 18, "point_diff": 3,
+    "off_rating": 0.9227, "def_rating": 0.8364,
+    "efg_pct": 0.4348, "ts_pct": 0.4241, "possessions": 22.76,
+    "reb": 13, "ast": 6, "tov": 3, "stl": 2, "blk": 2,
+    "fouls_committed": 7, "fouls_drawn": 5
+  },
+  "per_game": [
+    {
+      "game_id": "2820499", "date": "2026-04-28",
+      "opponent_code": "CNF", "home_away": "V", "entry_margin": 6,
+      "pts": 16, "opp_pts": 12, "point_diff": 4,
+      "off_rating": 1.16, "def_rating": 0.96, "efg_pct": 0.577, "ts_pct": 0.542,
+      "possessions": 13.8, "tov": 1, "ast": 5, "reb": 6,
+      "fouls_committed": 6, "fouls_drawn": 4,
+      "top_finisher": { "name": "C. Mitchell", "pts": 5 },
+      "top_creator":  { "name": "J. Canty", "ast": 1 }
+    }
+  ]
+}
 ```
 
-- `off_rating`/`def_rating` = OER/DER (docs/metrics.md) sobre las posesiones del cierre; `null` si 0 posesiones.
-- `point_diff` = `pts − opp_pts` en la ventana clutch.
-- `top_finisher`/`top_creator` = jugador con más puntos / asistencias **dentro del cierre** (`null` si no hubo).
+- **Calificación por ventana:** un partido entra solo si al minuto 5:00 (último evento con `clock_secs > 300` del REGULAR final) la diferencia absoluta era ≤ `margin`. Si no, suma a `games_excluded` (paliza) y no aporta al agregado. `entry_margin` = esa diferencia por partido.
+- `aggregate` = suma de las stats crudas de todos los cierres calificados; tasas recalculadas sobre la suma (`null` si 0 posesiones). `aggregate.point_diff == pts_for − pts_against`.
+- `clutch_record` = `ganados-perdidos-empatados` de los cierres calificados (`pts > / < / == opp_pts`).
 - Faltas desde `pbp_events`: `fouls_committed` (`foul`), `fouls_drawn` (`foulon`).
-- `[]` si ningún partido tiene play-by-play (ver [Feature 02](database.md#pbp_events)).
+- **Errores:** `404` — equipo inexistente o sin play-by-play. Con `games_qualified == 0`, `aggregate` trae conteos 0 y tasas `null`.
 
 ---
 
@@ -368,14 +379,15 @@ Rendimiento del equipo con el jugador en cancha (**ON**) vs. en el banco (**OFF*
 {
   "team_code": "CNF", "player": "E. Oglivie", "usg_pct": 0.0947,
   "games_used": 2, "games_excluded": 0,
-  "on":  { "possessions": 87.0, "seconds": 2682.0, "pts_for": 103, "pts_against": 63, "oer": 1.1839, "der": 0.7475, "net_rating": 0.4364, "efg_pct": 0.5513, "ts_pct": 0.5787 },
-  "off": { "possessions": 77.0, "seconds": 2201.0, "pts_for": 104, "pts_against": 91, "oer": 1.3506, "der": 1.1837, "net_rating": 0.1669, "efg_pct": 0.6692, "ts_pct": 0.6842 },
+  "on":  { "possessions": 87.0, "seconds": 2682.0, "pts_for": 103, "pts_against": 63, "reb": 53, "orb": 15, "drb": 38, "ast": 13, "tov": 11, "stl": 8, "blk": 3, "oer": 1.1839, "der": 0.7475, "net_rating": 0.4364, "efg_pct": 0.5513, "ts_pct": 0.5787 },
+  "off": { "possessions": 77.0, "seconds": 2201.0, "pts_for": 104, "pts_against": 91, "reb": 36, "orb": 10, "drb": 26, "ast": 18, "tov": 9, "stl": 5, "blk": 1, "oer": 1.3506, "der": 1.1837, "net_rating": 0.1669, "efg_pct": 0.6692, "ts_pct": 0.6842 },
   "diff": { "oer": -0.1667, "der": -0.4362, "net_rating": 0.2695, "efg_pct": -0.1179, "ts_pct": -0.1055 }
 }
 ```
 
 - `usg_pct` — USO% promedio del jugador (`calc_player_stats`, mismo cálculo que `/api/search/players`).
-- `diff = ON − OFF`; `null` si cualquiera de los dos lados no tiene dato (denominador 0, ver CA-2 en `sdd/specs/04-on-off/spec.md`).
+- **Conteos crudos del equipo (RF-8):** `pts_for`, `pts_against`, `reb`/`orb`/`drb`, `ast`, `tov`, `stl`, `blk` en cada conjunto ON/OFF. Escalan con los minutos del conjunto (ON suele tener más posesiones), así que su Δ no es comparable directo — las tasas sí lo son. El frontend calcula el Δ de conteos como `ON − OFF`.
+- `diff = ON − OFF` (solo tasas); `null` si cualquiera de los dos lados no tiene dato (denominador 0, ver CA-2 en `sdd/specs/04-on-off/spec.md`).
 - Si ON u OFF tienen `possessions: 0` (jugador jugó 0 o el 100% de los minutos), sus métricas de tasa son `null` (no `NaN`/`Infinity`).
 
 **Errores:** `404` — `{"error": "Sin datos ON/OFF para este jugador"}` (jugador o equipo sin datos) / `{"error": "Equipo no encontrado o sin play-by-play"}`.

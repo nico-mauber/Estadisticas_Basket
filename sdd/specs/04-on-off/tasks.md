@@ -5,6 +5,8 @@
 ### Grupo A — Backend: agregación ON/OFF (reusa motor de Feature 03)
 - [x] T-A1 · `_side_metrics()` (agrega un lado: posesiones/pts_for/pts_against/oer/der/net/eFG%/TS%) · `backend/lineups.py` · cubre RF-2, RF-3, RF-5
 - [x] T-A2 · `onoff_stats()` (partición ON/OFF por partido vía `build_segments`, diff null-safe) · `backend/lineups.py` · cubre RF-1..RF-5
+- [x] T-A3 · **(v2)** conteos crudos del equipo en `_side_metrics` (`reb/orb/drb/ast/tov/stl/blk`) · `backend/lineups.py` · cubre RF-8
+- [x] T-A4 · **(v2)** endurecer `build_segments` (fusión de cambios simultáneos, sin quintetos parciales) · `backend/lineups.py` · robustez motor (compartido Feat 03)
 
 ### Grupo B — Backend: ruta
 - [x] T-B1 · `GET /api/onoff/<team_code>/<player_name>` (404 si sin datos, `usg_pct` vía `calc_player_stats`) · `backend/app.py` · cubre RF-6, RF-7
@@ -12,7 +14,8 @@
 ### Grupo C — Frontend
 - [x] T-C1 · `api.onoff(team, player)` · `frontend/js/api.js`
 - [x] T-C2 · Panel ON/OFF en vista Equipo (tabla `ON|OFF|Δ` + muestra + "sin muestra") · `frontend/js/app.js`
-- [x] T-C3 · Bump `sw.js` cache version
+- [x] T-C3 · **(v2)** segunda tabla "Producción del equipo" (conteos crudos, Δ = ON−OFF) · `frontend/js/app.js` · RF-8
+- [x] T-C4 · Bump `sw.js` cache version (`v8`)
 
 ### Grupo F — Verificación de feature
 - [x] T-F1 · Backend arranca sin traceback

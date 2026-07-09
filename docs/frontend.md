@@ -28,8 +28,8 @@ La navegación es por `#hash` o botones de tab. No hay routing del servidor.
 | Vista | ID sección | Descripción |
 |-------|-----------|-------------|
 | **Importar** | `#import` | Input URL FIBA LiveStats + botón importar; botón "Agregar partidos" (seed) solo si `seed_enabled` (dev) |
-| **Liga** | `#league` | Tabla ranking de equipos (columnas ordenables) + mapa de dispersión con ejes X/Y seleccionables (`LEAGUE_MAPS`) + apartado **Cierres (últimos 5 min)**: tabla tipo game log del cierre, una fila por equipo-partido, ordenable, filtrable por equipo (`_renderClutch`, `api.clutch`) |
-| **Equipo** | `#team` | Record, Four Factors, métricas avanzadas, desglose ofensivo, shot chart (si hay datos), game log. Botón **"Ver mapa de tiro"**: shot chart por zonas del jugador seleccionado dentro de Equipo (`#team-shotmap`). Botón **"Ver ON/OFF"**: tabla `ON \| OFF \| Δ` del jugador seleccionado (`#team-onoff`, `_renderTeamOnOff`, Feature 04). Apartado **"Combinaciones (Lineups)"**: multi-select de 3-5 jugadores del equipo + botón "Analizar combinación" → tarjeta de métricas y líderes (`#team-lineup-picker`/`#team-lineup`, `renderTeamLineup`, Feature 03) |
+| **Liga** | `#league` | Tabla ranking de equipos (columnas ordenables) + mapa de dispersión con ejes X/Y seleccionables (`LEAGUE_MAPS`). *(Los Cierres se movieron a la vista Equipo — Feature 05 v2.)* |
+| **Equipo** | `#team` | Record, Four Factors, métricas avanzadas, desglose ofensivo, shot chart (si hay datos), game log. Botón **"Ver mapa de tiro"**: shot chart por zonas del jugador seleccionado dentro de Equipo (`#team-shotmap`). Botón **"Ver ON/OFF"**: dos tablas `ON \| OFF \| Δ` del jugador — **Eficiencia** (tasas, Δ del backend) y **Producción del equipo** (conteos crudos: pts a favor/contra, REB, AST, pérdidas, robos, tapones; Δ = ON−OFF) (`#team-onoff`, `renderTeamOnOff`, Feature 04). Apartado **"Combinaciones (Lineups)"**: multi-select de 3-5 jugadores + botón "Analizar combinación" → tarjeta de métricas y líderes (`#team-lineup-picker`/`#team-lineup`, `renderTeamLineup`, Feature 03). Apartado **"Cierres (últimos 5 min, dif ≤ 15)"**: tarjeta agregada del equipo ("mini-partido" de sus cierres apretados, con récord) + tabla por partido ordenable (`#team-clutch`, `renderTeamClutch`, Feature 05 v2) |
 | **Jugador** | `#player` | Métricas individuales, shot chart (11 zonas o 3 zonas según disponibilidad de coordenadas), game log |
 | **Comparar** | `#compare` | Radar de tres polígonos (equipo A, equipo B, promedio liga) + box score FIBA |
 | **Buscar** | `#search` | Buscador avanzado de jugadores: filtros combinables (nombre, equipo, competencia, posición, rangos mín/máx de métricas) sobre todos los jugadores de la base; tabla ordenable; fila → vista Jugador |
@@ -50,7 +50,7 @@ api.importGame(url)         // POST   /api/import
 api.team(code)              // GET    /api/team/<code>
 api.players(code) / api.player(code, name) / api.playerShots(code, name)
 api.searchPlayers()         // GET /api/search/players (buscador avanzado)
-api.clutch(team?)           // GET /api/clutch (cierres; ?team opcional)
+api.clutchTeam(team)        // GET /api/clutch/<team> (cierres del equipo: agregado + por partido)
 api.lineup(team, players[]) // GET /api/lineup/<team>?players=A|B|C (combinaciones 3-5)
 api.onoff(team, player)     // GET /api/onoff/<team>/<player>
 api.league() / api.teams() / api.games()
@@ -112,7 +112,7 @@ El mismo mapa se muestra en dos lugares: en la vista **Jugador** (`renderPlayer`
 
 ## Service Worker (`sw.js`)
 
-Cache name: `smart-basket-v7`
+Cache name: `smart-basket-v8`
 
 **Estrategia:**
 - `install`: pre-cachea los archivos estáticos listados en `STATIC[]`
