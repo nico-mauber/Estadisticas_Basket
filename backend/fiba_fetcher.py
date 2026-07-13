@@ -307,10 +307,10 @@ def _parse_fiba_json(raw: dict, source_url: str = "") -> dict:
             "blk":  ti(["Blocks"]),
             "pf":   ti(["FoulsPersonal"]),
             "paint_pts":         ti(["PointsInThePaint", "PaintPoints"]),
-            "second_chance_pts": ti(["SecondChancePoints"]),
+            "second_chance_pts": ti(["PointsSecondChance", "SecondChancePoints"]),
             "pts_from_tov":      ti(["PointsFromTurnovers"]),
             "bench_pts":         ti(["BenchPoints"]),
-            "fast_break_pts":    ti(["FastBreakPoints"]),
+            "fast_break_pts":    ti(["PointsFastBreak", "FastBreakPoints"]),
         }
         team_row["fgm"] = team_row["fgm2"] + team_row["fgm3"]
         team_row["fga"] = team_row["fga2"] + team_row["fga3"]

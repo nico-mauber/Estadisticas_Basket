@@ -39,6 +39,12 @@ Feedback del cliente: ver la producción cruda del equipo con el jugador ON vs O
 - Verificación: partición exhaustiva de conteos (`on[k] + off[k] == total del equipo`) OK en los 6 equipos para `pts/reb/ast/tov/stl/blk`; navegador (HYM/J. Canty) muestra ambas tablas, consola limpia.
 - El motor de segmentos se endureció (fusión de cambios simultáneos) — ver [[03-lineups]] progress; números ON/OFF idénticos.
 
+## Revisión v3 (2026-07-13) — minutos exactos + etiqueta
+Feedback del cliente ("revisar minutos"). Los minutos ON/OFF (tiempo de juego del equipo con el jugador en cancha/banca) estaban inflados ~3.5% por un bug: los eventos vienen por `action_number`, no por reloj, así que el reloj salta hacia arriba dentro de un período y el guard `if delta > 0` re-contaba ese tramo.
+- [x] Fix en `build_segments` (`lineups.py`): acumulador con piso monótono por período + volcado de la cola de cada período → suma de segundos = PERIOD_LEN exacto (600 regular / 300 OT). Verificado: cada partido = 2400s, ON+OFF = 4800 para 2 partidos (antes 4883); E. Oglivie ON=44.9min ≈ box score 44.2.
+- [x] Etiqueta UI: `N' en cancha` en `renderTeamOnOff` (`app.js`).
+- Beneficia también a Lineups ([[03-lineups]]) — mismo motor; números de eficiencia sin cambio (event-based).
+
 ## Deuda / TODO (spec §8)
 - ~~Conteos crudos ON vs OFF~~ → **hecho (RF-8, v2)**.
 - "Chaos" y "Offensive Dependency" — sin fórmula definida (spec §9), no implementados.

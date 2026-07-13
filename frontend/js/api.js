@@ -34,7 +34,8 @@ export const api = {
   clutchTeam:    team => apiFetch(`/api/clutch/${encodeURIComponent(team)}`),
   lineup:        (code, players) => apiFetch(`/api/lineup/${encodeURIComponent(code)}?players=${players.map(encodeURIComponent).join("|")}`),
   onoff:         (code, name) => apiFetch(`/api/onoff/${encodeURIComponent(code)}/${encodeURIComponent(name)}`),
-  league:        ()   => apiFetch("/api/league"),
+  league:        (comp) => apiFetch(`/api/league${comp ? `?competition=${encodeURIComponent(comp)}` : ""}`),
+  competitions:  ()   => apiFetch("/api/competitions"),
   deleteGames:   (ids) => apiFetch("/api/games", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ game_ids: ids }) }),
   seed:          ()   => apiFetch("/api/seed", { method: "POST" }),
 };

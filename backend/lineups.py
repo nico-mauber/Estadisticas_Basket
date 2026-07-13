@@ -84,23 +84,40 @@ def build_segments(events, team_code, starters):
     juego con un `on_court` distinto. Así, varios cambios simultáneos (mismo
     reloj) se fusionan en UN solo cambio de quinteto y nunca se generan quintetos
     parciales transitorios (4/3/2 jugadores) que mal-atribuyan eventos o segundos.
+
+    Segundos por tramo: los eventos vienen ordenados por `action_number`, no por
+    reloj, así que el reloj puede saltar hacia arriba dentro de un período (misma
+    jugada registrada fuera de orden). Se acumula tiempo solo cuando el reloj baja
+    de un nuevo mínimo del período (`period_floor`); los saltos hacia atrás no
+    suman ni se re-cuentan. Al cerrar cada período se vuelca su cola
+    (`period_floor`, del mínimo alcanzado hasta 0:00) al tramo abierto → la suma
+    de segundos de todos los tramos es EXACTA: PERIOD_LEN por período (600 regular
+    / 300 OT), y por lo tanto ON+OFF de un jugador = tiempo total de juego.
     """
     segments = []
     on_court = set(starters)
     cur_on = frozenset(on_court)
     bucket, seg_seconds = [], 0.0
-    last_period = last_clock = None
+    last_period = None
+    period_floor = None   # reloj mínimo (seg restantes) alcanzado en el período actual
 
     for ev in events:
-        period, clock, ptype = ev.get("period"), ev.get("clock_secs") or 0, ev.get("period_type")
-        if last_period is not None:
-            if period == last_period:
-                delta = last_clock - clock
-            else:
-                delta = last_clock + (PERIOD_LEN.get(ptype, 600) - clock)
-            if delta > 0:
-                seg_seconds += delta
-        last_period, last_clock = period, clock
+        period = ev.get("period")
+        clock  = ev.get("clock_secs") or 0
+        plen   = PERIOD_LEN.get(ev.get("period_type"), 600)
+
+        if period != last_period:
+            # volcar la cola del período anterior (de su mínimo hasta 0:00) al tramo abierto
+            if period_floor is not None:
+                seg_seconds += period_floor
+            period_floor = plen        # el período nuevo arranca con el reloj completo
+            last_period = period
+
+        # avanzar tiempo solo cuando el reloj llega a un nuevo mínimo del período;
+        # saltos hacia atrás (clock >= floor) no suman y nunca se re-cuentan
+        if clock < period_floor:
+            seg_seconds += period_floor - clock
+            period_floor = clock
 
         if ev.get("action_type") == "substitution" and ev.get("team_code") == team_code:
             player, sub = ev.get("player_name"), (ev.get("sub_type") or "").lower()
@@ -113,13 +130,15 @@ def build_segments(events, team_code, starters):
             new_on = frozenset(on_court)
             if new_on != cur_on and bucket:
                 # el quinteto cambió desde el último evento de juego; el tiempo
-                # acumulado (incluido el delta de este evento) transcurrió con el
-                # quinteto viejo → se cierra el tramo con él
+                # acumulado transcurrió con el quinteto viejo → se cierra con él
                 segments.append({"on_court": cur_on, "events": bucket, "seconds": seg_seconds})
                 bucket, seg_seconds = [], 0.0
             cur_on = new_on
             bucket.append(ev)
 
+    # volcar la cola del último período al tramo abierto
+    if period_floor is not None:
+        seg_seconds += period_floor
     segments.append({"on_court": cur_on, "events": bucket, "seconds": seg_seconds})
     return segments
 

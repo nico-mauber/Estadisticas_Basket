@@ -427,6 +427,7 @@ def team_stats(team_code: str):
         game_stats.append({
             "game_id":       row.game_id,
             "date":          game_info.date if game_info else "",
+            "competition":   game_info.competition if game_info else "",
             "opponent":      opp.team_name,
             "opponent_code": opp.team_code,
             "home_away":     "L" if row.is_home else "V",
@@ -577,6 +578,7 @@ def player_stats(team_code: str, player_name: str):
         game_log.append({
             "game_id":       row.game_id,
             "date":          game_info.date if game_info else "",
+            "competition":   game_info.competition if game_info else "",
             "opponent":      opp.team_name  if opp else "",
             "opponent_code": opp.team_code  if opp else "",
             **adv
@@ -895,15 +897,32 @@ def clutch_team(team_code: str):
 
 # ── League ─────────────────────────────────────────────────────────────────
 
+@app.route("/api/competitions")
+@login_required
+def competitions():
+    """Lista de competencias distintas (para los selects de filtro por competencia)."""
+    rows = db.session.query(Game.competition).distinct().all()
+    return jsonify(sorted({c for (c,) in rows if c}))
+
+
 @app.route("/api/league")
 @login_required
 def league_overview():
     codes    = db.session.query(TeamGameStats.team_code).distinct().all()
     all_rows = TeamGameStats.query.all()
 
+    # Filtro opcional por competencia: mantiene solo los partidos de esa competencia
+    # (evita mezclar competencias en el ranking y sus promedios).
+    comp = (request.args.get("competition") or "").strip()
+    if comp:
+        comp_gids = {g.game_id for g in Game.query.filter_by(competition=comp).all()}
+        all_rows = [r for r in all_rows if r.game_id in comp_gids]
+
     result = []
     for (code,) in codes:
         rows = [r for r in all_rows if r.team_code == code]
+        if not rows:
+            continue  # equipo sin partidos en la competencia filtrada
         name = rows[-1].team_name
 
         adv_list = []

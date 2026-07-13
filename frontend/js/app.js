@@ -53,6 +53,7 @@ function _computeAvg(gameLog) {
     "pace","pts","possessions","plays",
     "stocks","def_playmaking","def_to_ratio","physical_impact",
     "reb_share","oreb_share","dreb_share",
+    "uso_pct","ast_to",   // keys de jugador (ausentes en logs de equipo → null)
     "fgm","fga","fgm2","fga2","fgm3","fga3","ftm","fta",
     "orb","drb","trb","ast","tov","stl","blk","pf",
     "opp_pf","paint_pts","second_chance_pts","pts_from_tov","bench_pts","fast_break_pts",
@@ -67,6 +68,18 @@ function _computeAvg(gameLog) {
     ? Math.round((result.oer - result.der) * 10000) / 10000
     : null;
   return result;
+}
+
+// ── Filtro por competencia (compartido: Liga/Equipo/Comparar/Jugador) ────────
+function _logComps(gameLog) {
+  return [...new Set((gameLog || []).map(g => g.competition).filter(Boolean))].sort();
+}
+function _filterByComp(gameLog, comp) {
+  return comp ? (gameLog || []).filter(g => g.competition === comp) : gameLog;
+}
+function _compOptions(comps, selected = "") {
+  return `<option value="">Todas las competencias</option>` +
+    comps.map(c => `<option value="${c}"${c === selected ? " selected" : ""}>${c}</option>`).join("");
 }
 
 // ── Four Factors card ──────────────────────────────────────────────────────
@@ -155,6 +168,13 @@ async function refreshCompareSelectors() {
     const el = document.getElementById(id);
     if (el) el.innerHTML = opts;
   });
+  // Selector de competencia (solo si hay >1 competencia en la base)
+  const compSel = document.getElementById("compare-comp");
+  if (compSel) {
+    const comps = await api.competitions().catch(() => []);
+    compSel.style.display = comps.length > 1 ? "" : "none";
+    compSel.innerHTML = _compOptions(comps, compSel.value || "");
+  }
 }
 
 // ── Nav ────────────────────────────────────────────────────────────────────
@@ -375,6 +395,7 @@ let _leagueTeams    = [];
 let _leagueSortKey  = "oer";
 let _leagueSortDir  = -1; // -1 desc, 1 asc
 let _leagueMap      = "ef";
+let _leagueComp     = ""; // "" = todas las competencias
 
 // Scatter map presets — each defines the X/Y axes for el mapa de liga.
 const LEAGUE_MAPS = [
@@ -497,12 +518,19 @@ async function renderLeague() {
   const sec = document.getElementById("sec-league");
   sec.innerHTML = '<p class="empty"><span class="spinner"></span>Cargando...</p>';
   try {
-    _leagueTeams = await api.league();
+    const comps = await api.competitions().catch(() => []);
+    _leagueTeams = await api.league(_leagueComp);
     if (!_leagueTeams.length) { sec.innerHTML = '<p class="empty">Sin datos. Importa partidos primero.</p>'; return; }
 
+    const compSelHTML = comps.length > 1
+      ? `<select id="league-comp" class="map-select">${_compOptions(comps, _leagueComp)}</select>`
+      : "";
     sec.innerHTML = `
       <div class="card">
-        <div class="card-title">Ranking de equipos — Liga <span style="color:var(--muted);font-size:10px;font-weight:400;margin-left:8px">Click en columna para ordenar</span></div>
+        <div class="map-header">
+          <div class="card-title" style="margin:0">Ranking de equipos — Liga <span style="color:var(--muted);font-size:10px;font-weight:400;margin-left:8px">Click en columna para ordenar</span></div>
+          ${compSelHTML}
+        </div>
         <div class="table-wrap">
           <table id="league-table" class="table-sticky"></table>
         </div>
@@ -512,6 +540,9 @@ async function renderLeague() {
     tableEl.innerHTML = _leagueTableHTML(_sortedLeague());
     _bindLeagueTableEvents(tableEl);
     _bindLeagueRowClicks(tableEl);
+
+    const compSel = document.getElementById("league-comp");
+    if (compSel) compSel.addEventListener("change", e => { _leagueComp = e.target.value; renderLeague(); });
 
     if (_leagueTeams.length >= 2) {
       const mapOpts = LEAGUE_MAPS.map(m =>
@@ -637,6 +668,7 @@ function _drawClutchTable() {
 // ── Team section — with last-N filter ─────────────────────────────────────
 let _teamData  = null;
 let _teamLastN = 0; // 0 = all
+let _teamComp  = ""; // "" = todas las competencias
 
 function _filteredLog(gameLog, n) {
   if (!n) return gameLog;
@@ -689,10 +721,13 @@ function _renderUsageRanking(players) {
 }
 
 function _renderTeamContent(main, data, n) {
-  const filtered = _filteredLog(data.game_log, n);
-  const av = n ? _computeAvg(filtered) : data.averages;
-  const lg = data.league;
-  const rec = n ? null : data.record;
+  const byComp   = _filterByComp(data.game_log, _teamComp);
+  const filtered = _filteredLog(byComp, n);
+  // sin filtro alguno → usar los promedios/record ya calculados por el backend
+  const unfiltered = !n && !_teamComp;
+  const av  = unfiltered ? data.averages : _computeAvg(filtered);
+  const lg  = data.league;
+  const rec = unfiltered ? data.record : null;
 
   main.innerHTML = `
     ${_recordCard(rec, data.team_name)}
@@ -802,6 +837,7 @@ async function renderTeam(teamCode) {
   const main = document.getElementById("team-main");
   main.innerHTML = '<p class="empty"><span class="spinner"></span>Cargando...</p>';
   _teamLastN = 0;
+  _teamComp  = "";
 
   try {
     _teamData = await api.team(teamCode);
@@ -810,6 +846,15 @@ async function renderTeam(teamCode) {
     const filterWrap = document.getElementById("team-filter-pills");
     if (filterWrap) {
       filterWrap.style.display = _teamData.games > 3 ? "" : "none";
+    }
+
+    // Selector de competencia (solo si el equipo tiene >1 competencia)
+    const comps    = _logComps(_teamData.game_log);
+    const compWrap = document.getElementById("team-comp-wrap");
+    const compSel  = document.getElementById("team-comp");
+    if (compWrap && compSel) {
+      compWrap.style.display = comps.length > 1 ? "" : "none";
+      compSel.innerHTML = _compOptions(comps);
     }
 
     _renderTeamContent(main, _teamData, 0);
@@ -886,7 +931,7 @@ async function renderTeamOnOff(teamCode, playerName) {
       </tr>`;
     };
     const sample = (side, data) => data.possessions
-      ? `${side}: ${data.possessions} pos · ${Math.round(data.seconds / 60)}'`
+      ? `${side}: ${data.possessions} pos · ${Math.round(data.seconds / 60)}' en cancha`
       : `${side}: sin muestra`;
 
     box.innerHTML = `
@@ -986,7 +1031,9 @@ async function renderCompare() {
 
     try {
       const [dataA, dataB] = await Promise.all([api.team(codeA), api.team(codeB)]);
-      const avA = dataA.averages, avB = dataB.averages;
+      const comp = document.getElementById("compare-comp")?.value || "";
+      const avA = comp ? _computeAvg(_filterByComp(dataA.game_log, comp)) : dataA.averages;
+      const avB = comp ? _computeAvg(_filterByComp(dataB.game_log, comp)) : dataB.averages;
       const lg  = dataA.league;
 
       const a = avA, b = avB;
@@ -1201,16 +1248,37 @@ function _shotChartSVG(zones, totalShots, summary, hasCoordinates) {
 }
 
 // ── Player section ─────────────────────────────────────────────────────────
+let _playerData = null;
+let _playerComp = "";
+let _playerCtx  = { teamCode: "", playerName: "" };
+
 async function renderPlayer(teamCode, playerName) {
   const main = document.getElementById("player-main");
   main.innerHTML = '<p class="empty"><span class="spinner"></span>Cargando...</p>';
+  _playerComp = "";
+  _playerCtx  = { teamCode, playerName };
 
   try {
-    const data = await api.player(teamCode, playerName);
-    const av   = data.averages;
-    const lg   = data.league;
+    _playerData = await api.player(teamCode, playerName);
+    _renderPlayerContent(main, _playerData, "");
+  } catch (e) {
+    main.innerHTML = `<p class="empty below-avg">${e.message}</p>`;
+  }
+}
 
+function _renderPlayerContent(main, data, comp) {
+  const { teamCode, playerName } = _playerCtx;
+  const log  = _filterByComp(data.game_log, comp);
+  const av   = comp ? _computeAvg(log) : data.averages;
+  const lg   = data.league;
+  const comps = _logComps(data.game_log);
+
+  {
     main.innerHTML = `
+      ${comps.length > 1 ? `
+      <div class="card">
+        <select id="player-comp" class="map-select">${_compOptions(comps, comp)}</select>
+      </div>` : ""}
       <div class="card">
         <div class="card-title">Producción ofensiva</div>
         <div class="stat-grid">
@@ -1280,7 +1348,7 @@ async function renderPlayer(teamCode, playerName) {
               <th>OER</th><th>eFG%</th><th>TS%</th>
             </tr></thead>
             <tbody>
-              ${data.game_log.map(g => `
+              ${log.map(g => `
                 <tr>
                   <td class="td-muted">${_fmtDate(g.date)}</td>
                   <td>${g.opponent}</td>
@@ -1301,9 +1369,16 @@ async function renderPlayer(teamCode, playerName) {
         </div>
       </div>`;
     drawRadar("chart-player-radar", av, lg, playerName);
-    drawPlayerEvolution("chart-player-evo", data.game_log);
+    drawPlayerEvolution("chart-player-evo", log);
 
-    // Shot chart — async, non-blocking
+    if (comps.length > 1) {
+      document.getElementById("player-comp").addEventListener("change", e => {
+        _playerComp = e.target.value;
+        _renderPlayerContent(main, data, _playerComp);
+      });
+    }
+
+    // Shot chart — async, non-blocking (global del jugador, no filtrado por competencia)
     api.playerShots(teamCode, playerName).then(shots => {
       if (!shots || !shots.total_shots) return;
       const shotCard = document.createElement("div");
@@ -1313,8 +1388,6 @@ async function renderPlayer(teamCode, playerName) {
         ${_shotChartSVG(shots.zones, shots.total_shots, shots.summary, shots.has_coordinates)}`;
       main.insertBefore(shotCard, main.querySelector(".chart-grid"));
     }).catch(() => {});
-  } catch (e) {
-    main.innerHTML = `<p class="empty below-avg">${e.message}</p>`;
   }
 }
 
@@ -1509,6 +1582,9 @@ function renderApp() {
             <button class="filter-pill" data-n="5">Últ. 5</button>
             <button class="filter-pill" data-n="3">Últ. 3</button>
           </div>
+          <span id="team-comp-wrap" style="display:none;margin-top:12px">
+            <select id="team-comp" class="map-select"></select>
+          </span>
         </div>
         <div id="team-shotmap"></div>
         <div id="team-onoff"></div>
@@ -1531,6 +1607,7 @@ function renderApp() {
           <div class="compare-controls">
             <select id="compare-a"><option value="">— Equipo A —</option></select>
             <select id="compare-b"><option value="">— Equipo B —</option></select>
+            <select id="compare-comp" style="display:none"><option value="">Todas las competencias</option></select>
             <button class="btn" id="btn-compare">Comparar</button>
           </div>
         </div>
@@ -1615,6 +1692,13 @@ function renderApp() {
     _teamLastN = n;
     document.querySelectorAll(".filter-pill").forEach(p => p.classList.toggle("active", p === pill));
     _renderTeamContent(document.getElementById("team-main"), _teamData, n);
+  });
+
+  // Competition filter (compone con las pills Últ. N)
+  document.getElementById("team-comp").addEventListener("change", e => {
+    if (!_teamData) return;
+    _teamComp = e.target.value;
+    _renderTeamContent(document.getElementById("team-main"), _teamData, _teamLastN);
   });
 
   // Import section: pagination + select mode + delete

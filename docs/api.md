@@ -363,7 +363,7 @@ Rendimiento del equipo mientras los jugadores indicados (3 a 5, separados por `|
 ```
 
 - `games_used`/`games_excluded` — partidos con quinteto inicial válido (5 titulares) vs. descartados por datos de pbp inconsistentes (RF-1/RF-7).
-- `sample.seconds` es aproximado (asume 600s por cuarto, 300s por prórroga; no modela reloj detenido).
+- `sample.seconds` = tiempo de juego del equipo con esos jugadores en cancha. La suma de segundos de todos los tramos de un partido es exacta (PERIOD_LEN por período: 600 regular / 300 OT); no modela reloj detenido dentro de un tramo.
 - Tasas `null` si su denominador es 0 (regla de nulos, ver nota al inicio).
 
 **Errores:** `400` — `{"error": "Elegí entre 3 y 5 jugadores"}` (menos de 3 o más de 5 nombres) · `404` — equipo sin partidos con play-by-play.
@@ -394,9 +394,19 @@ Rendimiento del equipo con el jugador en cancha (**ON**) vs. en el banco (**OFF*
 
 ---
 
+## GET `/api/competitions`
+
+Lista de competencias distintas (para los selectores de filtro por competencia — Feature 09).
+
+**Response:** `["Liga Uruguaya de Basquetbol 2025/2026", ...]`
+
+---
+
 ## GET `/api/league`
 
 Ranking de todos los equipos ordenado por OER descendente.
+
+**Query params:** `?competition=<c>` (opcional) — filtra el ranking y sus promedios a los partidos de esa competencia (Feature 09). Sin el parámetro, agrega todas las competencias. Equipos sin partidos en la competencia se omiten; competencia inexistente → `[]`.
 
 **Response:**
 ```json
@@ -418,6 +428,8 @@ Ranking de todos los equipos ordenado por OER descendente.
   }
 ]
 ```
+
+> **`competition` en game_log:** `GET /api/team/<code>` y `GET /api/player/<code>/<name>` incluyen `competition` en cada entrada de `game_log`, para que el frontend filtre por competencia y recompute los promedios client-side (Feature 09).
 
 ---
 
