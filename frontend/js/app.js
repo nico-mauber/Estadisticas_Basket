@@ -875,10 +875,26 @@ async function renderTeam(teamCode) {
       lineupCard.style.display = "none";
     }
 
-    renderTeamClutch(teamCode);   // cierres del equipo (Feature 05 v2)
+    renderTeamShotmapTeam(teamCode);   // mapa de tiro del equipo (Feature 10)
+    renderTeamClutch(teamCode);        // cierres del equipo (Feature 05 v2)
   } catch (e) {
     main.innerHTML = `<p class="empty below-avg">${e.message}</p>`;
   }
+}
+
+// Mapa de tiro AGREGADO del equipo (Feature 10) — reusa api.teamShots + _shotChartSVG
+function renderTeamShotmapTeam(teamCode) {
+  const box = document.getElementById("team-teamshot");
+  if (!box) return;
+  box.innerHTML = '<div class="card"><p class="empty"><span class="spinner"></span>Cargando mapa de tiro del equipo...</p></div>';
+  api.teamShots(teamCode).then(shots => {
+    if (!shots || !shots.total_shots) { box.innerHTML = ""; return; }
+    box.innerHTML = `
+      <div class="card">
+        <div class="card-title">Mapa de tiro del equipo <span style="color:var(--muted2);font-weight:400;text-transform:none;letter-spacing:0">— ${teamCode}</span></div>
+        ${_shotChartSVG(shots.zones, shots.total_shots, shots.summary, shots.has_coordinates)}
+      </div>`;
+  }).catch(() => { box.innerHTML = ""; });
 }
 
 // Shot chart del jugador DENTRO de la vista Equipo (reusa api.playerShots + _shotChartSVG)
@@ -998,6 +1014,23 @@ async function renderTeamLineup(teamCode, players) {
           ${r.games_used} partido(s) usado(s)${r.games_excluded ? ` (${r.games_excluded} excluido(s) por datos inconsistentes)` : ""}
         </p>
         ${smallSample}
+        <div class="table-wrap" style="margin-top:12px">
+          <table class="search-table">
+            <thead><tr>
+              <th>Off</th><th>Def</th><th>Net</th><th>eFG%</th><th>TS%</th><th>Pos</th>
+              <th>Pts</th><th>Pts-C</th><th>REB</th><th>OR</th><th>DR</th><th>AST</th>
+              <th>TOV</th><th>ROB</th><th>TAP</th><th>FGA</th><th>3PA</th><th>FTA</th>
+            </tr></thead>
+            <tbody><tr>
+              <td>${DEC2(m.oer)}</td><td>${DEC2(m.der)}</td><td>${DEC2(m.net_rating)}</td>
+              <td>${PCT(m.efg_pct)}</td><td>${PCT(m.ts_pct)}</td><td>${r.sample.possessions}</td>
+              <td>${r.raw.pts}</td><td>${r.raw.pts_against}</td><td>${r.raw.reb}</td>
+              <td>${r.raw.orb}</td><td>${r.raw.drb}</td><td>${r.raw.ast}</td>
+              <td>${r.raw.tov}</td><td>${r.raw.stl}</td><td>${r.raw.blk}</td>
+              <td>${r.raw.fga}</td><td>${r.raw.fga3}</td><td>${r.raw.fta}</td>
+            </tr></tbody>
+          </table>
+        </div>
         <div class="stat-grid" style="margin-top:8px">
           <div class="stat-box"><div class="stat-label">Anota más</div><div class="stat-value neutral">${lead(r.leaders.scorer, "pts")}</div></div>
           <div class="stat-box"><div class="stat-label">Asiste más</div><div class="stat-value neutral">${lead(r.leaders.assister, "ast")}</div></div>
@@ -1082,6 +1115,15 @@ async function renderCompare() {
         rawRow("PCA",       a.fast_break_pts    || 0, b.fast_break_pts    || 0),
       ].join("");
 
+      // Tabla de métricas avanzadas (una fila por equipo, estilo tabla de cierres)
+      const advRow = (name, av, color) => `<tr>
+        <td style="color:${color};font-weight:600;text-align:left">${name}</td>
+        <td>${DEC2(av.oer)}</td><td>${DEC2(av.der)}</td><td>${DEC2(av.net_rating)}</td>
+        <td>${PCT(av.efg_pct)}</td><td>${PCT(av.ts_pct)}</td><td>${DEC2(av.pace)}</td>
+        <td>${PCT(av.or_pct)}</td><td>${PCT(av.dr_pct)}</td><td>${PCT(av.to_pct)}</td>
+        <td>${PCT(av.as_pct)}</td><td>${DEC2(av.pts)}</td><td>${DEC2(av.possessions)}</td>
+      </tr>`;
+
       document.getElementById("compare-result").innerHTML = `
         <div class="chart-grid">
           <div class="card">
@@ -1102,6 +1144,22 @@ async function renderCompare() {
                 <tbody>${rows}</tbody>
               </table>
             </div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title">Métricas avanzadas</div>
+          <div class="table-wrap">
+            <table class="search-table">
+              <thead><tr>
+                <th style="text-align:left">Equipo</th>
+                <th>Off</th><th>Def</th><th>Net</th><th>eFG%</th><th>TS%</th><th>Pace</th>
+                <th>OR%</th><th>DR%</th><th>TO%</th><th>AS%</th><th>Pts</th><th>Pos</th>
+              </tr></thead>
+              <tbody>
+                ${advRow(dataA.team_name, avA, "var(--accent)")}
+                ${advRow(dataB.team_name, avB, "var(--blue)")}
+              </tbody>
+            </table>
           </div>
         </div>`;
 
@@ -1586,6 +1644,7 @@ function renderApp() {
             <select id="team-comp" class="map-select"></select>
           </span>
         </div>
+        <div id="team-teamshot"></div>
         <div id="team-shotmap"></div>
         <div id="team-onoff"></div>
         <div class="card" id="team-lineup-card" style="display:none">
@@ -1640,8 +1699,8 @@ function renderApp() {
   // Team selector
   const teamSel = document.getElementById("team-select");
   teamSel.addEventListener("change", () => {
-    // limpiar apartados del equipo anterior (mapa de tiro, ON/OFF, lineup, cierres)
-    ["team-shotmap", "team-onoff", "team-lineup", "team-clutch"].forEach(id => {
+    // limpiar apartados del equipo anterior (mapas de tiro, ON/OFF, lineup, cierres)
+    ["team-teamshot", "team-shotmap", "team-onoff", "team-lineup", "team-clutch"].forEach(id => {
       const box = document.getElementById(id);
       if (box) box.innerHTML = "";
     });

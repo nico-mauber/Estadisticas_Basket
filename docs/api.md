@@ -239,6 +239,10 @@ Por zona: `made`, `attempts`, `pct` (% acierto) y `pf` (puntos por intento = mad
 
 `has_coordinates` — `true` si al menos un tiro del jugador tiene coordenadas reales (`x!=0` o `y!=0`); `false` si todos son `x=0,y=0` (partido importado sin array `shot` de FIBA, caso típico de la competencia FUBB). El frontend usa este flag para elegir entre el chart de 11 zonas y el chart simplificado de 3 zonas (ver [frontend.md](frontend.md#shot-chart)).
 
+### GET `/api/shots/<team_code>` (agregado del equipo)
+
+Mismo shape que el de jugador, pero agrega los tiros de **todos los jugadores** del equipo (Feature 10). `summary.ppp` se calcula desde `TeamGameStats`. Alimenta el "Mapa de tiro del equipo" en la vista Equipo.
+
 `summary`:
 - `global_pf` — puntos por tiro global
 - `efg_pct` — eFG% derivado de los tiros con zona

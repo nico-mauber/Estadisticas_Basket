@@ -40,6 +40,10 @@ La navegación es por `#hash` o botones de tab. No hay routing del servidor.
 
 **ON/OFF — minutos:** el panel muestra `N' en cancha` (tiempo de juego del equipo con el jugador en cancha/banca). La suma de segundos por partido es exacta (arreglado el doble-conteo por reloj no-monótono en `build_segments`).
 
+**Mapa de tiro del equipo (Feature 10):** además del mapa por jugador (botón "Ver mapa de tiro"), la vista Equipo muestra automáticamente el mapa AGREGADO del equipo (`#team-teamshot`, `renderTeamShotmapTeam` → `api.teamShots`), reusando `_shotChartSVG`.
+
+**Más stats en Combinación y Comparar (Feature 11):** la card de Combinación (lineup) incluye una tabla ancha (`.search-table`) con la línea completa (Off/Def/Net/eFG%/TS%/Pos/Pts/REB/AST/…); Comparar incluye una card "Métricas avanzadas" (tabla de 2 filas, una por equipo).
+
 **Vista Comparar — box score FIBA:** tabla de 3 columnas (`valor A | etiqueta | valor B`) con el ganador de cada fila resaltado en verde. Filas: LC, 2Pts, 3Pts, 1Pt (con %), REB, As, ST, Blq, PER, FP (formato `faltas (recibidas)`), PeP, PtsSegCh, PtPer, Pts Banca, PCA. Clase CSS `.fiba-box`.
 
 ## `api.js`
@@ -52,7 +56,7 @@ api.logout()                // POST   /api/logout
 api.me()                    // GET    /api/me  (auth + feature flags)
 api.importGame(url)         // POST   /api/import
 api.team(code)              // GET    /api/team/<code>
-api.players(code) / api.player(code, name) / api.playerShots(code, name)
+api.players(code) / api.player(code, name) / api.playerShots(code, name) / api.teamShots(code)  // teamShots = mapa agregado del equipo
 api.searchPlayers()         // GET /api/search/players (buscador avanzado)
 api.clutchTeam(team)        // GET /api/clutch/<team> (cierres del equipo: agregado + por partido)
 api.lineup(team, players[]) // GET /api/lineup/<team>?players=A|B|C (combinaciones 3-5)

@@ -622,16 +622,11 @@ def player_stats(team_code: str, player_name: str):
     })
 
 
-# ── Player shots ───────────────────────────────────────────────────────────
+# ── Shots (jugador y equipo) ─────────────────────────────────────────────────
 
-@app.route("/api/shots/<team_code>/<player_name>")
-@login_required
-def player_shots(team_code: str, player_name: str):
-    team_code = team_code.upper()
-    rows = Shot.query.filter_by(team_code=team_code, player_name=player_name).all()
-
+def _zones_from_shots(rows):
+    """Clasifica una lista de tiros en las 11 zonas + totales. Compartido jugador/equipo."""
     has_coordinates = any((row.x or 0) != 0 or (row.y or 0) != 0 for row in rows)
-
     zones = {k: {"made": 0, "attempts": 0} for k in ZONE_KEYS_11}
     for row in rows:
         z = _classify_zone_11(row.action_type, row.sub_type, row.x or 0, row.y or 0)
@@ -651,6 +646,16 @@ def player_shots(team_code: str, player_name: str):
             z["pct"] = None
             z["pf"]  = None
 
+    return zones, total_fga, total_pts, fgm2, fgm3, has_coordinates
+
+
+@app.route("/api/shots/<team_code>/<player_name>")
+@login_required
+def player_shots(team_code: str, player_name: str):
+    team_code = team_code.upper()
+    rows = Shot.query.filter_by(team_code=team_code, player_name=player_name).all()
+    zones, total_fga, total_pts, fgm2, fgm3, has_coordinates = _zones_from_shots(rows)
+
     games = db.session.query(Shot.game_id).filter_by(
         team_code=team_code, player_name=player_name
     ).distinct().count()
@@ -668,18 +673,52 @@ def player_shots(team_code: str, player_name: str):
         if poss:
             ppp = round((pgs.pts or 0) / poss, 3)
 
-    summary = {
-        "global_pf": round(total_pts / total_fga, 3) if total_fga else None,
-        "efg_pct":   round((fgm2 + 1.5 * fgm3) / total_fga, 4) if total_fga else None,
-        "ppp":       ppp,
-        "games":     games,
-    }
+    return jsonify({
+        "zones": zones,
+        "total_shots": total_fga,
+        "has_coordinates": has_coordinates,
+        "summary": {
+            "global_pf": round(total_pts / total_fga, 3) if total_fga else None,
+            "efg_pct":   round((fgm2 + 1.5 * fgm3) / total_fga, 4) if total_fga else None,
+            "ppp":       ppp,
+            "games":     games,
+        },
+    })
+
+
+@app.route("/api/shots/<team_code>")
+@login_required
+def team_shots(team_code: str):
+    """Mapa de tiro AGREGADO del equipo (todos sus jugadores)."""
+    team_code = team_code.upper()
+    rows = Shot.query.filter_by(team_code=team_code).all()
+    zones, total_fga, total_pts, fgm2, fgm3, has_coordinates = _zones_from_shots(rows)
+
+    games = db.session.query(Shot.game_id).filter_by(team_code=team_code).distinct().count()
+
+    tgs = db.session.query(
+        func.sum(TeamGameStats.pts).label("pts"),
+        func.sum(TeamGameStats.fga).label("fga"),
+        func.sum(TeamGameStats.fta).label("fta"),
+        func.sum(TeamGameStats.tov).label("tov"),
+    ).filter_by(team_code=team_code).first()
+
+    ppp = None
+    if tgs and tgs.fga:
+        poss = (tgs.fga or 0) + 0.44 * (tgs.fta or 0) + (tgs.tov or 0)
+        if poss:
+            ppp = round((tgs.pts or 0) / poss, 3)
 
     return jsonify({
         "zones": zones,
         "total_shots": total_fga,
         "has_coordinates": has_coordinates,
-        "summary": summary,
+        "summary": {
+            "global_pf": round(total_pts / total_fga, 3) if total_fga else None,
+            "efg_pct":   round((fgm2 + 1.5 * fgm3) / total_fga, 4) if total_fga else None,
+            "ppp":       ppp,
+            "games":     games,
+        },
     })
 
 

@@ -206,8 +206,10 @@ def lineup_stats(games, team_code, players):
         },
         "metrics": metrics,
         "raw": {
+            "pts": tb["pts"], "pts_against": ob["pts"],
             "fga": tb["fga"], "fgm": tb["fgm"], "fga3": tb["fga3"], "fgm3": tb["fgm3"],
-            "fta": tb["fta"], "ftm": tb["ftm"], "orb": tb["orb"], "drb": tb["drb"],
+            "fta": tb["fta"], "ftm": tb["ftm"],
+            "orb": tb["orb"], "drb": tb["drb"], "reb": tb["orb"] + tb["drb"],
             "ast": tb["ast"], "tov": tb["tov"], "stl": tb["stl"], "blk": tb["blk"],
         },
         "leaders": {
