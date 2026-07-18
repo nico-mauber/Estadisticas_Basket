@@ -81,6 +81,9 @@ Stats individuales por jugador por partido.
 | `player_name` | TEXT NOT NULL | Nombre completo (de FIBA) |
 | `jersey` | TEXT | Número de camiseta |
 | `minutes` | TEXT | Minutos jugados (formato `MM:SS`) |
+| `position` | TEXT DEFAULT `''` | Posición FIBA (`playingPosition`: G/F/C/PG/PF...). Vacío en partidos importados antes de su incorporación hasta reimportar |
+| `plus_minus` | INTEGER DEFAULT 0 | Plus/Minus del partido (`sPlusMinusPoints` FIBA; puede ser negativo) |
+| `starter` | INTEGER DEFAULT 0 | 1=titular en ese partido (`starter` FIBA). Base para reconstruir el quinteto inicial (lineups/on-off) |
 | `pts` | INTEGER | |
 | `fgm` / `fga` | INTEGER | |
 | `fgm2` / `fga2` | INTEGER | |
@@ -111,6 +114,30 @@ Registro de cada tiro por partido. Tiene coordenadas `x/y` si vienen del array `
 | `action_number` | INTEGER | Número de acción en el play-by-play |
 
 **Restricción única:** `(game_id, action_number)`
+
+---
+
+### `pbp_events`
+Play-by-play completo: un registro por evento de FIBA (`raw["pbp"]`). Base de lineups (Feature 03), on/off (Feature 04) y clutch (Feature 05). A diferencia de `shots` (solo 2pt/3pt), guarda **todos** los tipos de evento.
+
+| Columna | Tipo | Descripción |
+|---------|------|-------------|
+| `id` | INTEGER PK AUTOINCREMENT | |
+| `game_id` | TEXT FK → games | |
+| `team_code` | TEXT | `""` en eventos no-equipo (`game`/`period`, `tno=0`) |
+| `player_name` | TEXT | `""` en eventos no-jugador |
+| `period` | INTEGER | Período |
+| `period_type` | TEXT | `REGULAR` / `OT` |
+| `clock_secs` | INTEGER | Segundos **restantes** en el período (de `gt` `MM:SS`) |
+| `s1` / `s2` | INTEGER | Marcador corrido local / visitante tras el evento |
+| `action_type` | TEXT | `2pt`, `3pt`, `rebound`, `assist`, `steal`, `block`, `turnover`, `freethrow`, `foul`, `foulon`, `substitution`, `timeout`, `jumpball`, `game`, `period` |
+| `sub_type` | TEXT | Ej. `in`/`out` (substitution), `layup`, etc. |
+| `success` | INTEGER | 1=exitoso (según el tipo de acción) |
+| `action_number` | INTEGER | Número de acción en el play-by-play |
+
+**Restricción única:** `(game_id, action_number)` — reimportar es idempotente (insert-or-ignore).
+
+> Partidos importados antes de la Feature 02 no tienen `pbp_events` hasta reimportarse.
 
 ## Clasificación de zonas de tiro
 

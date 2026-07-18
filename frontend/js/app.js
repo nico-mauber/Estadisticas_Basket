@@ -53,6 +53,7 @@ function _computeAvg(gameLog) {
     "pace","pts","possessions","plays",
     "stocks","def_playmaking","def_to_ratio","physical_impact",
     "reb_share","oreb_share","dreb_share",
+    "uso_pct","ast_to",   // keys de jugador (ausentes en logs de equipo → null)
     "fgm","fga","fgm2","fga2","fgm3","fga3","ftm","fta",
     "orb","drb","trb","ast","tov","stl","blk","pf",
     "opp_pf","paint_pts","second_chance_pts","pts_from_tov","bench_pts","fast_break_pts",
@@ -60,10 +61,25 @@ function _computeAvg(gameLog) {
   const result = {};
   for (const k of keys) {
     const vals = gameLog.map(g => g[k]).filter(v => v != null && !isNaN(v));
-    result[k] = vals.length ? Math.round((vals.reduce((s, v) => s + v, 0) / vals.length) * 10000) / 10000 : 0;
+    // null (no 0) cuando ningún partido tiene dato válido para esa tasa
+    result[k] = vals.length ? Math.round((vals.reduce((s, v) => s + v, 0) / vals.length) * 10000) / 10000 : null;
   }
-  result.net_rating = (result.oer || 0) - (result.der || 0);
+  result.net_rating = (result.oer != null && result.der != null)
+    ? Math.round((result.oer - result.der) * 10000) / 10000
+    : null;
   return result;
+}
+
+// ── Filtro por competencia (compartido: Liga/Equipo/Comparar/Jugador) ────────
+function _logComps(gameLog) {
+  return [...new Set((gameLog || []).map(g => g.competition).filter(Boolean))].sort();
+}
+function _filterByComp(gameLog, comp) {
+  return comp ? (gameLog || []).filter(g => g.competition === comp) : gameLog;
+}
+function _compOptions(comps, selected = "") {
+  return `<option value="">Todas las competencias</option>` +
+    comps.map(c => `<option value="${c}"${c === selected ? " selected" : ""}>${c}</option>`).join("");
 }
 
 // ── Four Factors card ──────────────────────────────────────────────────────
@@ -152,10 +168,17 @@ async function refreshCompareSelectors() {
     const el = document.getElementById(id);
     if (el) el.innerHTML = opts;
   });
+  // Selector de competencia (solo si hay >1 competencia en la base)
+  const compSel = document.getElementById("compare-comp");
+  if (compSel) {
+    const comps = await api.competitions().catch(() => []);
+    compSel.style.display = comps.length > 1 ? "" : "none";
+    compSel.innerHTML = _compOptions(comps, compSel.value || "");
+  }
 }
 
 // ── Nav ────────────────────────────────────────────────────────────────────
-const sections = ["import", "league", "team", "compare", "player"];
+const sections = ["import", "league", "team", "compare", "player", "search"];
 let activeSection = "import";
 
 function setSection(id) {
@@ -372,6 +395,7 @@ let _leagueTeams    = [];
 let _leagueSortKey  = "oer";
 let _leagueSortDir  = -1; // -1 desc, 1 asc
 let _leagueMap      = "ef";
+let _leagueComp     = ""; // "" = todas las competencias
 
 // Scatter map presets — each defines the X/Y axes for el mapa de liga.
 const LEAGUE_MAPS = [
@@ -494,12 +518,19 @@ async function renderLeague() {
   const sec = document.getElementById("sec-league");
   sec.innerHTML = '<p class="empty"><span class="spinner"></span>Cargando...</p>';
   try {
-    _leagueTeams = await api.league();
+    const comps = await api.competitions().catch(() => []);
+    _leagueTeams = await api.league(_leagueComp);
     if (!_leagueTeams.length) { sec.innerHTML = '<p class="empty">Sin datos. Importa partidos primero.</p>'; return; }
 
+    const compSelHTML = comps.length > 1
+      ? `<select id="league-comp" class="map-select">${_compOptions(comps, _leagueComp)}</select>`
+      : "";
     sec.innerHTML = `
       <div class="card">
-        <div class="card-title">Ranking de equipos — Liga <span style="color:var(--muted);font-size:10px;font-weight:400;margin-left:8px">Click en columna para ordenar</span></div>
+        <div class="map-header">
+          <div class="card-title" style="margin:0">Ranking de equipos — Liga <span style="color:var(--muted);font-size:10px;font-weight:400;margin-left:8px">Click en columna para ordenar</span></div>
+          ${compSelHTML}
+        </div>
         <div class="table-wrap">
           <table id="league-table" class="table-sticky"></table>
         </div>
@@ -509,6 +540,9 @@ async function renderLeague() {
     tableEl.innerHTML = _leagueTableHTML(_sortedLeague());
     _bindLeagueTableEvents(tableEl);
     _bindLeagueRowClicks(tableEl);
+
+    const compSel = document.getElementById("league-comp");
+    if (compSel) compSel.addEventListener("change", e => { _leagueComp = e.target.value; renderLeague(); });
 
     if (_leagueTeams.length >= 2) {
       const mapOpts = LEAGUE_MAPS.map(m =>
@@ -533,14 +567,108 @@ async function renderLeague() {
       });
       document.getElementById("btn-reset-scatter").addEventListener("click", () => resetZoom("chart-scatter"));
     }
+    // Cierres se movieron a la vista Equipo (Feature 05 v2).
   } catch (e) {
     sec.innerHTML = `<p class="empty below-avg">${e.message}</p>`;
   }
 }
 
+// ── Clutch por equipo (últimos 5 min, dif ≤ 15) — dentro de Equipo (Feat 05 v2) ──
+let _clutchData = null;
+let _clutchSort = { key: "date", dir: -1 };
+
+const CLUTCH_COLS = [
+  { key: "date", label: "Fecha", date: true },
+  { key: "opponent_code", label: "Rival", txt: true }, { key: "home_away", label: "L/V", txt: true },
+  { key: "entry_margin", label: "Δ@5:00", int: true },
+  { key: "point_diff", label: "Dif", diff: true }, { key: "pts", label: "Pts", int: true },
+  { key: "off_rating", label: "Off" }, { key: "def_rating", label: "Def" },
+  { key: "efg_pct", label: "eFG%", pct: true }, { key: "ts_pct", label: "TS%", pct: true },
+  { key: "tov", label: "TOV", int: true }, { key: "ast", label: "AST", int: true },
+  { key: "reb", label: "REB", int: true },
+  { key: "fouls_drawn", label: "FR", int: true }, { key: "fouls_committed", label: "FC", int: true },
+  { key: "top_finisher", label: "Finaliza", leader: "pts" }, { key: "top_creator", label: "Crea", leader: "ast" },
+];
+
+async function renderTeamClutch(teamCode) {
+  const box = document.getElementById("team-clutch");
+  if (!box) return;
+  const title = '<div class="card-title">Cierres (últimos 5 min, dif ≤ 15)</div>';
+  box.innerHTML = `<div class="card">${title}<p class="empty"><span class="spinner"></span>Calculando cierres...</p></div>`;
+  try {
+    _clutchData = await api.clutchTeam(teamCode);
+  } catch (e) {
+    box.innerHTML = `<div class="card">${title}<p class="empty below-avg">${e.message || "No se pudieron cargar los cierres"}</p></div>`;
+    return;
+  }
+  const d = _clutchData;
+  if (!d.games_qualified) {
+    box.innerHTML = `<div class="card">${title}<p class="empty">Sin cierres apretados: los ${d.games_excluded} partido(s) con play-by-play se definieron por más de ${d.margin} al minuto 5:00.</p></div>`;
+    return;
+  }
+  const a = d.aggregate;
+  box.innerHTML = `
+    <div class="card">
+      ${title}
+      <p class="td-muted">Agregado del equipo en cierres apretados — récord <strong>${d.clutch_record}</strong> · ${d.games_qualified} calificado(s)${d.games_excluded ? ` · ${d.games_excluded} excluido(s) por paliza` : ""}</p>
+      <div class="stat-grid">
+        ${statBox("Dif", a.point_diff, (a.point_diff > 0 ? "+" : "") + a.point_diff, null, null)}
+        ${statBox("Off", a.off_rating, DEC2(a.off_rating), null, null)}
+        ${statBox("Def", a.def_rating, DEC2(a.def_rating), null, null, false)}
+        ${statBox("eFG%", a.efg_pct, PCT(a.efg_pct), null, null)}
+        ${statBox("TS%", a.ts_pct, PCT(a.ts_pct), null, null)}
+      </div>
+      <div class="stat-grid" style="margin-top:8px">
+        <div class="stat-box"><div class="stat-label">Pts F / C</div><div class="stat-value neutral">${a.pts_for} / ${a.pts_against}</div></div>
+        <div class="stat-box"><div class="stat-label">REB</div><div class="stat-value neutral">${a.reb}</div></div>
+        <div class="stat-box"><div class="stat-label">AST</div><div class="stat-value neutral">${a.ast}</div></div>
+        <div class="stat-box"><div class="stat-label">TOV</div><div class="stat-value neutral">${a.tov}</div></div>
+        <div class="stat-box"><div class="stat-label">Robos / Tapones</div><div class="stat-value neutral">${a.stl} / ${a.blk}</div></div>
+      </div>
+      <div class="card-title" style="margin-top:16px">Por partido <span style="color:var(--muted);font-size:10px;font-weight:400;margin-left:8px">Click en columna para ordenar</span></div>
+      <div class="table-wrap"><table id="clutch-table" class="search-table"></table></div>
+    </div>`;
+  _drawClutchTable();
+}
+
+function _drawClutchTable() {
+  const t = document.getElementById("clutch-table");
+  if (!t || !_clutchData) return;
+  const k = _clutchSort.key;
+  const _val = v => (v && typeof v === "object") ? (v.pts ?? v.ast ?? 0) : v;
+  const sorted = [..._clutchData.per_game].sort((a, b) => {
+    let av = _val(a[k]), bv = _val(b[k]);
+    if (typeof av === "string" || typeof bv === "string")
+      return _clutchSort.dir * String(av ?? "").localeCompare(String(bv ?? ""));
+    if (av == null) av = -Infinity;
+    if (bv == null) bv = -Infinity;
+    return _clutchSort.dir * (av - bv);
+  });
+  const cell = (c, r) => {
+    const v = r[c.key];
+    if (c.leader) return v ? `${v.name} (${v[c.leader]})` : "—";
+    if (c.date)   return _fmtDate(v);
+    if (c.diff)   { const cls = v > 0 ? "above-avg" : v < 0 ? "below-avg" : ""; return `<span class="${cls}">${v > 0 ? "+" : ""}${v}</span>`; }
+    if (c.txt)    return v || "—";
+    if (c.int)    return v == null ? "—" : v;
+    if (c.pct)    return PCT(v);
+    return DEC2(v);
+  };
+  t.innerHTML = `
+    <thead><tr>${CLUTCH_COLS.map(c => `<th data-key="${c.key}">${c.label}</th>`).join("")}</tr></thead>
+    <tbody>${sorted.map(r => `<tr>${CLUTCH_COLS.map(c => `<td>${cell(c, r)}</td>`).join("")}</tr>`).join("")}</tbody>`;
+  t.querySelectorAll("th").forEach(th => th.addEventListener("click", () => {
+    const key = th.dataset.key;
+    if (_clutchSort.key === key) _clutchSort.dir *= -1;
+    else _clutchSort = { key, dir: ["date","opponent_code","home_away","top_finisher","top_creator"].includes(key) ? 1 : -1 };
+    _drawClutchTable();
+  }));
+}
+
 // ── Team section — with last-N filter ─────────────────────────────────────
 let _teamData  = null;
 let _teamLastN = 0; // 0 = all
+let _teamComp  = ""; // "" = todas las competencias
 
 function _filteredLog(gameLog, n) {
   if (!n) return gameLog;
@@ -593,10 +721,13 @@ function _renderUsageRanking(players) {
 }
 
 function _renderTeamContent(main, data, n) {
-  const filtered = _filteredLog(data.game_log, n);
-  const av = n ? _computeAvg(filtered) : data.averages;
-  const lg = data.league;
-  const rec = n ? null : data.record;
+  const byComp   = _filterByComp(data.game_log, _teamComp);
+  const filtered = _filteredLog(byComp, n);
+  // sin filtro alguno → usar los promedios/record ya calculados por el backend
+  const unfiltered = !n && !_teamComp;
+  const av  = unfiltered ? data.averages : _computeAvg(filtered);
+  const lg  = data.league;
+  const rec = unfiltered ? data.record : null;
 
   main.innerHTML = `
     ${_recordCard(rec, data.team_name)}
@@ -706,6 +837,7 @@ async function renderTeam(teamCode) {
   const main = document.getElementById("team-main");
   main.innerHTML = '<p class="empty"><span class="spinner"></span>Cargando...</p>';
   _teamLastN = 0;
+  _teamComp  = "";
 
   try {
     _teamData = await api.team(teamCode);
@@ -716,6 +848,15 @@ async function renderTeam(teamCode) {
       filterWrap.style.display = _teamData.games > 3 ? "" : "none";
     }
 
+    // Selector de competencia (solo si el equipo tiene >1 competencia)
+    const comps    = _logComps(_teamData.game_log);
+    const compWrap = document.getElementById("team-comp-wrap");
+    const compSel  = document.getElementById("team-comp");
+    if (compWrap && compSel) {
+      compWrap.style.display = comps.length > 1 ? "" : "none";
+      compSel.innerHTML = _compOptions(comps);
+    }
+
     _renderTeamContent(main, _teamData, 0);
 
     const players = await api.players(teamCode);
@@ -723,8 +864,183 @@ async function renderTeam(teamCode) {
     pSel.innerHTML = '<option value="">— Seleccionar jugador —</option>' +
       players.map(p => `<option value="${p.name}">${p.name}</option>`).join("");
     _renderUsageRanking(players);
+
+    const lineupCard = document.getElementById("team-lineup-card");
+    const picker = document.getElementById("team-lineup-picker");
+    if (players.length >= 3) {
+      picker.innerHTML = players.map(p => `
+        <label class="lineup-check"><input type="checkbox" value="${p.name}">${p.name}</label>`).join("");
+      lineupCard.style.display = "";
+    } else {
+      lineupCard.style.display = "none";
+    }
+
+    renderTeamShotmapTeam(teamCode);   // mapa de tiro del equipo (Feature 10)
+    renderTeamClutch(teamCode);        // cierres del equipo (Feature 05 v2)
   } catch (e) {
     main.innerHTML = `<p class="empty below-avg">${e.message}</p>`;
+  }
+}
+
+// Mapa de tiro AGREGADO del equipo (Feature 10) — reusa api.teamShots + _shotChartSVG
+function renderTeamShotmapTeam(teamCode) {
+  const box = document.getElementById("team-teamshot");
+  if (!box) return;
+  box.innerHTML = '<div class="card"><p class="empty"><span class="spinner"></span>Cargando mapa de tiro del equipo...</p></div>';
+  api.teamShots(teamCode).then(shots => {
+    if (!shots || !shots.total_shots) { box.innerHTML = ""; return; }
+    box.innerHTML = `
+      <div class="card">
+        <div class="card-title">Mapa de tiro del equipo <span style="color:var(--muted2);font-weight:400;text-transform:none;letter-spacing:0">— ${teamCode}</span></div>
+        ${_shotChartSVG(shots.zones, shots.total_shots, shots.summary, shots.has_coordinates)}
+      </div>`;
+  }).catch(() => { box.innerHTML = ""; });
+}
+
+// Shot chart del jugador DENTRO de la vista Equipo (reusa api.playerShots + _shotChartSVG)
+function renderTeamShotmap(teamCode, playerName) {
+  const box = document.getElementById("team-shotmap");
+  if (!box) return;
+  box.innerHTML = '<div class="card"><p class="empty"><span class="spinner"></span>Cargando mapa de tiro...</p></div>';
+  api.playerShots(teamCode, playerName).then(shots => {
+    if (!shots || !shots.total_shots) {
+      box.innerHTML = "";
+      toast("Sin datos de tiro para este jugador", "err");
+      return;
+    }
+    box.innerHTML = `
+      <div class="card">
+        <div class="card-title">Shot chart por zonas <span style="color:var(--muted2);font-weight:400;text-transform:none;letter-spacing:0">— ${playerName}</span></div>
+        ${_shotChartSVG(shots.zones, shots.total_shots, shots.summary, shots.has_coordinates)}
+      </div>`;
+    box.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }).catch(() => { box.innerHTML = ""; });
+}
+
+// ON/OFF: rendimiento del equipo con un jugador en cancha vs en el banco (Feature 04)
+async function renderTeamOnOff(teamCode, playerName) {
+  const box = document.getElementById("team-onoff");
+  box.innerHTML = '<div class="card"><p class="empty"><span class="spinner"></span>Calculando ON/OFF...</p></div>';
+  try {
+    const r = await api.onoff(teamCode, playerName);
+    // Fila de tasas: Δ viene del backend (comparable ON vs OFF)
+    const row = (label, key, lowerBetter = false, fmt = DEC2) => {
+      const on = r.on[key], off = r.off[key], d = r.diff[key];
+      const cls = d == null ? "neutral" : (lowerBetter ? d <= 0 : d >= 0) ? "above-avg" : "below-avg";
+      return `<tr>
+        <td>${on != null ? fmt(on) : "—"}</td>
+        <td class="lbl">${label}</td>
+        <td>${off != null ? fmt(off) : "—"}</td>
+        <td class="${cls}">${d != null ? (d >= 0 ? "+" : "") + fmt(d) : "—"}</td>
+      </tr>`;
+    };
+    // Fila de conteos crudos: Δ = ON − OFF calculado acá (escala con minutos, no comparable directo)
+    const rawRow = (label, key, lowerBetter = false) => {
+      const on = r.on[key], off = r.off[key];
+      const d = (on != null && off != null) ? on - off : null;
+      const cls = d == null ? "neutral" : (lowerBetter ? d <= 0 : d >= 0) ? "above-avg" : "below-avg";
+      return `<tr>
+        <td>${on != null ? on : "—"}</td>
+        <td class="lbl">${label}</td>
+        <td>${off != null ? off : "—"}</td>
+        <td class="${cls}">${d != null ? (d >= 0 ? "+" : "") + d : "—"}</td>
+      </tr>`;
+    };
+    const sample = (side, data) => data.possessions
+      ? `${side}: ${data.possessions} pos · ${Math.round(data.seconds / 60)}' en cancha`
+      : `${side}: sin muestra`;
+
+    box.innerHTML = `
+      <div class="card">
+        <div class="card-title">ON / OFF <span style="color:var(--muted2);font-weight:400;text-transform:none;letter-spacing:0">— ${playerName} · Uso ${r.usg_pct != null ? PCT(r.usg_pct) : "—"}</span></div>
+        <div class="table-wrap">
+          <table class="onoff-table">
+            <thead><tr><th>ON</th><th>Eficiencia</th><th>OFF</th><th>Δ</th></tr></thead>
+            <tbody>
+              ${row("OER", "oer")}
+              ${row("DER", "der", true)}
+              ${row("Net Rating", "net_rating")}
+              ${row("eFG%", "efg_pct", false, PCT)}
+              ${row("TS%", "ts_pct", false, PCT)}
+            </tbody>
+          </table>
+        </div>
+        <div class="table-wrap" style="margin-top:12px">
+          <table class="onoff-table">
+            <thead><tr><th>ON</th><th>Producción del equipo</th><th>OFF</th><th>Δ</th></tr></thead>
+            <tbody>
+              ${rawRow("Pts a favor", "pts_for")}
+              ${rawRow("Pts en contra", "pts_against", true)}
+              ${rawRow("REB", "reb")}
+              ${rawRow("AST", "ast")}
+              ${rawRow("Pérdidas", "tov", true)}
+              ${rawRow("Robos", "stl")}
+              ${rawRow("Tapones", "blk")}
+            </tbody>
+          </table>
+        </div>
+        <p class="td-muted" style="margin-top:8px">${sample("ON", r.on)} &nbsp;|&nbsp; ${sample("OFF", r.off)}<br><span style="font-size:11px">Los conteos crudos escalan con los minutos de cada tramo; las tasas de arriba son comparables directas.</span></p>
+      </div>`;
+    box.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  } catch (e) {
+    box.innerHTML = "";
+    toast(e.message || "Sin datos ON/OFF para este jugador", "err");
+  }
+}
+
+// Lineups: rendimiento del equipo con una combinación de 3-5 jugadores en cancha (Feature 03)
+async function renderTeamLineup(teamCode, players) {
+  const box = document.getElementById("team-lineup");
+  box.innerHTML = '<div class="card"><p class="empty"><span class="spinner"></span>Calculando combinación...</p></div>';
+  try {
+    const r = await api.lineup(teamCode, players);
+    const m = r.metrics;
+    const lead = (l, key) => l ? `${l.name} (${l[key]})` : "—";
+    const smallSample = r.sample.possessions < 10
+      ? `<p class="empty below-avg" style="margin-top:8px">Muestra chica (${r.sample.possessions} posesiones) — tomar con cuidado</p>`
+      : "";
+    box.innerHTML = `
+      <div class="card">
+        <div class="card-title">Combinación <span style="color:var(--muted2);font-weight:400;text-transform:none;letter-spacing:0">— ${players.join(" · ")}</span></div>
+        <div class="stat-grid">
+          ${statBox("OER", m.oer, DEC2(m.oer), null, null)}
+          ${statBox("DER", m.der, DEC2(m.der), null, null, false)}
+          ${statBox("Net Rating", m.net_rating, DEC2(m.net_rating), null, null)}
+          ${statBox("eFG%", m.efg_pct, PCT(m.efg_pct), null, null)}
+          ${statBox("TS%", m.ts_pct, PCT(m.ts_pct), null, null)}
+        </div>
+        <p class="td-muted" style="margin-top:8px">
+          ${r.sample.possessions} posesiones · ${Math.round(r.sample.seconds / 60)}' en cancha ·
+          ${r.games_used} partido(s) usado(s)${r.games_excluded ? ` (${r.games_excluded} excluido(s) por datos inconsistentes)` : ""}
+        </p>
+        ${smallSample}
+        <div class="table-wrap" style="margin-top:12px">
+          <table class="search-table">
+            <thead><tr>
+              <th>Off</th><th>Def</th><th>Net</th><th>eFG%</th><th>TS%</th><th>Pos</th>
+              <th>Pts</th><th>Pts-C</th><th>REB</th><th>OR</th><th>DR</th><th>AST</th>
+              <th>TOV</th><th>ROB</th><th>TAP</th><th>FGA</th><th>3PA</th><th>FTA</th>
+            </tr></thead>
+            <tbody><tr>
+              <td>${DEC2(m.oer)}</td><td>${DEC2(m.der)}</td><td>${DEC2(m.net_rating)}</td>
+              <td>${PCT(m.efg_pct)}</td><td>${PCT(m.ts_pct)}</td><td>${r.sample.possessions}</td>
+              <td>${r.raw.pts}</td><td>${r.raw.pts_against}</td><td>${r.raw.reb}</td>
+              <td>${r.raw.orb}</td><td>${r.raw.drb}</td><td>${r.raw.ast}</td>
+              <td>${r.raw.tov}</td><td>${r.raw.stl}</td><td>${r.raw.blk}</td>
+              <td>${r.raw.fga}</td><td>${r.raw.fga3}</td><td>${r.raw.fta}</td>
+            </tr></tbody>
+          </table>
+        </div>
+        <div class="stat-grid" style="margin-top:8px">
+          <div class="stat-box"><div class="stat-label">Anota más</div><div class="stat-value neutral">${lead(r.leaders.scorer, "pts")}</div></div>
+          <div class="stat-box"><div class="stat-label">Asiste más</div><div class="stat-value neutral">${lead(r.leaders.assister, "ast")}</div></div>
+          <div class="stat-box"><div class="stat-label">Rebota más</div><div class="stat-value neutral">${lead(r.leaders.rebounder, "trb")}</div></div>
+        </div>
+      </div>`;
+    box.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  } catch (e) {
+    box.innerHTML = "";
+    toast(e.message || "Sin datos para esta combinación", "err");
   }
 }
 
@@ -748,7 +1064,9 @@ async function renderCompare() {
 
     try {
       const [dataA, dataB] = await Promise.all([api.team(codeA), api.team(codeB)]);
-      const avA = dataA.averages, avB = dataB.averages;
+      const comp = document.getElementById("compare-comp")?.value || "";
+      const avA = comp ? _computeAvg(_filterByComp(dataA.game_log, comp)) : dataA.averages;
+      const avB = comp ? _computeAvg(_filterByComp(dataB.game_log, comp)) : dataB.averages;
       const lg  = dataA.league;
 
       const a = avA, b = avB;
@@ -797,6 +1115,15 @@ async function renderCompare() {
         rawRow("PCA",       a.fast_break_pts    || 0, b.fast_break_pts    || 0),
       ].join("");
 
+      // Tabla de métricas avanzadas (una fila por equipo, estilo tabla de cierres)
+      const advRow = (name, av, color) => `<tr>
+        <td style="color:${color};font-weight:600;text-align:left">${name}</td>
+        <td>${DEC2(av.oer)}</td><td>${DEC2(av.der)}</td><td>${DEC2(av.net_rating)}</td>
+        <td>${PCT(av.efg_pct)}</td><td>${PCT(av.ts_pct)}</td><td>${DEC2(av.pace)}</td>
+        <td>${PCT(av.or_pct)}</td><td>${PCT(av.dr_pct)}</td><td>${PCT(av.to_pct)}</td>
+        <td>${PCT(av.as_pct)}</td><td>${DEC2(av.pts)}</td><td>${DEC2(av.possessions)}</td>
+      </tr>`;
+
       document.getElementById("compare-result").innerHTML = `
         <div class="chart-grid">
           <div class="card">
@@ -818,6 +1145,22 @@ async function renderCompare() {
               </table>
             </div>
           </div>
+        </div>
+        <div class="card">
+          <div class="card-title">Métricas avanzadas</div>
+          <div class="table-wrap">
+            <table class="search-table">
+              <thead><tr>
+                <th style="text-align:left">Equipo</th>
+                <th>Off</th><th>Def</th><th>Net</th><th>eFG%</th><th>TS%</th><th>Pace</th>
+                <th>OR%</th><th>DR%</th><th>TO%</th><th>AS%</th><th>Pts</th><th>Pos</th>
+              </tr></thead>
+              <tbody>
+                ${advRow(dataA.team_name, avA, "var(--accent)")}
+                ${advRow(dataB.team_name, avB, "var(--blue)")}
+              </tbody>
+            </table>
+          </div>
         </div>`;
 
       drawCompareRadar("chart-compare-radar", avA, avB, lg, dataA.team_name, dataB.team_name);
@@ -830,116 +1173,170 @@ async function renderCompare() {
   });
 }
 
-// ── Shot chart SVG — half court, 11 zones (heatmap por P/F, estilo "El Metro") ──
-function _shotChartSVG(zones, totalShots, summary) {
-  const W = 340, H = 320;
-  const cx = 170, cy = 256;
-  const cL = 20, cR = 320, cT = 8, cB = 288;
-  const r3 = 135, rP = 50;
-  const pbX1 = 121, pbX2 = 219, pbTop = 140;
-  const c3xL = 38, c3xR = 302;
-  const c3yJoin = Math.round(cy - Math.sqrt(r3 * r3 - (cx - c3xL) ** 2));
+// ── Shot chart SVG — half court, estilo "El Metro" (cancha clara, heatmap por P/F) ──
+// Geometría y paleta compartidas entre el modo 11 zonas (coords reales) y el modo
+// simplificado de 3 zonas (fallback: partido sin array `shot` de FIBA → x=0,y=0).
+const SC_W = 340, SC_H = 320;
+const SC_cx = 170, SC_cy = 256;
+const SC_cL = 20, SC_cR = 320, SC_cT = 8, SC_cB = 288;
+const SC_r3 = 135, SC_rP = 50;
+const SC_pbX1 = 121, SC_pbX2 = 219, SC_pbTop = 140;
+const SC_c3xL = 38, SC_c3xR = 302;
+const SC_c3yJoin = Math.round(SC_cy - Math.sqrt(SC_r3 * SC_r3 - (SC_cx - SC_c3xL) ** 2));
 
-  // Light court palette (igual a la imagen de referencia)
-  const courtBg = "#f3f6fa", paintBg = "#c7d8ec", restrictBg = "#b4c8e6",
-        cornerBg = "#efe9c4", line = "#46566a", boxText = "#1f2937";
+const SC_courtBg = "#f3f6fa", SC_paintBg = "#c7d8ec", SC_restrictBg = "#b4c8e6",
+      SC_cornerBg = "#efe9c4", SC_line = "#46566a", SC_boxText = "#1f2937";
 
-  // Heatmap por P/F (puntos por finalización), umbrales calcados de la imagen
-  const boxFill = pf => pf >= 1.00 ? "#79b13f" : pf >= 0.85 ? "#ef8b3a" : "#df574c";
+// Heatmap por P/F (puntos por finalización), umbrales calcados de la imagen de referencia
+const _scBoxFill = pf => pf >= 1.00 ? "#79b13f" : pf >= 0.85 ? "#ef8b3a" : "#df574c";
+const _scDec2 = v => v.toFixed(2).replace(".", ",");
+const _scDec1 = v => v.toFixed(1).replace(".", ",");
 
-  const dec2 = v => v.toFixed(2).replace(".", ",");
-  const dec1 = v => v.toFixed(1).replace(".", ",");
+function _scHCirc(r) {
+  return `M${SC_cx - r},${SC_cy} A${r},${r} 0 0,0 ${SC_cx + r},${SC_cy} Z`;
+}
 
-  const hCirc = r => `M${cx - r},${cy} A${r},${r} 0 0,0 ${cx + r},${cy} Z`;
+// Spokes (líneas que abren desde el aro separando los sectores del modo 11 zonas)
+function _scSpoke(deg) {
+  const t = deg * Math.PI / 180;
+  const x1 = SC_cx + SC_rP * Math.cos(t),  y1 = SC_cy - SC_rP * Math.sin(t);
+  const x2 = SC_cx + 250 * Math.cos(t),    y2 = SC_cy - 250 * Math.sin(t);
+  return `<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="${SC_line}" stroke-width="1.2" clip-path="url(#sc-clip)"/>`;
+}
 
-  // Spokes (líneas que abren desde el aro separando los sectores)
-  const spoke = deg => {
-    const t = deg * Math.PI / 180;
-    const x1 = cx + rP * Math.cos(t),  y1 = cy - rP * Math.sin(t);
-    const x2 = cx + 250 * Math.cos(t), y2 = cy - 250 * Math.sin(t);
-    return `<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="${line}" stroke-width="1.2" clip-path="url(#sc-clip)"/>`;
-  };
+function _scLbl(zones, totalShots, key, lx, ly) {
+  const z = zones?.[key];
+  if (!z?.attempts) return '';
+  const share = _scDec1((z.attempts / totalShots) * 100);
+  const pf    = _scDec2(z.pf);
+  const fg    = _scDec1(z.pct * 100) + '%';
+  const bg    = _scBoxFill(z.pf);
+  const w = 54, h = 33, r = 4;
+  const x0 = lx - w / 2, y0 = ly - h / 2;
+  return `
+    <rect x="${x0}" y="${y0}" width="${w}" height="${h}" rx="${r}" fill="${bg}" stroke="rgba(0,0,0,0.25)" stroke-width="0.8"/>
+    <text x="${lx - 5}" y="${ly - 6}" text-anchor="end"   fill="rgba(0,0,0,0.70)" font-size="7.5" font-family="Inter,sans-serif">${share}%</text>
+    <text x="${lx + 4}" y="${ly - 6}" text-anchor="start" fill="rgba(0,0,0,0.70)" font-size="7.5" font-family="Inter,sans-serif">P/F ${pf}</text>
+    <text x="${lx}"     y="${ly + 9}" text-anchor="middle" fill="${SC_boxText}" font-size="14" font-weight="800" font-family="Inter,sans-serif">${fg}</text>`;
+}
 
-  function lbl(key, lx, ly) {
-    const z = zones?.[key];
-    if (!z?.attempts) return '';
-    const share = dec1((z.attempts / totalShots) * 100);
-    const pf    = dec2(z.pf);
-    const fg    = dec1(z.pct * 100) + '%';
-    const bg    = boxFill(z.pf);
-    const w = 54, h = 33, r = 4;
-    const x0 = lx - w / 2, y0 = ly - h / 2;
-    return `
-      <rect x="${x0}" y="${y0}" width="${w}" height="${h}" rx="${r}" fill="${bg}" stroke="rgba(0,0,0,0.25)" stroke-width="0.8"/>
-      <text x="${lx - 5}" y="${ly - 6}" text-anchor="end"   fill="rgba(0,0,0,0.70)" font-size="7.5" font-family="Inter,sans-serif">${share}%</text>
-      <text x="${lx + 4}" y="${ly - 6}" text-anchor="start" fill="rgba(0,0,0,0.70)" font-size="7.5" font-family="Inter,sans-serif">P/F ${pf}</text>
-      <text x="${lx}"     y="${ly + 9}" text-anchor="middle" fill="${boxText}" font-size="14" font-weight="800" font-family="Inter,sans-serif">${fg}</text>`;
-  }
+function _scBadge(summary) {
+  if (!summary) return '';
+  const pf  = summary.global_pf != null ? _scDec2(summary.global_pf) : '—';
+  const efg = summary.efg_pct   != null ? _scDec1(summary.efg_pct * 100) + ' %' : '—';
+  const cw = 70, ch = 38, bx = SC_cR - 2 * cw, by = SC_cT + 2;
+  return `
+    <rect x="${bx}"      y="${by}" width="${cw}" height="${ch}" rx="4" fill="#ef8b3a"/>
+    <rect x="${bx + cw}" y="${by}" width="${cw}" height="${ch}" rx="4" fill="#9aa83a"/>
+    <text x="${bx + cw/2}"        y="${by + 14}" text-anchor="middle" fill="rgba(0,0,0,0.65)" font-size="9"  font-family="Inter,sans-serif">P/F</text>
+    <text x="${bx + cw/2}"        y="${by + 31}" text-anchor="middle" fill="${SC_boxText}" font-size="15" font-weight="800" font-family="Inter,sans-serif">${pf}</text>
+    <text x="${bx + cw + cw/2}"   y="${by + 14}" text-anchor="middle" fill="rgba(0,0,0,0.65)" font-size="9"  font-family="Inter,sans-serif">eFG%</text>
+    <text x="${bx + cw + cw/2}"   y="${by + 31}" text-anchor="middle" fill="${SC_boxText}" font-size="15" font-weight="800" font-family="Inter,sans-serif">${efg}</text>`;
+}
 
-  function badge() {
-    if (!summary) return '';
-    const pf  = summary.global_pf != null ? dec2(summary.global_pf) : '—';
-    const efg = summary.efg_pct   != null ? dec1(summary.efg_pct * 100) + ' %' : '—';
-    const cw = 70, ch = 38, bx = cR - 2 * cw, by = cT + 2;
-    return `
-      <rect x="${bx}"      y="${by}" width="${cw}" height="${ch}" rx="4" fill="#ef8b3a"/>
-      <rect x="${bx + cw}" y="${by}" width="${cw}" height="${ch}" rx="4" fill="#9aa83a"/>
-      <text x="${bx + cw/2}"        y="${by + 14}" text-anchor="middle" fill="rgba(0,0,0,0.65)" font-size="9"  font-family="Inter,sans-serif">P/F</text>
-      <text x="${bx + cw/2}"        y="${by + 31}" text-anchor="middle" fill="${boxText}" font-size="15" font-weight="800" font-family="Inter,sans-serif">${pf}</text>
-      <text x="${bx + cw + cw/2}"   y="${by + 14}" text-anchor="middle" fill="rgba(0,0,0,0.65)" font-size="9"  font-family="Inter,sans-serif">eFG%</text>
-      <text x="${bx + cw + cw/2}"   y="${by + 31}" text-anchor="middle" fill="${boxText}" font-size="15" font-weight="800" font-family="Inter,sans-serif">${efg}</text>`;
-  }
+function _courtLinesSVG() {
+  return `
+    <rect width="${SC_W}" height="${SC_H}" fill="${SC_courtBg}" rx="8"/>
+    <rect x="${SC_cL}" y="${SC_cT}" width="${SC_cR-SC_cL}" height="${SC_cB-SC_cT}" fill="${SC_courtBg}" rx="3"/>
+    <!-- Esquinas amarillas (fuera de la línea de 3 lateral) -->
+    <rect x="${SC_cL}"   y="${SC_c3yJoin}" width="${SC_c3xL-SC_cL}" height="${SC_cB-SC_c3yJoin}" fill="${SC_cornerBg}" clip-path="url(#sc-clip)"/>
+    <rect x="${SC_c3xR}" y="${SC_c3yJoin}" width="${SC_cR-SC_c3xR}" height="${SC_cB-SC_c3yJoin}" fill="${SC_cornerBg}" clip-path="url(#sc-clip)"/>
+    <!-- Pintura + zona restringida (azul) -->
+    <rect x="${SC_pbX1}" y="${SC_pbTop}" width="${SC_pbX2-SC_pbX1}" height="${SC_cB-SC_pbTop}" fill="${SC_paintBg}" clip-path="url(#sc-clip)"/>
+    <path d="${_scHCirc(SC_rP)}" fill="${SC_restrictBg}" clip-path="url(#sc-clip)"/>
+    <!-- Spokes (sectores) -->
+    ${_scSpoke(150)}${_scSpoke(108)}${_scSpoke(72)}${_scSpoke(30)}
+    <!-- Líneas de cancha -->
+    <rect x="${SC_cL}" y="${SC_cT}" width="${SC_cR-SC_cL}" height="${SC_cB-SC_cT}" fill="none" stroke="${SC_line}" stroke-width="1.5" rx="3"/>
+    <rect x="${SC_pbX1}" y="${SC_pbTop}" width="${SC_pbX2-SC_pbX1}" height="${SC_cB-SC_pbTop}" fill="none" stroke="${SC_line}" stroke-width="1.5"/>
+    <path d="M${SC_pbX1},${SC_pbTop} A49,49 0 0,0 ${SC_pbX2},${SC_pbTop}" fill="none" stroke="${SC_line}" stroke-width="1.5" stroke-dasharray="4,3"/>
+    <path d="M${SC_c3xL},${SC_cB} L${SC_c3xL},${SC_c3yJoin} A${SC_r3},${SC_r3} 0 0,0 ${SC_c3xR},${SC_c3yJoin} L${SC_c3xR},${SC_cB}" fill="none" stroke="${SC_line}" stroke-width="1.5"/>
+    <path d="M${SC_cx-SC_rP},${SC_cy} A${SC_rP},${SC_rP} 0 0,0 ${SC_cx+SC_rP},${SC_cy}" fill="none" stroke="${SC_line}" stroke-width="1.2"/>
+    <circle cx="${SC_cx}" cy="${SC_cy}" r="9" fill="none" stroke="#c2611f" stroke-width="2"/>
+    <line x1="${SC_cx-26}" y1="${SC_cB-3}" x2="${SC_cx+26}" y2="${SC_cB-3}" stroke="${SC_line}" stroke-width="3"/>`;
+}
 
-  return `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg"
+function _scSvgWrap(inner) {
+  return `<svg viewBox="0 0 ${SC_W} ${SC_H}" xmlns="http://www.w3.org/2000/svg"
     style="width:100%;max-width:440px;margin:0 auto;display:block;border-radius:8px">
     <defs>
-      <clipPath id="sc-clip"><rect x="${cL}" y="${cT}" width="${cR-cL}" height="${cB-cT}"/></clipPath>
+      <clipPath id="sc-clip"><rect x="${SC_cL}" y="${SC_cT}" width="${SC_cR-SC_cL}" height="${SC_cB-SC_cT}"/></clipPath>
     </defs>
-    <rect width="${W}" height="${H}" fill="${courtBg}" rx="8"/>
-    <rect x="${cL}" y="${cT}" width="${cR-cL}" height="${cB-cT}" fill="${courtBg}" rx="3"/>
-    <!-- Esquinas amarillas (fuera de la línea de 3 lateral) -->
-    <rect x="${cL}"   y="${c3yJoin}" width="${c3xL-cL}" height="${cB-c3yJoin}" fill="${cornerBg}" clip-path="url(#sc-clip)"/>
-    <rect x="${c3xR}" y="${c3yJoin}" width="${cR-c3xR}" height="${cB-c3yJoin}" fill="${cornerBg}" clip-path="url(#sc-clip)"/>
-    <!-- Pintura + zona restringida (azul) -->
-    <rect x="${pbX1}" y="${pbTop}" width="${pbX2-pbX1}" height="${cB-pbTop}" fill="${paintBg}" clip-path="url(#sc-clip)"/>
-    <path d="${hCirc(rP)}" fill="${restrictBg}" clip-path="url(#sc-clip)"/>
-    <!-- Spokes (sectores) -->
-    ${spoke(150)}${spoke(108)}${spoke(72)}${spoke(30)}
-    <!-- Líneas de cancha -->
-    <rect x="${cL}" y="${cT}" width="${cR-cL}" height="${cB-cT}" fill="none" stroke="${line}" stroke-width="1.5" rx="3"/>
-    <rect x="${pbX1}" y="${pbTop}" width="${pbX2-pbX1}" height="${cB-pbTop}" fill="none" stroke="${line}" stroke-width="1.5"/>
-    <path d="M${pbX1},${pbTop} A49,49 0 0,0 ${pbX2},${pbTop}" fill="none" stroke="${line}" stroke-width="1.5" stroke-dasharray="4,3"/>
-    <path d="M${c3xL},${cB} L${c3xL},${c3yJoin} A${r3},${r3} 0 0,0 ${c3xR},${c3yJoin} L${c3xR},${cB}" fill="none" stroke="${line}" stroke-width="1.5"/>
-    <path d="M${cx-rP},${cy} A${rP},${rP} 0 0,0 ${cx+rP},${cy}" fill="none" stroke="${line}" stroke-width="1.2"/>
-    <circle cx="${cx}" cy="${cy}" r="9" fill="none" stroke="#c2611f" stroke-width="2"/>
-    <line x1="${cx-26}" y1="${cB-3}" x2="${cx+26}" y2="${cB-3}" stroke="${line}" stroke-width="3"/>
-    <!-- Cajas de estadística por zona (heatmap) -->
-    ${lbl('top_key_3',       cx,         70)}
-    ${lbl('left_wing_3',     cL + 34,   150)}
-    ${lbl('right_wing_3',    cR - 34,   150)}
-    ${lbl('mid_top',         cx,        162)}
-    ${lbl('mid_left_far',    cx - 64,   206)}
-    ${lbl('mid_right_far',   cx + 64,   206)}
-    ${lbl('restricted_area', cx,        236)}
-    ${lbl('mid_left_close',  cx - 64,   263)}
-    ${lbl('mid_right_close', cx + 64,   263)}
-    ${lbl('left_corner_3',   cL + 30,   263)}
-    ${lbl('right_corner_3',  cR - 30,   263)}
-    ${badge()}
+    ${inner}
   </svg>`;
 }
 
+// 11 zonas — requiere coordenadas reales de tiro (array `shot` de FIBA con x/y)
+function _shotChart11SVG(zones, totalShots, summary) {
+  return _scSvgWrap(`
+    ${_courtLinesSVG()}
+    <!-- Cajas de estadística por zona (heatmap) -->
+    ${_scLbl(zones, totalShots, 'top_key_3',       SC_cx,          70)}
+    ${_scLbl(zones, totalShots, 'left_wing_3',     SC_cL + 34,    150)}
+    ${_scLbl(zones, totalShots, 'right_wing_3',    SC_cR - 34,    150)}
+    ${_scLbl(zones, totalShots, 'mid_top',         SC_cx,         162)}
+    ${_scLbl(zones, totalShots, 'mid_left_far',    SC_cx - 64,    206)}
+    ${_scLbl(zones, totalShots, 'mid_right_far',   SC_cx + 64,    206)}
+    ${_scLbl(zones, totalShots, 'restricted_area', SC_cx,         236)}
+    ${_scLbl(zones, totalShots, 'mid_left_close',  SC_cx - 64,    263)}
+    ${_scLbl(zones, totalShots, 'mid_right_close', SC_cx + 64,    263)}
+    ${_scLbl(zones, totalShots, 'left_corner_3',   SC_cL + 30,    263)}
+    ${_scLbl(zones, totalShots, 'right_corner_3',  SC_cR - 30,    263)}
+    ${_scBadge(summary)}`);
+}
+
+// 3 zonas — fallback honesto cuando el partido no trae coordenadas de tiro
+// (Feature 01: sdd/specs/01-shot-chart-fallback-visual). Solo `top_key_3`,
+// `mid_top` y `restricted_area` pueden tener attempts>0 en este caso.
+function _shotChart3SVG(zones, totalShots, summary) {
+  return _scSvgWrap(`
+    ${_courtLinesSVG()}
+    <!-- Cajas de estadística: Triple / Media / Pintura -->
+    ${_scLbl(zones, totalShots, 'top_key_3',       SC_cx, 70)}
+    ${_scLbl(zones, totalShots, 'mid_top',         SC_cx, 162)}
+    ${_scLbl(zones, totalShots, 'restricted_area', SC_cx, 236)}
+    ${_scBadge(summary)}`);
+}
+
+// Dispatcher: `hasCoordinates` viene de `GET /api/shots/...` (`has_coordinates`).
+function _shotChartSVG(zones, totalShots, summary, hasCoordinates) {
+  return hasCoordinates === false
+    ? _shotChart3SVG(zones, totalShots, summary)
+    : _shotChart11SVG(zones, totalShots, summary);
+}
+
 // ── Player section ─────────────────────────────────────────────────────────
+let _playerData = null;
+let _playerComp = "";
+let _playerCtx  = { teamCode: "", playerName: "" };
+
 async function renderPlayer(teamCode, playerName) {
   const main = document.getElementById("player-main");
   main.innerHTML = '<p class="empty"><span class="spinner"></span>Cargando...</p>';
+  _playerComp = "";
+  _playerCtx  = { teamCode, playerName };
 
   try {
-    const data = await api.player(teamCode, playerName);
-    const av   = data.averages;
-    const lg   = data.league;
+    _playerData = await api.player(teamCode, playerName);
+    _renderPlayerContent(main, _playerData, "");
+  } catch (e) {
+    main.innerHTML = `<p class="empty below-avg">${e.message}</p>`;
+  }
+}
 
+function _renderPlayerContent(main, data, comp) {
+  const { teamCode, playerName } = _playerCtx;
+  const log  = _filterByComp(data.game_log, comp);
+  const av   = comp ? _computeAvg(log) : data.averages;
+  const lg   = data.league;
+  const comps = _logComps(data.game_log);
+
+  {
     main.innerHTML = `
+      ${comps.length > 1 ? `
+      <div class="card">
+        <select id="player-comp" class="map-select">${_compOptions(comps, comp)}</select>
+      </div>` : ""}
       <div class="card">
         <div class="card-title">Producción ofensiva</div>
         <div class="stat-grid">
@@ -1009,7 +1406,7 @@ async function renderPlayer(teamCode, playerName) {
               <th>OER</th><th>eFG%</th><th>TS%</th>
             </tr></thead>
             <tbody>
-              ${data.game_log.map(g => `
+              ${log.map(g => `
                 <tr>
                   <td class="td-muted">${_fmtDate(g.date)}</td>
                   <td>${g.opponent}</td>
@@ -1030,21 +1427,173 @@ async function renderPlayer(teamCode, playerName) {
         </div>
       </div>`;
     drawRadar("chart-player-radar", av, lg, playerName);
-    drawPlayerEvolution("chart-player-evo", data.game_log);
+    drawPlayerEvolution("chart-player-evo", log);
 
-    // Shot chart — async, non-blocking
+    if (comps.length > 1) {
+      document.getElementById("player-comp").addEventListener("change", e => {
+        _playerComp = e.target.value;
+        _renderPlayerContent(main, data, _playerComp);
+      });
+    }
+
+    // Shot chart — async, non-blocking (global del jugador, no filtrado por competencia)
     api.playerShots(teamCode, playerName).then(shots => {
       if (!shots || !shots.total_shots) return;
       const shotCard = document.createElement("div");
       shotCard.className = "card";
       shotCard.innerHTML = `
         <div class="card-title">Shot chart por zonas <span style="color:var(--muted2);font-weight:400;text-transform:none;letter-spacing:0">— ${playerName}</span></div>
-        ${_shotChartSVG(shots.zones, shots.total_shots, shots.summary)}`;
+        ${_shotChartSVG(shots.zones, shots.total_shots, shots.summary, shots.has_coordinates)}`;
       main.insertBefore(shotCard, main.querySelector(".chart-grid"));
     }).catch(() => {});
-  } catch (e) {
-    main.innerHTML = `<p class="empty below-avg">${e.message}</p>`;
   }
+}
+
+// ── Search section ───────────────────────────────────────────────────────────
+let _searchData = null;
+let _searchSort = { key: "player", dir: 1 };
+
+const SEARCH_METRICS = [
+  { key: "efg_pct", label: "eFG%", pct: true }, { key: "ts_pct", label: "TS%", pct: true },
+  { key: "oer", label: "OER" }, { key: "uso_pct", label: "USO%", pct: true },
+  { key: "ppp", label: "PPP" }, { key: "pps", label: "PPT" },
+  { key: "fg2_pct", label: "FG2%", pct: true }, { key: "fg3_pct", label: "FG3%", pct: true },
+  { key: "ft_pct", label: "FT%", pct: true },
+  { key: "pts", label: "Pts/g" }, { key: "ast", label: "Ast/g" }, { key: "tov", label: "Pérd/g" },
+  { key: "stl", label: "Robos/g" }, { key: "blk", label: "Tapas/g" },
+  { key: "reb_share", label: "% Reb Eq", pct: true },
+  { key: "oreb_share", label: "% RebOf Eq", pct: true }, { key: "dreb_share", label: "% RebDef Eq", pct: true },
+  { key: "minutes", label: "Min" }, { key: "plus_minus", label: "+/-" },
+];
+
+const SEARCH_COLS = [
+  { key: "player", label: "Jugador", txt: true }, { key: "team_code", label: "Eq", txt: true },
+  { key: "position", label: "Pos", txt: true }, { key: "games", label: "G", int: true },
+  { key: "minutes", label: "Min" }, { key: "plus_minus", label: "+/-" },
+  { key: "efg_pct", label: "eFG%", pct: true }, { key: "ts_pct", label: "TS%", pct: true },
+  { key: "oer", label: "OER" }, { key: "uso_pct", label: "USO%", pct: true },
+  { key: "pts", label: "Pts" }, { key: "ast", label: "Ast" }, { key: "tov", label: "TOV" },
+  { key: "stl", label: "ST" }, { key: "blk", label: "Blq" },
+];
+
+async function renderSearch() {
+  const main = document.getElementById("search-main");
+  if (!_searchData) {
+    main.innerHTML = '<p class="empty"><span class="spinner"></span>Cargando buscador...</p>';
+    try { _searchData = await api.searchPlayers(); }
+    catch (e) { main.innerHTML = `<p class="empty below-avg">No se pudo cargar el buscador</p>`; return; }
+  }
+  if (!_searchData.length) { main.innerHTML = `<p class="empty">No hay jugadores importados todavía</p>`; return; }
+
+  const teams     = [...new Set(_searchData.map(p => p.team_code))].sort();
+  const comps     = [...new Set(_searchData.flatMap(p => p.competitions))].sort();
+  const positions = [...new Set(_searchData.map(p => p.position).filter(Boolean))].sort();
+
+  main.innerHTML = `
+    <div class="card">
+      <div class="card-title">Buscador de jugadores</div>
+      <div class="search-filters">
+        <input type="text" id="sf-name" placeholder="Nombre contiene...">
+        <select id="sf-team"><option value="">Equipo (todos)</option>${teams.map(t=>`<option>${t}</option>`).join("")}</select>
+        <select id="sf-comp"><option value="">Competencia (todas)</option>${comps.map(c=>`<option value="${c}">${c}</option>`).join("")}</select>
+        <select id="sf-pos"><option value="">Posición (todas)</option>${positions.map(p=>`<option>${p}</option>`).join("")}</select>
+      </div>
+      <div class="search-ranges">
+        ${SEARCH_METRICS.map(m => `
+          <div class="range-filter">
+            <span>${m.label}</span>
+            <input type="number" step="any" class="sf-min" data-key="${m.key}" data-pct="${m.pct?1:0}" placeholder="mín">
+            <input type="number" step="any" class="sf-max" data-key="${m.key}" data-pct="${m.pct?1:0}" placeholder="máx">
+          </div>`).join("")}
+      </div>
+      <div class="search-actions">
+        <button class="btn" id="sf-apply">Buscar</button>
+        <button class="btn btn-ghost" id="sf-clear">Limpiar</button>
+        <span id="sf-count" class="td-muted"></span>
+      </div>
+    </div>
+    <div id="search-results"></div>`;
+
+  document.getElementById("sf-apply").addEventListener("click", _applySearch);
+  document.getElementById("sf-clear").addEventListener("click", () => {
+    main.querySelectorAll(".search-filters input, .search-ranges input").forEach(i => i.value = "");
+    main.querySelectorAll(".search-filters select").forEach(s => s.value = "");
+    _applySearch();
+  });
+  _applySearch();
+}
+
+function _applySearch() {
+  const name = document.getElementById("sf-name").value.trim().toLowerCase();
+  const team = document.getElementById("sf-team").value;
+  const comp = document.getElementById("sf-comp").value;
+  const pos  = document.getElementById("sf-pos").value;
+  const ranges = [];
+  document.querySelectorAll(".sf-min").forEach(inp => {
+    if (inp.value.trim() === "") return;
+    const pct = inp.dataset.pct === "1";
+    ranges.push({ key: inp.dataset.key, op: "min", val: pct ? parseFloat(inp.value)/100 : parseFloat(inp.value) });
+  });
+  document.querySelectorAll(".sf-max").forEach(inp => {
+    if (inp.value.trim() === "") return;
+    const pct = inp.dataset.pct === "1";
+    ranges.push({ key: inp.dataset.key, op: "max", val: pct ? parseFloat(inp.value)/100 : parseFloat(inp.value) });
+  });
+
+  const filtered = _searchData.filter(p => {
+    if (name && !p.player.toLowerCase().includes(name)) return false;
+    if (team && p.team_code !== team) return false;
+    if (comp && !p.competitions.includes(comp)) return false;
+    if (pos  && p.position !== pos) return false;
+    for (const r of ranges) {
+      const v = p[r.key];
+      if (v == null) return false;               // null no matchea rango (Feature 08)
+      if (r.op === "min" && v < r.val) return false;
+      if (r.op === "max" && v > r.val) return false;
+    }
+    return true;
+  });
+  document.getElementById("sf-count").textContent = `${filtered.length} jugadores`;
+  _renderSearchResults(filtered);
+}
+
+function _renderSearchResults(rows) {
+  const box = document.getElementById("search-results");
+  if (!rows.length) { box.innerHTML = `<p class="empty">Ningún jugador cumple los filtros</p>`; return; }
+  const k = _searchSort.key;
+  const sorted = [...rows].sort((a, b) => {
+    let av = a[k], bv = b[k];
+    if (typeof av === "string" || typeof bv === "string")
+      return _searchSort.dir * String(av ?? "").localeCompare(String(bv ?? ""));
+    if (av == null) av = -Infinity;
+    if (bv == null) bv = -Infinity;
+    return _searchSort.dir * (av - bv);
+  });
+  const fmt = (c, v) => c.txt ? (v || "—") : c.int ? (v ?? "—") : c.pct ? PCT(v) : DEC2(v);
+  box.innerHTML = `
+    <div class="card">
+      <div class="table-wrap">
+        <table class="search-table">
+          <thead><tr>${SEARCH_COLS.map(c => `<th data-key="${c.key}">${c.label}</th>`).join("")}</tr></thead>
+          <tbody>
+            ${sorted.map(p => `
+              <tr data-team="${p.team_code}" data-player="${p.player.replace(/"/g,'&quot;')}">
+                ${SEARCH_COLS.map(c => `<td>${fmt(c, p[c.key])}</td>`).join("")}
+              </tr>`).join("")}
+          </tbody>
+        </table>
+      </div>
+    </div>`;
+  box.querySelectorAll("th").forEach(th => th.addEventListener("click", () => {
+    const key = th.dataset.key;
+    if (_searchSort.key === key) _searchSort.dir *= -1;
+    else _searchSort = { key, dir: ["player","team_code","position"].includes(key) ? 1 : -1 };
+    _renderSearchResults(rows);
+  }));
+  box.querySelectorAll("tbody tr").forEach(tr => tr.addEventListener("click", () => {
+    setSection("player");
+    renderPlayer(tr.dataset.team, tr.dataset.player);
+  }));
 }
 
 // ── Bootstrap ──────────────────────────────────────────────────────────────
@@ -1054,6 +1603,7 @@ const NAV_ITEMS = {
   team:    { icon: "📊", label: "Equipo" },
   compare: { icon: "⚡", label: "Comparar" },
   player:  { icon: "👤", label: "Jugador" },
+  search:  { icon: "🔎", label: "Buscar" },
 };
 
 function renderApp() {
@@ -1081,6 +1631,8 @@ function renderApp() {
             <select id="team-select"><option value="">— Seleccionar equipo —</option></select>
             <select id="player-select"><option value="">— Seleccionar jugador —</option></select>
             <button class="btn btn-ghost" id="btn-show-player">Ver jugador</button>
+            <button class="btn btn-ghost" id="btn-show-shotmap">Ver mapa de tiro</button>
+            <button class="btn btn-ghost" id="btn-show-onoff">Ver ON/OFF</button>
           </div>
           <div class="filter-pills" id="team-filter-pills" style="display:none;margin-top:12px">
             <span style="color:var(--muted);font-size:12px;align-self:center;margin-right:4px">Período:</span>
@@ -1088,8 +1640,22 @@ function renderApp() {
             <button class="filter-pill" data-n="5">Últ. 5</button>
             <button class="filter-pill" data-n="3">Últ. 3</button>
           </div>
+          <span id="team-comp-wrap" style="display:none;margin-top:12px">
+            <select id="team-comp" class="map-select"></select>
+          </span>
         </div>
+        <div id="team-teamshot"></div>
+        <div id="team-shotmap"></div>
+        <div id="team-onoff"></div>
+        <div class="card" id="team-lineup-card" style="display:none">
+          <div class="card-title">Combinaciones (Lineups)</div>
+          <p class="td-muted">Elegí entre 3 y 5 jugadores para ver el rendimiento del equipo cuando comparten cancha.</p>
+          <div class="lineup-picker" id="team-lineup-picker"></div>
+          <button class="btn btn-ghost" id="btn-analyze-lineup" style="margin-top:12px">Analizar combinación</button>
+        </div>
+        <div id="team-lineup"></div>
         <div id="team-main"></div>
+        <div id="team-clutch"></div>
         <div id="usage-ranking"></div>
       </div>
 
@@ -1100,6 +1666,7 @@ function renderApp() {
           <div class="compare-controls">
             <select id="compare-a"><option value="">— Equipo A —</option></select>
             <select id="compare-b"><option value="">— Equipo B —</option></select>
+            <select id="compare-comp" style="display:none"><option value="">Todas las competencias</option></select>
             <button class="btn" id="btn-compare">Comparar</button>
           </div>
         </div>
@@ -1109,6 +1676,11 @@ function renderApp() {
       <!-- Player -->
       <div class="section" id="sec-player">
         <div id="player-main"><p class="empty">Selecciona un jugador desde la vista de equipo.</p></div>
+      </div>
+
+      <!-- Search -->
+      <div class="section" id="sec-search">
+        <div id="search-main"><p class="empty"><span class="spinner"></span>Cargando buscador...</p></div>
       </div>
     </main>`;
 
@@ -1120,12 +1692,18 @@ function renderApp() {
       if (btn.dataset.section === "league")  renderLeague();
       if (btn.dataset.section === "team")    refreshTeamSelector();
       if (btn.dataset.section === "compare") renderCompare();
+      if (btn.dataset.section === "search")  renderSearch();
     });
   });
 
   // Team selector
   const teamSel = document.getElementById("team-select");
   teamSel.addEventListener("change", () => {
+    // limpiar apartados del equipo anterior (mapas de tiro, ON/OFF, lineup, cierres)
+    ["team-teamshot", "team-shotmap", "team-onoff", "team-lineup", "team-clutch"].forEach(id => {
+      const box = document.getElementById(id);
+      if (box) box.innerHTML = "";
+    });
     if (teamSel.value) renderTeam(teamSel.value);
   });
 
@@ -1138,6 +1716,33 @@ function renderApp() {
     renderPlayer(team, player);
   });
 
+  // Shot map button — muestra el mapa de tiro DENTRO de Equipo
+  document.getElementById("btn-show-shotmap").addEventListener("click", () => {
+    const team   = document.getElementById("team-select").value;
+    const player = document.getElementById("player-select").value;
+    if (!team || !player) return toast("Selecciona equipo y jugador", "err");
+    renderTeamShotmap(team, player);
+  });
+
+  // ON/OFF button
+  document.getElementById("btn-show-onoff").addEventListener("click", () => {
+    const team   = document.getElementById("team-select").value;
+    const player = document.getElementById("player-select").value;
+    if (!team || !player) return toast("Selecciona equipo y jugador", "err");
+    renderTeamOnOff(team, player);
+  });
+
+  // Lineup (combinación) button
+  document.getElementById("btn-analyze-lineup").addEventListener("click", () => {
+    const team = document.getElementById("team-select").value;
+    if (!team) return toast("Selecciona un equipo", "err");
+    const checked = Array.from(
+      document.querySelectorAll("#team-lineup-picker input:checked")
+    ).map(el => el.value);
+    if (checked.length < 3 || checked.length > 5) return toast("Elegí entre 3 y 5 jugadores", "err");
+    renderTeamLineup(team, checked);
+  });
+
   // Last-N filter pills
   document.getElementById("team-filter-pills").addEventListener("click", e => {
     const pill = e.target.closest(".filter-pill");
@@ -1146,6 +1751,13 @@ function renderApp() {
     _teamLastN = n;
     document.querySelectorAll(".filter-pill").forEach(p => p.classList.toggle("active", p === pill));
     _renderTeamContent(document.getElementById("team-main"), _teamData, n);
+  });
+
+  // Competition filter (compone con las pills Últ. N)
+  document.getElementById("team-comp").addEventListener("change", e => {
+    if (!_teamData) return;
+    _teamComp = e.target.value;
+    _renderTeamContent(document.getElementById("team-main"), _teamData, _teamLastN);
   });
 
   // Import section: pagination + select mode + delete

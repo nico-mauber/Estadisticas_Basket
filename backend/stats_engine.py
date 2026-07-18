@@ -4,7 +4,15 @@ Formulas from Dean Oliver's "Basketball on Paper" and the FUBB scouting guide.
 """
 
 
-def _safe_div(num, den, default=0.0):
+def _safe_div(num, den, default=None):
+    """Divide devolviendo `None` (sin dato) cuando el denominador es 0.
+
+    Las métricas de tasa (%/ratios/puntos por posesión) que no tienen intentos
+    en un partido valen `null`, no 0: un partido sin tiros libres no debe contar
+    como FT% 0 y arrastrar el promedio. Los promedios (app.py `_avg`,
+    `league_averages`) y el frontend excluyen los `None`. Ver
+    sdd/specs/08-nulos-vs-cero/spec.md.
+    """
     return round(num / den, 4) if den else default
 
 
@@ -67,7 +75,7 @@ def calc_team_stats(t: dict, opp: dict) -> dict:
     # ── Efficiency ratings ────────────────────────────────────────────────────
     oer = _safe_div(pts, t_pos)
     der = _safe_div(opp["pts"], o_pos)
-    net = round(oer - der, 4)
+    net = round(oer - der, 4) if (oer is not None and der is not None) else None
 
     # ── Rebound percentages ───────────────────────────────────────────────────
     or_pct   = _safe_div(t["orb"], t["orb"] + opp["drb"])
@@ -79,7 +87,7 @@ def calc_team_stats(t: dict, opp: dict) -> dict:
     # ── Turnover & assist ratios ──────────────────────────────────────────────
     to_pct   = _safe_div(t["tov"], fga + 0.44 * fta + t["tov"])   # TO% (sobre plays)
     to_ratio = _safe_div(t["tov"], plays)                           # TO Ratio
-    as_pct   = _safe_div(t["ast"], fgm) if fgm else 0.0
+    as_pct   = _safe_div(t["ast"], fgm) if fgm else None
     ast_ratio = _safe_div(t["ast"], plays)                          # AST Ratio
 
     # ── Pace ──────────────────────────────────────────────────────────────────
@@ -188,7 +196,7 @@ def calc_player_stats(p: dict, team_pos: float, team: dict = None, game_minutes:
     fg3_uso = _safe_div(p["fga3"], fga)
     to_pct  = _safe_div(p["tov"], fga + 0.44 * fta + p["tov"])
     to_ratio = _safe_div(p["tov"], plays)
-    as_pct  = _safe_div(p["ast"], fgm) if fgm else 0.0
+    as_pct  = _safe_div(p["ast"], fgm) if fgm else None
     ast_to  = _safe_div(p["ast"], p["tov"]) if p["tov"] else (float("inf") if p["ast"] > 0 else 0.0)
     ast_ratio = _safe_div(p["ast"], plays)
     peso_1p = _safe_div(ftm, pts)

@@ -2,6 +2,8 @@
 
 Fuentes: Dean Oliver — *Basketball on Paper*; Guía de scouting FUBB.
 
+> **Nulo vs cero.** Toda métrica de tasa de esta página (las que tienen denominador: porcentajes, ratios, puntos por posesión/play/tiro) vale **`null`** —no `0`— cuando su denominador es 0 en un partido (ej. sin tiros libres → FT% nulo). Los promedios entre partidos **excluyen** los nulos. Las stats de conteo conservan su 0 real. Implementado vía `_safe_div(...)=None` en `stats_engine.py`. Ver `sdd/specs/08-nulos-vs-cero/`.
+
 ## Abreviaturas
 
 | Símbolo | Significado |

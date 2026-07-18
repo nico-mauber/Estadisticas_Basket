@@ -657,3 +657,48 @@ thead th[data-key]:hover  { color: var(--text); }
 .fiba-box .lbl { color: var(--muted); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; white-space: nowrap; }
 .fiba-box td:first-child, .fiba-box th:first-child { text-align: right; padding-right: var(--sp-2); }
 .fiba-box td:last-child,  .fiba-box th:last-child  { text-align: left;  padding-left:  var(--sp-2); }
+
+/* ── Buscador de jugadores ─────────────────────────── */
+.search-filters {
+  display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-bottom: var(--sp-3);
+}
+.search-filters input, .search-filters select,
+.search-ranges input {
+  background: var(--surface2); border: 1px solid var(--border);
+  border-radius: var(--radius); color: var(--text);
+  padding: 9px 11px; font-size: 13px; font-family: var(--font); outline: none;
+  transition: border-color .15s;
+}
+.search-filters input:focus, .search-filters select:focus,
+.search-ranges input:focus { border-color: var(--accent); }
+.search-filters input { flex: 1 1 160px; min-width: 140px; }
+.search-filters select { flex: 1 1 120px; }
+.search-ranges {
+  display: grid; grid-template-columns: 1fr; gap: var(--sp-2); margin-bottom: var(--sp-3);
+}
+@media (min-width: 480px) { .search-ranges { grid-template-columns: 1fr 1fr; } }
+@media (min-width: 768px) { .search-ranges { grid-template-columns: 1fr 1fr 1fr; } }
+.range-filter { display: flex; align-items: center; gap: var(--sp-2); }
+.range-filter span { flex: 0 0 84px; color: var(--muted); font-size: 12px; font-weight: 600; }
+.range-filter input { width: 100%; min-width: 0; }
+.search-actions { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; }
+.search-actions #sf-count { font-size: 12px; }
+.search-table tbody tr { cursor: pointer; }
+.search-table th { cursor: pointer; white-space: nowrap; }
+.search-table th:hover { color: var(--accent); }
+
+/* ── Lineups (combinaciones) ───────────────────────── */
+.lineup-picker {
+  display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-2);
+}
+.lineup-check {
+  display: flex; align-items: center; gap: 6px;
+  background: var(--surface2); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 7px 11px; font-size: 13px;
+  cursor: pointer; user-select: none;
+}
+.lineup-check input { cursor: pointer; }
+
+/* ── ON / OFF ───────────────────────────────────────── */
+.onoff-table td, .onoff-table th { text-align: center; min-width: 0; }
+.onoff-table .lbl { color: var(--muted); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; white-space: nowrap; }
