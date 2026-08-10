@@ -19,18 +19,38 @@ function statClass(value, avg, higherIsBetter = true) {
   return (higherIsBetter ? value >= avg : value <= avg) ? "above-avg" : "below-avg";
 }
 
+// Comparador único de tablas ordenables: el nulo se APARTA de la comparación en
+// vez de recibir un valor extremo, por eso su posición no depende de `dir` — queda
+// al final tanto ascendente como descendente (Feature 12 RF-1/RF-2).
+function _cmpNullsLast(av, bv, dir) {
+  const isNull = v => v == null || (typeof v === "number" && isNaN(v));
+  const an = isNull(av), bn = isNull(bv);
+  if (an && bn) return 0;
+  if (an) return 1;
+  if (bn) return -1;
+  if (typeof av === "string" || typeof bv === "string")
+    return dir * String(av).localeCompare(String(bv));
+  return dir * (av - bv);
+}
+
 function statBox(label, value, display, leagueKey, league, higherIsBetter = true) {
   const lg    = leagueKey ? league?.[leagueKey] : null;
   const avg   = lg?.avg;
-  const best  = lg?.best;
   const cls   = statClass(value, avg, higherIsBetter);
-  const isPct = !!leagueKey && (leagueKey.includes("pct") || leagueKey.includes("or_") || leagueKey.includes("dr_") || leagueKey.includes("to_") || leagueKey.includes("as_"));
+  // `def_to_ratio` = (STL+BLK+DR)/TOV es un RATIO, no un porcentaje: sin excluirlo,
+  // el `includes("to_")` lo formatea como % y un 3.275 se muestra "327.5%" — la misma
+  // familia de valor imposible que reporta C-02 (Feature 14 RF-5).
+  // `as_pos` cae en el mismo heurístico por `includes("as_")` y es un ratio (Feature 15 D-6)
+  const NOT_PCT = ["def_to_ratio", "as_pos"];
+  const isPct = !!leagueKey && !NOT_PCT.includes(leagueKey) &&
+    (leagueKey.includes("pct") || leagueKey.includes("or_") || leagueKey.includes("dr_") || leagueKey.includes("to_") || leagueKey.includes("as_"));
   const fmt   = v => v != null ? (isPct ? PCT(v) : DEC2(v)) : "—";
+  // El indicador "↑ mejor de la liga" se retiró: era el máximo de la población sin
+  // mínimo de muestra y producía valores imposibles (↑ 9900.0%). Su reemplazo es el
+  // percentil de T-01 (Feature 14 RF-5, decisión del cliente en ROADMAP §5).
   const context = lg ? `
       <div class="stat-context">
         <span class="avg">Ø ${fmt(avg)}</span>
-        &nbsp;
-        <span class="best">↑ ${fmt(best)}</span>
       </div>` : "";
   return `
     <div class="stat-box">
@@ -42,6 +62,10 @@ function statBox(label, value, display, leagueKey, league, higherIsBetter = true
 
 // ── Compute averages from a game_log array (for last-N filter) ─────────────
 function _computeAvg(gameLog) {
+  // Un DNP no cuenta como partido jugado (Feature 12 RF-6). El backend usa la misma
+  // población; si acá no se filtrara, el filtro de últimos N divergiría de `averages`.
+  // `played` solo viene en el game log de jugador — en el de equipo es undefined y no filtra.
+  gameLog = (gameLog || []).filter(g => g.played !== false);
   const n = gameLog.length;
   if (!n) return {};
   const keys = [
@@ -401,20 +425,20 @@ let _leagueComp     = ""; // "" = todas las competencias
 const LEAGUE_MAPS = [
   {
     id: "ef", label: "Eficiencia (OER / DER)",
-    axis: { xKey: "oer", xName: "OER", xTitle: "OER  (↑ mejor ataque)", xPct: false,
+    axis: { xKey: "oer", xName: "OER", xTitle: "OER  (→ mejor ataque)", xPct: false,
             yKey: "der", yName: "DER", yTitle: "DER  (↓ mejor defensa)", yPct: false },
     hint: "Derecha = mejor ataque (OER alto) &nbsp;|&nbsp; Abajo = mejor defensa (DER bajo) &nbsp;|&nbsp; Abajo-derecha = elite",
   },
   {
     id: "reb", label: "Rebotes (OR% / DR%)",
-    axis: { xKey: "or_pct", xName: "OR%", xTitle: "OR%  (↑ mejor)", xPct: true,
+    axis: { xKey: "or_pct", xName: "OR%", xTitle: "OR%  (→ mejor)", xPct: true,
             yKey: "dr_pct", yName: "DR%", yTitle: "DR%  (↑ mejor)", yPct: true },
     hint: "Arriba-derecha = domina ambos tableros (ofensivo y defensivo)",
   },
   {
     id: "rec", label: "Recuperos / Puntos",
-    axis: { xKey: "stl", xName: "Recuperos", xTitle: "Recuperos por partido  (↑)", xPct: false,
-            yKey: "pts", yName: "Puntos", yTitle: "Puntos por partido  (↑)", yPct: false },
+    axis: { xKey: "stl", xName: "Recuperos", xTitle: "Recuperos por partido  (→ más robos)", xPct: false,
+            yKey: "pts", yName: "Puntos", yTitle: "Puntos por partido  (↑ más puntos)", yPct: false },
     hint: "Derecha = más robos &nbsp;|&nbsp; Arriba = más puntos &nbsp;|&nbsp; Arriba-derecha = elite",
   },
 ];
@@ -435,15 +459,41 @@ const LEAGUE_COLS = [
   { key: "pts",          label: "Pts",   title: "Puntos por partido" },
 ];
 
+// C-09 — tabla de posiciones clásica: 2 puntos por ganado, 1 por perdido.
+// Se alimenta del mismo `_leagueTeams` que el ranking: sin fetch adicional.
+// Ordena por puntos de tabla; desempata por diferencia de puntos (Feature 17 RF-4).
+function _standingsCardHTML(teams) {
+  if (!teams?.length) return "";
+  const rows = [...teams].sort((a, b) =>
+    (b.table_points ?? 0) - (a.table_points ?? 0) ||
+    ((b.pts_for ?? 0) - (b.pts_against ?? 0)) - ((a.pts_for ?? 0) - (a.pts_against ?? 0)));
+  const th = ["Equipo", "PJ", "PG", "PP", "Pts", "PF", "PC"]
+    .map((h, i) => `<th${i ? ' style="text-align:right"' : ""}>${h}</th>`).join("");
+  const body = rows.map(t => `
+    <tr data-code="${t.team_code}">
+      <td>${t.team_name}</td>
+      <td style="text-align:right">${t.games ?? "—"}</td>
+      <td style="text-align:right">${t.wins ?? "—"}</td>
+      <td style="text-align:right">${t.losses ?? "—"}</td>
+      <td style="text-align:right;font-weight:700">${t.table_points ?? "—"}</td>
+      <td style="text-align:right">${t.pts_for ?? "—"}</td>
+      <td style="text-align:right">${t.pts_against ?? "—"}</td>
+    </tr>`).join("");
+  return `
+    <div class="card">
+      <div class="card-title">Tabla general</div>
+      <div class="table-wrap">
+        <table id="standings-table" class="search-table">
+          <thead><tr>${th}</tr></thead>
+          <tbody>${body}</tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
 function _sortedLeague() {
-  return [..._leagueTeams].sort((a, b) => {
-    const va = a[_leagueSortKey], vb = b[_leagueSortKey];
-    if (va == null) return 1;
-    if (vb == null) return -1;
-    return typeof va === "string"
-      ? va.localeCompare(vb) * _leagueSortDir
-      : (va - vb) * _leagueSortDir;
-  });
+  return [..._leagueTeams].sort((a, b) =>
+    _cmpNullsLast(a[_leagueSortKey], b[_leagueSortKey], _leagueSortDir));
 }
 
 function _leagueTableHTML(teams) {
@@ -526,6 +576,7 @@ async function renderLeague() {
       ? `<select id="league-comp" class="map-select">${_compOptions(comps, _leagueComp)}</select>`
       : "";
     sec.innerHTML = `
+      ${_standingsCardHTML(_leagueTeams)}
       <div class="card">
         <div class="map-header">
           <div class="card-title" style="margin:0">Ranking de equipos — Liga <span style="color:var(--muted);font-size:10px;font-weight:400;margin-left:8px">Click en columna para ordenar</span></div>
@@ -573,7 +624,7 @@ async function renderLeague() {
   }
 }
 
-// ── Clutch por equipo (últimos 5 min, dif ≤ 15) — dentro de Equipo (Feat 05 v2) ──
+// ── Clutch por equipo (últimos 5 min, dif ≤ `margin`) — dentro de Equipo (Feat 05 v2) ──
 let _clutchData = null;
 let _clutchSort = { key: "date", dir: -1 };
 
@@ -593,15 +644,20 @@ const CLUTCH_COLS = [
 async function renderTeamClutch(teamCode) {
   const box = document.getElementById("team-clutch");
   if (!box) return;
-  const title = '<div class="card-title">Cierres (últimos 5 min, dif ≤ 15)</div>';
-  box.innerHTML = `<div class="card">${title}<p class="empty"><span class="spinner"></span>Calculando cierres...</p></div>`;
+  // El umbral sale del backend, no de un literal: vivía duplicado y por eso la
+  // leyenda quedaba desincronizada (Feature 18 RF-4). Antes de la respuesta todavía
+  // no se conoce, así que loading y error usan el default.
+  const CLUTCH_MARGIN_DEFAULT = 10;
+  const titleFor = m => `<div class="card-title">Cierres (últimos 5 min, dif ≤ ${m})</div>`;
+  box.innerHTML = `<div class="card">${titleFor(CLUTCH_MARGIN_DEFAULT)}<p class="empty"><span class="spinner"></span>Calculando cierres...</p></div>`;
   try {
     _clutchData = await api.clutchTeam(teamCode);
   } catch (e) {
-    box.innerHTML = `<div class="card">${title}<p class="empty below-avg">${e.message || "No se pudieron cargar los cierres"}</p></div>`;
+    box.innerHTML = `<div class="card">${titleFor(CLUTCH_MARGIN_DEFAULT)}<p class="empty below-avg">${e.message || "No se pudieron cargar los cierres"}</p></div>`;
     return;
   }
   const d = _clutchData;
+  const title = titleFor(d.margin ?? CLUTCH_MARGIN_DEFAULT);
   if (!d.games_qualified) {
     box.innerHTML = `<div class="card">${title}<p class="empty">Sin cierres apretados: los ${d.games_excluded} partido(s) con play-by-play se definieron por más de ${d.margin} al minuto 5:00.</p></div>`;
     return;
@@ -635,20 +691,15 @@ function _drawClutchTable() {
   const t = document.getElementById("clutch-table");
   if (!t || !_clutchData) return;
   const k = _clutchSort.key;
-  const _val = v => (v && typeof v === "object") ? (v.pts ?? v.ast ?? 0) : v;
-  const sorted = [..._clutchData.per_game].sort((a, b) => {
-    let av = _val(a[k]), bv = _val(b[k]);
-    if (typeof av === "string" || typeof bv === "string")
-      return _clutchSort.dir * String(av ?? "").localeCompare(String(bv ?? ""));
-    if (av == null) av = -Infinity;
-    if (bv == null) bv = -Infinity;
-    return _clutchSort.dir * (av - bv);
-  });
+  const _val = v => (v && typeof v === "object") ? (v.pts ?? v.ast ?? null) : v;
+  const sorted = [..._clutchData.per_game].sort((a, b) =>
+    _cmpNullsLast(_val(a[k]), _val(b[k]), _clutchSort.dir));
   const cell = (c, r) => {
     const v = r[c.key];
     if (c.leader) return v ? `${v.name} (${v[c.leader]})` : "—";
     if (c.date)   return _fmtDate(v);
-    if (c.diff)   { const cls = v > 0 ? "above-avg" : v < 0 ? "below-avg" : ""; return `<span class="${cls}">${v > 0 ? "+" : ""}${v}</span>`; }
+    if (c.diff)   { if (v == null) return "—";   // sin dato: ni color ni valor crudo (RF-3/RF-4)
+                    const cls = v > 0 ? "above-avg" : v < 0 ? "below-avg" : ""; return `<span class="${cls}">${v > 0 ? "+" : ""}${v}</span>`; }
     if (c.txt)    return v || "—";
     if (c.int)    return v == null ? "—" : v;
     if (c.pct)    return PCT(v);
@@ -726,7 +777,9 @@ function _renderTeamContent(main, data, n) {
   // sin filtro alguno → usar los promedios/record ya calculados por el backend
   const unfiltered = !n && !_teamComp;
   const av  = unfiltered ? data.averages : _computeAvg(filtered);
-  const lg  = data.league;
+  // Promedio de liga de la COMPETENCIA activa, no del subconjunto en pantalla:
+  // el filtro de últimos N no participa de esta selección (Feature 14 RF-1/RF-2).
+  const lg  = data.leagues?.[_teamComp || ""] ?? data.league;
   const rec = unfiltered ? data.record : null;
 
   main.innerHTML = `
@@ -753,6 +806,7 @@ function _renderTeamContent(main, data, n) {
         ${statBox("FT%", av.ft_pct, PCT(av.ft_pct), "ft_pct", lg)}
         ${statBox("Uso 3P", av.fg3_uso, PCT(av.fg3_uso), "fg3_uso", lg)}
       </div>
+      ${_shotDetailGrid(av, data.totals, lg)}
     </div>
     <div class="card">
       <div class="card-title">Rebotes & Misc</div>
@@ -778,7 +832,7 @@ function _renderTeamContent(main, data, n) {
     <div class="card">
       <div class="card-title">Desglose ofensivo</div>
       <div class="stat-grid">
-        ${statBox("PeP",       av.paint_pts,         DEC2(av.paint_pts),         null, null, false)}
+        ${statBox("PtsEnPint",       av.paint_pts,         DEC2(av.paint_pts),         null, null, false)}
         ${statBox("Seg. Op.",  av.second_chance_pts,  DEC2(av.second_chance_pts), null, null, false)}
         ${statBox("Ptos/PER",  av.pts_from_tov,       DEC2(av.pts_from_tov),      null, null, false)}
         ${statBox("Banca",     av.bench_pts,          DEC2(av.bench_pts),         null, null, false)}
@@ -1070,49 +1124,52 @@ async function renderCompare() {
       const lg  = dataA.league;
 
       const a = avA, b = avB;
-      const N1 = v => v != null ? Math.round(v) : 0;
-      const D1 = v => v != null ? Number(v).toFixed(1) : "0";
+      // Sin dato → "—", nunca 0 (Feature 12 RF-4)
+      const N1 = v => v != null ? Math.round(v) : "—";
+      const D1 = v => v != null ? Number(v).toFixed(1) : "—";
+      // Ganador/perdedor: clase neutra si falta cualquiera de los dos lados — un nulo
+      // no se compara ni se pinta con color de rendimiento (RF-3)
+      const winCls = (va, vb, lowerBetter = false) =>
+        (va == null || vb == null) ? "" : ((lowerBetter ? va <= vb : va >= vb) ? "winner" : "loser");
 
       const shootRow = (label, madeA, attA, madeB, attB) => {
-        const pctA = attA ? Math.round(100 * madeA / attA) : 0;
-        const pctB = attB ? Math.round(100 * madeB / attB) : 0;
-        const winA = pctA >= pctB;
+        const pct  = (m, a) => (m == null || !a) ? null : Math.round(100 * m / a);
+        const pctA = pct(madeA, attA), pctB = pct(madeB, attB);
+        const shot = (m, a, p) => `${N1(m)}/${N1(a)}` + (p == null ? "" : ` (${p}%)`);
         return `<tr>
-          <td class="${winA ? 'winner' : 'loser'}">${N1(madeA)}/${N1(attA)} (${pctA}%)</td>
+          <td class="${winCls(pctA, pctB)}">${shot(madeA, attA, pctA)}</td>
           <td class="lbl">${label}</td>
-          <td class="${!winA ? 'winner' : 'loser'}">${N1(madeB)}/${N1(attB)} (${pctB}%)</td>
+          <td class="${winCls(pctB, pctA)}">${shot(madeB, attB, pctB)}</td>
         </tr>`;
       };
-      const rawRow = (label, va, vb, lowerBetter = false) => {
-        const winA = lowerBetter ? va <= vb : va >= vb;
-        return `<tr>
-          <td class="${winA ? 'winner' : 'loser'}">${D1(va)}</td>
+      const rawRow = (label, va, vb, lowerBetter = false) => `<tr>
+          <td class="${winCls(va, vb, lowerBetter)}">${D1(va)}</td>
           <td class="lbl">${label}</td>
-          <td class="${!winA ? 'winner' : 'loser'}">${D1(vb)}</td>
+          <td class="${winCls(vb, va, lowerBetter)}">${D1(vb)}</td>
         </tr>`;
-      };
 
-      const pfA = N1(a.pf), pfB = N1(b.pf), oppPfA = N1(a.opp_pf), oppPfB = N1(b.opp_pf);
+      const pfA = a.pf, pfB = b.pf, oppPfA = a.opp_pf, oppPfB = b.opp_pf;
       const rows = [
         shootRow("LC",      a.fgm,  a.fga,  b.fgm,  b.fga),
         shootRow("2Pts",    a.fgm2, a.fga2, b.fgm2, b.fga2),
         shootRow("3Pts",    a.fgm3, a.fga3, b.fgm3, b.fga3),
         shootRow("1Pt",     a.ftm,  a.fta,  b.ftm,  b.fta),
-        rawRow("REB",       a.trb || (a.orb + a.drb), b.trb || (b.orb + b.drb)),
+        rawRow("REB",       a.trb ?? (a.orb + a.drb), b.trb ?? (b.orb + b.drb)),
         rawRow("As",        a.ast,  b.ast),
         rawRow("ST",        a.stl,  b.stl),
         rawRow("Blq",       a.blk,  b.blk),
         rawRow("PER",       a.tov,  b.tov,  true),
         `<tr>
-          <td class="${pfA <= pfB ? 'winner' : 'loser'}">${pfA} (${oppPfA})</td>
+          <td class="${winCls(pfA, pfB, true)}">${N1(pfA)} (${N1(oppPfA)})</td>
           <td class="lbl">FP</td>
-          <td class="${pfB <= pfA ? 'winner' : 'loser'}">${pfB} (${oppPfB})</td>
+          <td class="${winCls(pfB, pfA, true)}">${N1(pfB)} (${N1(oppPfB)})</td>
         </tr>`,
-        rawRow("PeP",       a.paint_pts         || 0, b.paint_pts         || 0),
-        rawRow("PtsSegCh",  a.second_chance_pts || 0, b.second_chance_pts || 0),
-        rawRow("PtPer",     a.pts_from_tov      || 0, b.pts_from_tov      || 0),
-        rawRow("Pts Banca", a.bench_pts         || 0, b.bench_pts         || 0),
-        rawRow("PCA",       a.fast_break_pts    || 0, b.fast_break_pts    || 0),
+        // Sin `|| 0`: "la competencia no registra ese dato" es NULL, no cero (RF-4)
+        rawRow("PtsEnPint", a.paint_pts,         b.paint_pts),
+        rawRow("PtsSegCh",  a.second_chance_pts, b.second_chance_pts),
+        rawRow("PtPer",     a.pts_from_tov,      b.pts_from_tov),
+        rawRow("Pts Banca", a.bench_pts,         b.bench_pts),
+        rawRow("PCA",       a.fast_break_pts,    b.fast_break_pts),
       ].join("");
 
       // Tabla de métricas avanzadas (una fila por equipo, estilo tabla de cierres)
@@ -1187,8 +1244,9 @@ const SC_c3yJoin = Math.round(SC_cy - Math.sqrt(SC_r3 * SC_r3 - (SC_cx - SC_c3xL
 const SC_courtBg = "#f3f6fa", SC_paintBg = "#c7d8ec", SC_restrictBg = "#b4c8e6",
       SC_cornerBg = "#efe9c4", SC_line = "#46566a", SC_boxText = "#1f2937";
 
-// Heatmap por P/F (puntos por finalización), umbrales calcados de la imagen de referencia
-const _scBoxFill = pf => pf >= 1.00 ? "#79b13f" : pf >= 0.85 ? "#ef8b3a" : "#df574c";
+// Heatmap por PPT (puntos por tiro), umbrales calcados de la imagen de referencia.
+// La fórmula no cambió con C-03 — solo el nombre —, así que los colores son idénticos.
+const _scBoxFill = ppt => ppt >= 1.00 ? "#79b13f" : ppt >= 0.85 ? "#ef8b3a" : "#df574c";
 const _scDec2 = v => v.toFixed(2).replace(".", ",");
 const _scDec1 = v => v.toFixed(1).replace(".", ",");
 
@@ -1204,31 +1262,65 @@ function _scSpoke(deg) {
   return `<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="${SC_line}" stroke-width="1.2" clip-path="url(#sc-clip)"/>`;
 }
 
+// C-07 — detalle de tiro: intentos/convertidos de las 3 categorías (promedio por
+// partido + total de temporada) y los 4 PPT. Compartido por Equipo y Jugador.
+function _shotDetailGrid(av, totals, lg) {
+  const t = totals || {};
+  // "promedio (total)" — el promedio ya viene del backend; el total también, para no
+  // arrastrar el redondeo de multiplicar promedio × partidos (Feature 16 §9).
+  const cell = (label, avgKey, totKey) => {
+    const a = av?.[avgKey], n = t[totKey];
+    const disp = a != null ? `${DEC2(a)}<span style="font-size:9px;color:var(--muted)"> (${n ?? 0})</span>` : "—";
+    return statBox(label, a, disp, null, null);
+  };
+  return `
+    <div class="card-title" style="margin-top:14px;font-size:11px;color:var(--muted)">Detalle de tiro — promedio (total temporada)</div>
+    <div class="stat-grid">
+      ${cell("T2i", "fga2", "fga2")}
+      ${cell("T2c", "fgm2", "fgm2")}
+      ${cell("T3i", "fga3", "fga3")}
+      ${cell("T3c", "fgm3", "fgm3")}
+      ${cell("TLi", "fta",  "fta")}
+      ${cell("TLc", "ftm",  "ftm")}
+    </div>
+    <div class="card-title" style="margin-top:14px;font-size:11px;color:var(--muted)">Puntos por tiro</div>
+    <div class="stat-grid">
+      ${statBox("PPT",    av.pps,    DEC2(av.pps),    "pps",    lg)}
+      ${statBox("PPT 2",  av.ppt_2,  DEC2(av.ppt_2),  "ppt_2",  lg)}
+      ${statBox("PPT 3",  av.ppt_3,  DEC2(av.ppt_3),  "ppt_3",  lg)}
+      ${statBox("PPT TL", av.ppt_ft, DEC2(av.ppt_ft), "ppt_ft", lg)}
+    </div>`;
+}
+
 function _scLbl(zones, totalShots, key, lx, ly) {
   const z = zones?.[key];
   if (!z?.attempts) return '';
+  // C-03: cada zona muestra % de acierto, eFG% y PPT. El indicador "P/F" se retiró:
+  // era esta misma fórmula (puntos de la zona / intentos) mal etiquetada.
   const share = _scDec1((z.attempts / totalShots) * 100);
-  const pf    = _scDec2(z.pf);
+  const ppt   = z.ppt != null ? _scDec2(z.ppt) : '—';
   const fg    = _scDec1(z.pct * 100) + '%';
-  const bg    = _scBoxFill(z.pf);
-  const w = 54, h = 33, r = 4;
+  const efg   = z.efg != null ? _scDec1(z.efg * 100) + '%' : '—';
+  const bg    = _scBoxFill(z.ppt);
+  const w = 54, h = 44, r = 4;
   const x0 = lx - w / 2, y0 = ly - h / 2;
   return `
     <rect x="${x0}" y="${y0}" width="${w}" height="${h}" rx="${r}" fill="${bg}" stroke="rgba(0,0,0,0.25)" stroke-width="0.8"/>
-    <text x="${lx - 5}" y="${ly - 6}" text-anchor="end"   fill="rgba(0,0,0,0.70)" font-size="7.5" font-family="Inter,sans-serif">${share}%</text>
-    <text x="${lx + 4}" y="${ly - 6}" text-anchor="start" fill="rgba(0,0,0,0.70)" font-size="7.5" font-family="Inter,sans-serif">P/F ${pf}</text>
-    <text x="${lx}"     y="${ly + 9}" text-anchor="middle" fill="${SC_boxText}" font-size="14" font-weight="800" font-family="Inter,sans-serif">${fg}</text>`;
+    <text x="${lx - 5}" y="${ly - 11}" text-anchor="end"   fill="rgba(0,0,0,0.70)" font-size="7.5" font-family="Inter,sans-serif">${share}%</text>
+    <text x="${lx + 4}" y="${ly - 11}" text-anchor="start" fill="rgba(0,0,0,0.70)" font-size="7.5" font-family="Inter,sans-serif">PPT ${ppt}</text>
+    <text x="${lx}"     y="${ly + 5}"  text-anchor="middle" fill="${SC_boxText}" font-size="14" font-weight="800" font-family="Inter,sans-serif">${fg}</text>
+    <text x="${lx}"     y="${ly + 16}" text-anchor="middle" fill="rgba(0,0,0,0.70)" font-size="7.5" font-family="Inter,sans-serif">eFG ${efg}</text>`;
 }
 
 function _scBadge(summary) {
   if (!summary) return '';
-  const pf  = summary.global_pf != null ? _scDec2(summary.global_pf) : '—';
-  const efg = summary.efg_pct   != null ? _scDec1(summary.efg_pct * 100) + ' %' : '—';
+  const pf  = summary.ppt     != null ? _scDec2(summary.ppt) : '—';   // C-03: era "P/F"
+  const efg = summary.efg_pct != null ? _scDec1(summary.efg_pct * 100) + ' %' : '—';
   const cw = 70, ch = 38, bx = SC_cR - 2 * cw, by = SC_cT + 2;
   return `
     <rect x="${bx}"      y="${by}" width="${cw}" height="${ch}" rx="4" fill="#ef8b3a"/>
     <rect x="${bx + cw}" y="${by}" width="${cw}" height="${ch}" rx="4" fill="#9aa83a"/>
-    <text x="${bx + cw/2}"        y="${by + 14}" text-anchor="middle" fill="rgba(0,0,0,0.65)" font-size="9"  font-family="Inter,sans-serif">P/F</text>
+    <text x="${bx + cw/2}"        y="${by + 14}" text-anchor="middle" fill="rgba(0,0,0,0.65)" font-size="9"  font-family="Inter,sans-serif">PPT</text>
     <text x="${bx + cw/2}"        y="${by + 31}" text-anchor="middle" fill="${SC_boxText}" font-size="15" font-weight="800" font-family="Inter,sans-serif">${pf}</text>
     <text x="${bx + cw + cw/2}"   y="${by + 14}" text-anchor="middle" fill="rgba(0,0,0,0.65)" font-size="9"  font-family="Inter,sans-serif">eFG%</text>
     <text x="${bx + cw + cw/2}"   y="${by + 31}" text-anchor="middle" fill="${SC_boxText}" font-size="15" font-weight="800" font-family="Inter,sans-serif">${efg}</text>`;
@@ -1328,7 +1420,8 @@ function _renderPlayerContent(main, data, comp) {
   const { teamCode, playerName } = _playerCtx;
   const log  = _filterByComp(data.game_log, comp);
   const av   = comp ? _computeAvg(log) : data.averages;
-  const lg   = data.league;
+  // Promedio de liga de la COMPETENCIA activa (Feature 14 RF-1/RF-2)
+  const lg   = data.leagues?.[comp || ""] ?? data.league;
   const comps = _logComps(data.game_log);
 
   {
@@ -1350,6 +1443,16 @@ function _renderPlayerContent(main, data, comp) {
         </div>
       </div>
       <div class="card">
+        <div class="card-title">Por posesión y por minuto</div>
+        <div class="stat-grid">
+          ${statBox("AS/pos",  av.as_pos,  DEC2(av.as_pos),  "as_pos",  lg)}
+          ${statBox("PER/pos", av.tov_pos, DEC2(av.tov_pos), "tov_pos", lg, false)}
+          ${statBox("PTS/pos", av.pts_pos, DEC2(av.pts_pos), "pts_pos", lg)}
+          ${statBox("RO/min",  av.orb_min, DEC2(av.orb_min), "orb_min", lg)}
+          ${statBox("RD/min",  av.drb_min, DEC2(av.drb_min), "drb_min", lg)}
+        </div>
+      </div>
+      <div class="card">
         <div class="card-title">Tiro</div>
         <div class="stat-grid">
           ${statBox("FG2%", av.fg2_pct, PCT(av.fg2_pct), "fg2_pct", lg)}
@@ -1358,6 +1461,7 @@ function _renderPlayerContent(main, data, comp) {
           ${statBox("Uso 2P", av.fg2_uso, PCT(av.fg2_uso), "fg2_uso", lg)}
           ${statBox("Uso 3P", av.fg3_uso, PCT(av.fg3_uso), "fg3_uso", lg)}
         </div>
+        ${_shotDetailGrid(av, data.totals, lg)}
       </div>
       <div class="card">
         <div class="card-title">Rebotes & distribución</div>
@@ -1561,14 +1665,7 @@ function _renderSearchResults(rows) {
   const box = document.getElementById("search-results");
   if (!rows.length) { box.innerHTML = `<p class="empty">Ningún jugador cumple los filtros</p>`; return; }
   const k = _searchSort.key;
-  const sorted = [...rows].sort((a, b) => {
-    let av = a[k], bv = b[k];
-    if (typeof av === "string" || typeof bv === "string")
-      return _searchSort.dir * String(av ?? "").localeCompare(String(bv ?? ""));
-    if (av == null) av = -Infinity;
-    if (bv == null) bv = -Infinity;
-    return _searchSort.dir * (av - bv);
-  });
+  const sorted = [...rows].sort((a, b) => _cmpNullsLast(a[k], b[k], _searchSort.dir));
   const fmt = (c, v) => c.txt ? (v || "—") : c.int ? (v ?? "—") : c.pct ? PCT(v) : DEC2(v);
   box.innerHTML = `
     <div class="card">

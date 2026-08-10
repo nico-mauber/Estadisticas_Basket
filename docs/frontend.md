@@ -29,12 +29,12 @@ La navegación es por `#hash` o botones de tab. No hay routing del servidor.
 |-------|-----------|-------------|
 | **Importar** | `#import` | Input URL FIBA LiveStats + botón importar; botón "Agregar partidos" (seed) solo si `seed_enabled` (dev) |
 | **Liga** | `#league` | Tabla ranking de equipos (columnas ordenables) + mapa de dispersión con ejes X/Y seleccionables (`LEAGUE_MAPS`). *(Los Cierres se movieron a la vista Equipo — Feature 05 v2.)* **Filtro por competencia** (Feature 09): `<select>` en el header del ranking que refetchea `api.league(comp)` (solo si hay >1 competencia) |
-| **Equipo** | `#team` | Record, Four Factors, métricas avanzadas, desglose ofensivo, shot chart (si hay datos), game log. Botón **"Ver mapa de tiro"**: shot chart por zonas del jugador seleccionado dentro de Equipo (`#team-shotmap`). Botón **"Ver ON/OFF"**: dos tablas `ON \| OFF \| Δ` del jugador — **Eficiencia** (tasas, Δ del backend) y **Producción del equipo** (conteos crudos: pts a favor/contra, REB, AST, pérdidas, robos, tapones; Δ = ON−OFF) (`#team-onoff`, `renderTeamOnOff`, Feature 04). Apartado **"Combinaciones (Lineups)"**: multi-select de 3-5 jugadores + botón "Analizar combinación" → tarjeta de métricas y líderes (`#team-lineup-picker`/`#team-lineup`, `renderTeamLineup`, Feature 03). Apartado **"Cierres (últimos 5 min, dif ≤ 15)"**: tarjeta agregada del equipo ("mini-partido" de sus cierres apretados, con récord) + tabla por partido ordenable (`#team-clutch`, `renderTeamClutch`, Feature 05 v2) |
+| **Equipo** | `#team` | Record, Four Factors, métricas avanzadas, desglose ofensivo, shot chart (si hay datos), game log. Botón **"Ver mapa de tiro"**: shot chart por zonas del jugador seleccionado dentro de Equipo (`#team-shotmap`). Botón **"Ver ON/OFF"**: dos tablas `ON \| OFF \| Δ` del jugador — **Eficiencia** (tasas, Δ del backend) y **Producción del equipo** (conteos crudos: pts a favor/contra, REB, AST, pérdidas, robos, tapones; Δ = ON−OFF) (`#team-onoff`, `renderTeamOnOff`, Feature 04). Apartado **"Combinaciones (Lineups)"**: multi-select de 3-5 jugadores + botón "Analizar combinación" → tarjeta de métricas y líderes (`#team-lineup-picker`/`#team-lineup`, `renderTeamLineup`, Feature 03). Apartado **"Cierres (últimos 5 min, dif ≤ 10)"**: tarjeta agregada del equipo ("mini-partido" de sus cierres apretados, con récord) + tabla por partido ordenable (`#team-clutch`, `renderTeamClutch`, Feature 05 v2) |
 | **Jugador** | `#player` | Métricas individuales, shot chart (11 zonas o 3 zonas según disponibilidad de coordenadas), game log |
 | **Comparar** | `#compare` | Radar de tres polígonos (equipo A, equipo B, promedio liga) + box score FIBA |
 | **Buscar** | `#search` | Buscador avanzado de jugadores: filtros combinables (nombre, equipo, competencia, posición, rangos mín/máx de métricas) sobre todos los jugadores de la base; tabla ordenable; fila → vista Jugador |
 
-**Vista Equipo — card "Desglose ofensivo":** se renderiza solo si hay datos (>0) en PeP / Seg. Op. / Ptos/PER / Banca / PCA (columnas `paint_pts`, `second_chance_pts`, `pts_from_tov`, `bench_pts`, `fast_break_pts`). *(Seg. Op. y PCA se poblaban en 0 por claves FIBA mal escritas — corregido en `fiba_fetcher.py`: `PointsSecondChance`/`PointsFastBreak`.)*
+**Vista Equipo — card "Desglose ofensivo":** se renderiza solo si hay datos (>0) en PtsEnPint / Seg. Op. / Ptos/PER / Banca / PCA (columnas `paint_pts`, `second_chance_pts`, `pts_from_tov`, `bench_pts`, `fast_break_pts`). *(Seg. Op. y PCA se poblaban en 0 por claves FIBA mal escritas — corregido en `fiba_fetcher.py`: `PointsSecondChance`/`PointsFastBreak`.)*
 
 **Filtro por competencia (Feature 09):** helpers compartidos `_logComps`/`_filterByComp`/`_compOptions`. Selectores en **Liga** (refetch `api.league(comp)`), **Equipo** (`#team-comp`, filtra el `game_log` y recomputa con `_computeAvg`; compone con las pills Últ. N), **Comparar** (`#compare-comp`) y **Jugador** (`#player-comp`, `renderPlayer`→`_renderPlayerContent`). Cada `<select>` se oculta si hay ≤1 competencia. `_computeAvg` incluye las keys de jugador `uso_pct`/`ast_to`.
 
@@ -44,7 +44,7 @@ La navegación es por `#hash` o botones de tab. No hay routing del servidor.
 
 **Más stats en Combinación y Comparar (Feature 11):** la card de Combinación (lineup) incluye una tabla ancha (`.search-table`) con la línea completa (Off/Def/Net/eFG%/TS%/Pos/Pts/REB/AST/…); Comparar incluye una card "Métricas avanzadas" (tabla de 2 filas, una por equipo).
 
-**Vista Comparar — box score FIBA:** tabla de 3 columnas (`valor A | etiqueta | valor B`) con el ganador de cada fila resaltado en verde. Filas: LC, 2Pts, 3Pts, 1Pt (con %), REB, As, ST, Blq, PER, FP (formato `faltas (recibidas)`), PeP, PtsSegCh, PtPer, Pts Banca, PCA. Clase CSS `.fiba-box`.
+**Vista Comparar — box score FIBA:** tabla de 3 columnas (`valor A | etiqueta | valor B`) con el ganador de cada fila resaltado en verde. Filas: LC, 2Pts, 3Pts, 1Pt (con %), REB, As, ST, Blq, PER, FP (formato `faltas (recibidas)`), PtsEnPint, PtsSegCh, PtPer, Pts Banca, PCA. Clase CSS `.fiba-box`.
 
 ## `api.js`
 
@@ -95,10 +95,49 @@ Lógica principal. Funciones clave:
 | `_renderLeague()` | Renderiza tabla de liga con sort clickeable |
 | `_renderTeamContent(data)` | Record card + Four Factors + métricas + shot chart + game log |
 | `_renderPlayerContent(data)` | Métricas jugador + shot chart por zonas + game log |
-| `_computeAvg(gameLog, keys)` | Promedia un array de partidos sobre las keys pedidas |
+| `_computeAvg(gameLog, keys)` | Promedia un array de partidos sobre las keys pedidas. Excluye las entradas con `played === false` (DNP) |
+| `_cmpNullsLast(av, bv, dir)` | **Comparador único de tablas ordenables.** Ver "Orden de nulos" abajo |
 | `_fourFactorsCard(av, name)` | Tabla Four Factors equipo vs rival con color-coding |
 | `_recordCard(record, name)` | Display W/L con porcentaje, local, visitante |
 | `_colorCell(val, avg, invert)` | Color verde/rojo relativo al promedio de liga |
+| `statClass(value, avg, hib)` | Clase de rendimiento; devuelve `"neutral"` si el valor o el promedio son `null` |
+| `statBox(label, value, display, leagueKey, league, hib)` | Card de métrica. Contexto: **solo `Ø {promedio}`** — el indicador `↑ {mejor}` se retiró (ver abajo) |
+
+### Contexto de las cards de stat
+
+La card muestra el valor de la entidad y, debajo, `Ø {promedio de liga}` — el de la **competencia
+seleccionada**, tomado de `data.leagues[compActiva]`. El filtro de últimos N cambia el valor de la
+entidad pero **no** el `Ø`.
+
+El indicador `↑ {mejor de la liga}` fue **eliminado**: era el máximo de la población sin mínimo de
+muestra, y producía valores imposibles (`↑ 9900.0%`). Su reemplazo es el percentil de T-01. No
+reintroducirlo. Ver `sdd/specs/14-promedios-de-liga/`.
+
+⚠️ `statBox` decide si formatear como porcentaje por **substring** del nombre de la métrica
+(`pct`, `or_`, `dr_`, `to_`, `as_`), con una lista de exclusión `NOT_PCT` para los ratios que caen mal
+en ese heurístico (`def_to_ratio`, `as_pos`). Al agregar una métrica cuyo nombre contenga esos
+fragmentos sin ser un porcentaje, agregarla a `NOT_PCT` o el valor se mostrará multiplicado por 100.
+Ya obligó a dos parches; lo correcto sería declarar el formato junto a cada métrica.
+
+### Perfil de jugador — card "Por posesión y por minuto"
+
+`AS/pos`, `PER/pos`, `PTS/pos`, `RO/min`, `RD/min` (`sdd/specs/15-metricas-jugador/`). `PER` es
+**pérdidas**, no Player Efficiency Rating — convención ya vigente en la app (`Ptos/PER`, fila `PER`
+de Comparar). `PER/pos` se renderiza con `higherIsBetter = false`.
+
+### Orden de nulos en tablas ordenables
+
+Un `null` **nunca se ordena como si fuera 0**: va siempre al final, **en ambos sentidos**. La regla
+vive en un único helper, `_cmpNullsLast(av, bv, dir)`, que consumen los tres sitios ordenables —
+`_sortedLeague` (Liga), `_drawClutchTable` (Cierres) y `_renderSearchResults` (Buscador).
+
+El mecanismo importa: el nulo se **aparta** de la comparación (devuelve `1`/`-1` **sin multiplicar
+por `dir`**) en vez de recibir un valor extremo. Asignarle `-Infinity`, que es lo que se hacía antes,
+funciona en descendente y falla en ascendente, donde los nulos encabezan la tabla.
+
+Al agregar una tabla ordenable nueva, usar este helper — no escribir un comparador propio.
+Un `null` tampoco recibe color de rendimiento: `statClass` y `winCls` (Comparar) devuelven clase
+neutra si falta cualquiera de los dos lados. Ver `sdd/specs/12-nulos-orden-color-dnp/`.
 
 ## Shot chart
 
@@ -147,3 +186,35 @@ Cache name: `smart-basket-v9`
 - Nav superior en desktop
 - CSS custom properties para dark mode
 - Breakpoint principal: `768px`
+
+## Cierres (umbral de partido cerrado)
+
+El umbral de "partido cerrado" es **dif ≤ 10** al minuto 5:00 (C-06; antes 15). Vive en un solo
+lugar: el default de `team_clutch()` en `backend/clutch.py`, expuesto en la respuesta de
+`GET /api/clutch/<code>` como `margin`. **El título de la card lo lee de ahí** — no escribirlo como
+literal en el frontend: esa duplicación fue la causa de que la leyenda quedara desincronizada.
+Ver `sdd/specs/18-etiquetas-y-umbrales/`.
+
+### Mapa de tiro y card "Tiro" (C-03 / C-07)
+
+Cada zona del mapa muestra **volumen %**, **PPT**, **% de acierto** y **eFG%** (caja SVG de 54×44).
+El encabezado muestra `PPT` y `eFG%`. **El indicador `P/F` fue retirado de toda la app** — era la
+misma fórmula de PPT mal etiquetada; no reintroducirlo.
+
+La card "Tiro" (Equipo y Jugador) incluye `_shotDetailGrid(av, totals, lg)`: `T2i`/`T2c`, `T3i`/`T3c`,
+`TLi`/`TLc` como `promedio (total temporada)`, más `PPT`, `PPT 2`, `PPT 3` y `PPT TL`.
+Ver `sdd/specs/16-tiro-completo-ppt/`.
+
+### Vista Liga — tabla general y ejes del mapa (C-09 / C-10)
+
+**Tabla general** (`_standingsCardHTML`): tabla de posiciones clásica arriba del ranking — Equipo, PJ,
+PG, PP, Pts, PF, PC. Puntos = 2 por ganado + 1 por perdido. Ordena por puntos y desempata por
+diferencia (PF − PC). Se alimenta del mismo `_leagueTeams` que el ranking: **sin fetch adicional**.
+
+> La tabla refleja únicamente los partidos importados, no el fixture completo.
+
+**Convención de flechas en los ejes del mapa**: la flecha indica la **dirección en pantalla** del
+mejor rendimiento — `→`/`←` en el eje horizontal, `↑`/`↓` en el vertical. No usar `↑` en un eje
+horizontal para decir "más es mejor": esa ambigüedad fue el defecto que reportó C-10.
+El gráfico no invierte la escala (`reverse: false` en `charts.js`), así que el valor más alto siempre
+se dibuja arriba. Ver `sdd/specs/17-vista-liga/`.

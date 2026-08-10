@@ -57,7 +57,7 @@ Stats de box score por equipo por partido. Incluye stats del rival pre-calculada
 | `opp_orb` / `opp_drb` | INTEGER | Rebotes del rival |
 | `opp_tov` | INTEGER | Pérdidas del rival |
 | `opp_pf` | INTEGER | Faltas del rival (faltas recibidas) |
-| `paint_pts` | INTEGER | Puntos en la pintura (PeP) |
+| `paint_pts` | INTEGER | Puntos en la pintura. **Etiqueta de UI: `PtsEnPint`** (antes `PeP`) — la columna NO se renombra (C-05 / Constitución 5) |
 | `second_chance_pts` | INTEGER | Puntos de segunda oportunidad (PtsSegCh) |
 | `pts_from_tov` | INTEGER | Puntos tras pérdida rival (PtPer) |
 | `bench_pts` | INTEGER | Puntos del banco |
@@ -92,7 +92,11 @@ Stats individuales por jugador por partido.
 | `orb` / `drb` / `trb` | INTEGER | |
 | `ast` / `tov` / `stl` / `blk` / `pf` | INTEGER | |
 
-**Restricción única:** `(game_id, team_code, player_name)`
+**Restricción única:** `(game_id, team_code, player_name)` — sobre el nombre **crudo**, tal como llega de FIBA.
+
+> **Identidad vs unicidad.** La restricción de arriba no define quién es un jugador: solo impide dos filas idénticas en un mismo partido. La **identidad** se resuelve al leer, por nombre normalizado + equipo (`norm_name()` en `stats_engine.py`), de modo que dos grafías del mismo nombre (`"C. Zinaich"` / `"C.  ZINAICH"`) se unifican en una sola ficha sin tocar los datos. Esto cubre todo el histórico sin migración. Ver `sdd/specs/13-dedup-jugadores/`.
+>
+> La columna `position` puede venir vacía en algunos partidos (FIBA no siempre carga `playingPosition`): al unificar gana la más frecuente entre las no vacías.
 
 ---
 

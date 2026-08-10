@@ -106,11 +106,12 @@ def _box_metrics(tb, ob):
     }
 
 
-def team_clutch(games, team_code, team_name, margin=15):
+def team_clutch(games, team_code, team_name, margin=10):
     """Cierre agregado ("mini-partido") + desglose por partido de UN equipo.
 
     games: [{game_id, events, opp_code, info:{date, home_away}}, ...] (Feature 02).
     Solo cuentan los partidos con diferencia ≤ `margin` al minuto 5:00 (§10.1).
+    Umbral por defecto 10 (C-06; antes 15). Ver sdd/specs/18-etiquetas-y-umbrales/.
     Ver sdd/specs/05-clutch/spec.md §10.
     """
     per_game, team_boxes, opp_boxes = [], [], []

@@ -7,6 +7,32 @@ Todas las rutas bajo `/api/`. Respuestas en JSON. Errores retornan `{"error": "m
 
 > **Nulo vs cero en métricas de tasa.** Los campos de tasa (porcentajes, ratios, puntos por posesión: `oer`, `der`, `net_rating`, `efg_pct`, `ts_pct`, `fg2_pct`, `fg3_pct`, `ft_pct`, `ft_rate`, `pps`, `ppp`, `or_pct`, `dr_pct`, `trb_pct`, `to_pct`, `as_pct`, `uso_pct`, etc.) valen **`null`** cuando su denominador es 0 en ese partido (ej. un partido sin tiros libres → `ft_pct: null`, no `0`). En `averages`, esos partidos se **excluyen** del promedio (no cuentan como 0). Las stats de conteo (`pts`, `fta`, `ast`, ...) conservan su 0 real. `null` = "sin dato / sin intentos"; `0` = "valor real cero". Ver `sdd/specs/08-nulos-vs-cero/`.
 
+> **Partidos DNP y población de promedio.** Un partido con 0 minutos disputados (DNP) **no cuenta como partido jugado**: queda fuera de todos los promedios del jugador, tanto de tasa como de conteo. Afecta a `GET /api/player/<team>/<player>`, `GET /api/players/<team>` y `GET /api/search/players`:
+> - `games` es el número de partidos **jugados**, no el de fichas en `player_game_stats`.
+> - `averages.*`, `uso_pct`, `pts`, `minutes` y `plus_minus` se promedian solo sobre partidos jugados.
+> - `game_log` sigue devolviendo **todas** las fichas, incluidas las DNP: cada entrada trae `"played": bool` (`false` = DNP). El DNP se excluye del promedio, no de la historia.
+>
+> Un partido **con** minutos y 0 puntos sí cuenta — ese 0 es real. Campos que además pueden valer `null` donde antes devolvían `0`: `reb_share`, `oreb_share`, `dreb_share` (tasas: denominador 0 o sin fila de equipo), `uso_pct` en `/api/players/<team>`, y `record.win_pct` en `/api/team/<code>`. Ver `sdd/specs/12-nulos-orden-color-dnp/`.
+
+> **Identidad de jugador.** Los tres endpoints de jugador resuelven la identidad por **nombre normalizado** (minúsculas, sin tildes, espacios colapsados) + equipo: dos fichas cuyo nombre normaliza igual son el mismo jugador y se unifican al leer, sumando sus partidos. La tabla conserva el nombre crudo — la unificación no altera datos.
+> - `GET /api/player/<team>/<name>` acepta **cualquier grafía** en la URL y devuelve todos los partidos del jugador. `404` solo si no resuelve a ninguna ficha.
+> - El `player`/`name` devuelto es siempre una grafía real (la de la ficha más reciente), nunca la clave normalizada.
+> - `position` es la más frecuente entre las no vacías; a igual frecuencia, la de la ficha más reciente.
+>
+> La normalización es tipográfica, no semántica: `J. Feldeine` y `Jerome Feldeine` **no** se unifican. La competencia no entra en la clave (un jugador con partidos en dos competencias es una sola ficha, con `competitions[]`). Ver `sdd/specs/13-dedup-jugadores/`.
+
+> **Promedios de liga por competencia.** `GET /api/team/<code>` y `GET /api/player/<team>/<name>` devuelven `leagues`: un mapa `{"<competencia>": {…}}` con el promedio de liga de cada competencia en que la entidad tiene partidos, más la clave `""` con el agregado de todas. El campo `league` se conserva y equivale a `leagues[""]`.
+> - El promedio es la media **sobre todos los partidos** de esa competencia (ponderada: un equipo con 2 partidos aporta el doble que uno con 1), no la media de los promedios por equipo.
+> - `avg` y `best` valen `null` —no `0`— cuando ninguna observación de la población tiene dato.
+> - El promedio de liga **no** se recalcula con el subconjunto filtrado en pantalla (últimos N partidos): solo depende de la competencia seleccionada.
+> - `best` ya no se consume en la UI (el indicador `↑` se retiró); se conserva en la respuesta hasta que T-01 rehaga el bloque de contexto.
+>
+> Ver `sdd/specs/14-promedios-de-liga/`.
+
+> **Métricas de jugador por posesión y por minuto.** `game_log[]` y `averages` de los endpoints de jugador incluyen `as_pos`, `tov_pos` (`PER/pos`), `pts_pos`, `orb_min` y `drb_min`; y `or_pct`/`dr_pct`/`trb_pct`, que antes estaban **ausentes** y ahora traen el valor de la fórmula individual (ver `docs/metrics.md`). Todos pueden ser `null` con denominador 0 o sin datos del rival.
+>
+> **`ast_to` cambió de semántica**: era el promedio de los ratios por partido; ahora es el **acumulado de temporada** (`AST_total / TOV_total`), en equipo y en jugador. Un mismo jugador puede mostrar un valor distinto al de antes — el anterior era incorrecto. `null` si no hubo pérdidas (antes `99.0`). Ver `sdd/specs/15-metricas-jugador/`.
+
 ---
 
 ## POST `/api/import`

@@ -39,7 +39,9 @@ function _applyDefaults() {
 // ── Normalize a value to 0-100 relative to league ──────────────────────────
 function _norm(value, leagueKey, league, higherIsBetter = true) {
   const lg = league?.[leagueKey];
-  if (!lg || value == null) return 0;
+  // Sin dato → null, no 0: un 0 dibujaría el eje en el peor valor posible y se
+  // leería como "rinde pésimo" en vez de "no hay dato" (Feature 12 RF-9).
+  if (!lg || value == null) return null;
   const best  = lg.best;
   const avg   = lg.avg;
   // Estimate "worst" symmetrically from avg
@@ -203,7 +205,8 @@ export function drawEvolution(canvasId, gameLog, leagueOerAvg) {
       datasets: [
         {
           label: "OER",
-          data: sorted.map(g => +(g.oer ?? 0).toFixed(3)),
+          // Partido sin dato: se omite el punto, no se dibuja en 0 (Feature 12 RF-8)
+          data: sorted.map(g => g.oer == null ? null : +g.oer.toFixed(3)),
           borderColor: C.accent,
           backgroundColor: C.accentA,
           borderWidth: 2,
@@ -215,7 +218,7 @@ export function drawEvolution(canvasId, gameLog, leagueOerAvg) {
         },
         {
           label: "eFG%",
-          data: sorted.map(g => +(((g.efg_pct ?? 0) * 100).toFixed(1))),
+          data: sorted.map(g => g.efg_pct == null ? null : +(g.efg_pct * 100).toFixed(1)),
           borderColor: C.blue,
           backgroundColor: "transparent",
           borderWidth: 2,
@@ -276,7 +279,8 @@ export function drawPlayerEvolution(canvasId, gameLog) {
       datasets: [
         {
           label: "Puntos",
-          data: sorted.map(g => g.pts ?? 0),
+          // Partido sin dato: se omite el punto, no se dibuja en 0 (Feature 12 RF-8)
+          data: sorted.map(g => g.pts ?? null),
           borderColor: C.accent,
           backgroundColor: C.accentA,
           borderWidth: 2,
@@ -287,7 +291,7 @@ export function drawPlayerEvolution(canvasId, gameLog) {
         },
         {
           label: "OER",
-          data: sorted.map(g => +(g.oer ?? 0).toFixed(3)),
+          data: sorted.map(g => g.oer == null ? null : +g.oer.toFixed(3)),
           borderColor: C.green,
           backgroundColor: "transparent",
           borderWidth: 2,

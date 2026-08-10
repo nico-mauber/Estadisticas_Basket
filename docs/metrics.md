@@ -3,6 +3,10 @@
 Fuentes: Dean Oliver — *Basketball on Paper*; Guía de scouting FUBB.
 
 > **Nulo vs cero.** Toda métrica de tasa de esta página (las que tienen denominador: porcentajes, ratios, puntos por posesión/play/tiro) vale **`null`** —no `0`— cuando su denominador es 0 en un partido (ej. sin tiros libres → FT% nulo). Los promedios entre partidos **excluyen** los nulos. Las stats de conteo conservan su 0 real. Implementado vía `_safe_div(...)=None` en `stats_engine.py`. Ver `sdd/specs/08-nulos-vs-cero/`.
+>
+> **Reb Share** (y sus variantes ofensiva y defensiva) también es tasa: vale `null` cuando el total del equipo es 0 o no hay dato de equipo para ese partido.
+
+> **Partidos DNP.** Un partido con 0 minutos disputados **no cuenta como partido jugado**: queda fuera de todos los promedios del jugador, de tasa *y* de conteo. Predicado único: `played(minutes)` en `stats_engine.py`. Un partido **con** minutos y 0 puntos sí cuenta —ese 0 es real—, así que esto no contradice la regla de arriba: primero se descarta el DNP (no jugó), después el nulo (jugó sin dato). Ver `sdd/specs/12-nulos-orden-color-dnp/`.
 
 ## Abreviaturas
 
@@ -60,8 +64,24 @@ Similar a posesiones pero sin descuento de rebotes ofensivos. Representa el tota
 | **FG2%** | `2PM / 2PA` | Porcentaje de dobles |
 | **FG3%** | `3PM / 3PA` | Porcentaje de triples |
 | **FT%** | `FTM / FTA` | Porcentaje de tiros libres |
-| **PPT** | `PTS / FGA` | Puntos por tiro intentado |
+| **PPT** | `PTS / FGA` | Puntos por tiro intentado (solo tiros de campo) |
+| **PPT 2** | `(2 × 2PM) / 2PA` | Puntos por intento de 2 |
+| **PPT 3** | `(3 × 3PM) / 3PA` | Puntos por intento de 3 |
+| **PPT TL** | `FTM / FTA` | Puntos por tiro libre intentado |
 | **PPP** | `PTS / PLAYS` | Puntos por play (jugador) |
+
+---
+
+### eFG% por zona del mapa de tiro
+
+`(convertidos × factor) / intentos`, con `factor = 1.0` en zonas de 2 puntos y `1.5` en zonas de 3.
+Es `(FGM + 0.5 × 3PM) / FGA` aplicado a una zona de un único valor de puntos.
+
+> En las zonas de 2 el eFG% **coincide** con el % de acierto: el factor es 1.0. Todo el diferencial
+> del eFG% viene del triple.
+
+Cada zona del mapa muestra **% de acierto**, **eFG%** y **PPT**. El indicador `P/F` fue retirado:
+era esta misma fórmula de PPT con otra etiqueta. Ver `sdd/specs/16-tiro-completo-ppt/`.
 
 ---
 
@@ -107,10 +127,41 @@ Suma ≈ 1.0 (diferencias por redondeo).
 
 | Métrica | Fórmula | Descripción |
 |---------|---------|-------------|
-| **OR%** | `OR / (OR + DR_rival)` | % rebotes ofensivos capturados |
-| **DR%** | `DR / (DR + OR_rival)` | % rebotes defensivos capturados |
-| **TRB%** | `(OR + DR) / (OR + DR + OR_rival + DR_rival)` | % rebotes totales |
+| **OR%** *(equipo)* | `OR / (OR + DR_rival)` | % rebotes ofensivos capturados |
+| **DR%** *(equipo)* | `DR / (DR + OR_rival)` | % rebotes defensivos capturados |
+| **TRB%** *(equipo)* | `(OR + DR) / (OR + DR + OR_rival + DR_rival)` | % rebotes totales |
 | **Reb Share** *(jugador)* | `TRB_jugador / TRB_equipo` | Porción de rebotes del equipo |
+
+### OR% / DR% / TRB% de jugador — fórmula individual
+
+Las fórmulas de arriba son **de equipo** y no aplican a un individuo. Para un jugador se usa la
+fórmula individual, que ajusta por los minutos que estuvo en cancha:
+
+```
+OR%  = (RO_jug  × duración_partido) / (min_jug × (RO_equipo + RD_rival))
+DR%  = (RD_jug  × duración_partido) / (min_jug × (RD_equipo + RO_rival))
+TRB% = (REB_jug × duración_partido) / (min_jug × (REB_equipo + REB_rival))
+```
+
+Responde "de los rebotes disponibles mientras estuvo en cancha, ¿qué porción capturó?". `null` si
+faltan los datos del rival o si el jugador no disputó minutos.
+
+> ⚠️ El `OR%` de jugador y el de equipo comparten nombre pero son escalas distintas: el de equipo
+> ronda 29%, el individual ~4%. No compararlos entre sí.
+
+---
+
+## Por posesión y por minuto *(jugador)*
+
+| Métrica | Fórmula | Descripción |
+|---------|---------|-------------|
+| **AS/pos** | `AST / POS_jugador` | Asistencias por posesión propia |
+| **PER/pos** | `TOV / POS_jugador` | Pérdidas por posesión propia (**PER = pérdidas**, no Player Efficiency Rating) |
+| **PTS/pos** | `PTS / POS_jugador` | Puntos por posesión propia — **idéntico al OER de jugador**: misma fuente, dos etiquetas |
+| **RO/min** | `OR / min_jugador` | Rebotes ofensivos por minuto disputado |
+| **RD/min** | `DR / min_jugador` | Rebotes defensivos por minuto disputado |
+
+`POS_jugador` usa la fórmula de posesiones de arriba. Todas valen `null` con denominador 0.
 
 ---
 
@@ -122,7 +173,12 @@ Suma ≈ 1.0 (diferencias por redondeo).
 | **TO Ratio** | `TOV / PLAYS` | Pérdidas por play |
 | **AST%** | `AST / FGM` | % de canastas con asistencia |
 | **AST Ratio** | `AST / PLAYS` | Asistencias por play |
-| **AST/TO** *(jugador)* | `AST / TOV` | Ratio asistencias/pérdidas |
+| **AST/TO** *(equipo y jugador)* | `AST_temporada / TOV_temporada` | Ratio asistencias/pérdidas — **acumulado de temporada** |
+
+> **AS/PER es acumulado, no promediado.** Se calcula como el cociente de los **totales** de la
+> temporada, no como el promedio de los ratios por partido: un partido de 2/1 no debe pesar lo mismo
+> que uno de 10/5. Mismo criterio en equipo y en jugador. Vale `null` si no hubo pérdidas.
+> Ver `sdd/specs/15-metricas-jugador/`.
 
 ---
 
