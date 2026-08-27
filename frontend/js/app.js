@@ -1695,29 +1695,49 @@ function _renderSearchResults(rows) {
 
 // ── Bootstrap ──────────────────────────────────────────────────────────────
 const NAV_ITEMS = {
-  import:  { icon: "📥", label: "Importar" },
-  league:  { icon: "🏆", label: "Liga" },
-  team:    { icon: "📊", label: "Equipo" },
-  compare: { icon: "⚡", label: "Comparar" },
-  player:  { icon: "👤", label: "Jugador" },
-  search:  { icon: "🔎", label: "Buscar" },
+  import:  { icon: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 19h14"/></svg>', label: "Importar" },
+  league:  { icon: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 4h8v4a4 4 0 0 1-8 0V4Zm0 2H4v1a4 4 0 0 0 4 4m8-5h4v1a4 4 0 0 1-4 4M12 12v5m-4 3h8"/></svg>', label: "Liga" },
+  team:    { icon: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V9l8-6 8 6v11h-6v-6h-4v6H4Z"/></svg>', label: "Equipo" },
+  compare: { icon: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m13 2-8 12h7l-1 8 8-12h-7l1-8Z"/></svg>', label: "Comparar" },
+  player:  { icon: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>', label: "Jugador" },
+  search:  { icon: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>', label: "Buscar" },
 };
 
 function renderApp() {
   document.getElementById("app").innerHTML = `
-    <header>
-      <span class="header-logo">🏀 Smart-Basket</span>
-      <span class="header-sub">Basketball Advanced Analytics</span>
-      ${_authRequired ? `<span class="header-user">${_authUser || ""} · <button class="header-logout" id="btn-logout">Salir</button></span>` : ""}
-    </header>
-    <nav>
-      ${sections.map(s => `
-        <button data-section="${s}">
-          <span class="nav-icon">${NAV_ITEMS[s].icon}</span>
-          ${NAV_ITEMS[s].label}
-        </button>`).join("")}
-    </nav>
-    <main>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="sidebar-brand">
+          <span class="brand-mark" aria-hidden="true"><span>SB</span></span>
+          <span class="brand-copy">
+            <strong>Smart-Basket</strong>
+            <small>Basketball analytics</small>
+          </span>
+        </div>
+        <nav aria-label="Navegación principal">
+          <span class="nav-eyebrow">Análisis</span>
+          ${sections.map(s => `
+            <button data-section="${s}">
+              <span class="nav-icon">${NAV_ITEMS[s].icon}</span>
+              <span class="nav-label">${NAV_ITEMS[s].label}</span>
+            </button>`).join("")}
+        </nav>
+        <div class="sidebar-footer">
+          <div class="sidebar-status"><span></span> Datos guardados localmente</div>
+          ${_authRequired ? `
+            <div class="sidebar-account">
+              <span class="account-avatar">${(_authUser || "U").charAt(0).toUpperCase()}</span>
+              <span class="account-copy"><strong>${_authUser || "Usuario"}</strong><small>Sesión activa</small></span>
+            </div>
+            <button class="header-logout" data-action="logout">Cerrar sesión</button>` : ""}
+        </div>
+      </aside>
+      <div class="app-workspace">
+        <header class="mobile-header">
+          <span class="header-logo"><span class="mini-brand">SB</span> Smart-Basket</span>
+          ${_authRequired ? `<span class="header-user">${_authUser || ""}<button class="header-logout" data-action="logout">Salir</button></span>` : ""}
+        </header>
+        <main>
       <div class="section" id="sec-import"></div>
       <div class="section" id="sec-league"></div>
 
@@ -1779,7 +1799,9 @@ function renderApp() {
       <div class="section" id="sec-search">
         <div id="search-main"><p class="empty"><span class="spinner"></span>Cargando buscador...</p></div>
       </div>
-    </main>`;
+        </main>
+      </div>
+    </div>`;
 
   // Nav clicks
   document.querySelectorAll("nav button").forEach(btn => {
@@ -1899,13 +1921,12 @@ function renderApp() {
     document.getElementById("games-table").innerHTML = _gamesTable(games, importPage);
   });
 
-  const logoutBtn = document.getElementById("btn-logout");
-  if (logoutBtn) {
+  document.querySelectorAll('[data-action="logout"]').forEach(logoutBtn => {
     logoutBtn.addEventListener("click", async () => {
       try { await api.logout(); } catch {}
       showLogin("Sesión cerrada.");
     });
-  }
+  });
 
   setSection("import");
   renderImport();

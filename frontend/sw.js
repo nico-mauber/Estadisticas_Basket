@@ -1,4 +1,4 @@
-const CACHE = "smart-basket-v9";
+const CACHE = "smart-basket-v10";
 const STATIC = [
   "/",
   "/manifest.json",
@@ -26,7 +26,19 @@ self.addEventListener("activate", e => {
 
 self.addEventListener("fetch", e => {
   if (e.request.url.includes("/api/")) return;
+  if (e.request.method !== "GET") return;
+
+  // Network-first: durante desarrollo y después de un deploy se muestran los
+  // archivos nuevos inmediatamente. El caché queda como respaldo offline.
   e.respondWith(
-    caches.match(e.request).then(r => r || fetch(e.request))
+    fetch(e.request)
+      .then(response => {
+        if (response.ok && new URL(e.request.url).origin === self.location.origin) {
+          const copy = response.clone();
+          caches.open(CACHE).then(cache => cache.put(e.request, copy));
+        }
+        return response;
+      })
+      .catch(() => caches.match(e.request).then(r => r || caches.match("/")))
   );
 });
