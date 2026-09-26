@@ -33,6 +33,21 @@ Todas las rutas bajo `/api/`. Respuestas en JSON. Errores retornan `{"error": "m
 >
 > **`ast_to` cambió de semántica**: era el promedio de los ratios por partido; ahora es el **acumulado de temporada** (`AST_total / TOV_total`), en equipo y en jugador. Un mismo jugador puede mostrar un valor distinto al de antes — el anterior era incorrecto. `null` si no hubo pérdidas (antes `99.0`). Ver `sdd/specs/15-metricas-jugador/`.
 
+> **Nulos con razón (C-11).** `GET /api/team/<code>`, `GET /api/player/<team>/<name>` y `GET /api/search/players` agregan un mapa `null_reasons` `{clave: código}` que dice **por qué** vale `null` cada métrica nula. Solo lista claves cuyo valor es `null`; el valor sigue siendo `null`.
+> - Dónde: en `/api/team` y `/api/player`, `null_reasons` en la raíz explica `averages`, y cada entrada de `game_log[]` trae su propio `null_reasons`. En `/api/search/players`, cada fila trae el suyo.
+> - Códigos que se emiten hoy:
+>
+>   | Código | Significa |
+>   |---|---|
+>   | `dnp` | El jugador no disputó minutos en ese partido (o en ninguno, para `averages`) |
+>   | `no_registrado` | La competencia no publica ese campo (FIBA no manda la clave): `paint_pts`, `second_chance_pts`, `pts_from_tov`, `bench_pts`, `fast_break_pts`, `plus_minus` |
+>   | `sin_perdidas` | `ast_to` o `def_to_ratio` con 0 pérdidas: el cociente no está definido |
+>   | `sin_intentos` | Cualquier otra tasa con denominador 0 |
+>
+> - **Sin centinelas**: `ast_to` y `def_to_ratio` con 0 pérdidas valen `null` (`sin_perdidas`), también por partido — antes `99.0` (DA-07). Ninguna respuesta contiene `Infinity` ni `NaN`.
+> - **`averages.def_to_ratio`** es el acumulado `(ΣROB + ΣTAP + ΣRD) / ΣPER` (pooled, DA-02), igual que `ast_to`; antes era el promedio de los ratios por partido.
+> - **Desglose FIBA y `plus_minus`**: si la competencia no los publica, valen `null` (antes `0`). En `/api/search/players`, `plus_minus` promedia solo los partidos que lo traen.
+
 ---
 
 ## POST `/api/import`

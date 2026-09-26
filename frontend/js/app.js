@@ -1,5 +1,6 @@
 import { api, setUnauthorizedHandler } from "./api.js";
 import { drawRadar, drawEvolution, drawPlayerEvolution, drawLeagueScatter, drawCompareRadar, resetZoom } from "./charts.js";
+import { PCT, PCT0, DEC1, DEC2, isNull, nullDisplay, fmtOrNull } from "./core/format.js";
 
 // ── Toast ──────────────────────────────────────────────────────────────────
 function toast(msg, type = "ok") {
@@ -11,8 +12,7 @@ function toast(msg, type = "ok") {
 }
 
 // ── Stat helpers ───────────────────────────────────────────────────────────
-const PCT  = v => v != null ? (v * 100).toFixed(1) + "%" : "—";
-const DEC2 = v => v != null ? Number(v).toFixed(2) : "—";
+// PCT/DEC1/DEC2 y la regla de nulos viven en core/format.js (C-11).
 
 function statClass(value, avg, higherIsBetter = true) {
   if (value == null || avg == null) return "neutral";
@@ -33,7 +33,9 @@ function _cmpNullsLast(av, bv, dir) {
   return dir * (av - bv);
 }
 
-function statBox(label, value, display, leagueKey, league, higherIsBetter = true) {
+// `reason`: código de `null_reasons` del backend; si `value` es nulo se muestra "—" con
+// esa razón en el title, sea cual sea `display` (C-11 RF-4).
+function statBox(label, value, display, leagueKey, league, higherIsBetter = true, reason = null) {
   const lg    = leagueKey ? league?.[leagueKey] : null;
   const avg   = lg?.avg;
   const cls   = statClass(value, avg, higherIsBetter);
@@ -55,7 +57,7 @@ function statBox(label, value, display, leagueKey, league, higherIsBetter = true
   return `
     <div class="stat-box">
       <div class="stat-label">${label}</div>
-      <div class="stat-value ${cls}">${display}</div>
+      <div class="stat-value ${cls}">${isNull(value) ? nullDisplay(reason) : display}</div>
       ${context}
     </div>`;
 }
@@ -91,6 +93,17 @@ function _computeAvg(gameLog) {
   result.net_rating = (result.oer != null && result.der != null)
     ? Math.round((result.oer - result.der) * 10000) / 10000
     : null;
+  // DEF/TO acumulado (pooled, DA-02), mismo criterio que el backend (C-11)
+  const sum = k => gameLog.reduce((s, g) => s + (g[k] || 0), 0);
+  const tov = sum("tov");
+  result.def_to_ratio = tov ? Math.round(((sum("stl") + sum("blk") + sum("drb")) / tov) * 10000) / 10000 : null;
+  // Razón de cada nulo: la que comparten los partidos del filtro; si difieren, genérica.
+  result.null_reasons = {};
+  for (const [k, v] of Object.entries(result)) {
+    if (v != null) continue;
+    const rs = new Set(gameLog.map(g => g.null_reasons?.[k]).filter(Boolean));
+    result.null_reasons[k] = rs.size === 1 ? [...rs][0] : "sin_intentos";
+  }
   return result;
 }
 
@@ -111,7 +124,8 @@ function _fourFactorsCard(av, teamName) {
   const factors = [
     { label: "eFG%",    team: av.efg_pct,     opp: av.opp_efg_pct, fmt: PCT, hib: true,  title: "Eficiencia de tiro ajustada" },
     { label: "TO%",     team: av.to_pct,      opp: av.opp_to_pct,  fmt: PCT, hib: false, title: "Cuidado del balón" },
-    { label: "RebOf%",  team: av.or_pct,      opp: 1-(av.dr_pct||0), fmt: PCT, hib: true, title: "Segundas oportunidades" },
+    // RebOf% rival = 1 − DR% propio; con DR% nulo el resultado es nulo, no 100% (C-11 RF-6)
+    { label: "RebOf%",  team: av.or_pct,      opp: av.dr_pct == null ? null : 1 - av.dr_pct, fmt: PCT, hib: true, title: "Segundas oportunidades" },
     { label: "FT Rate", team: av.ft_rate,     opp: av.opp_ft_rate, fmt: DEC2, hib: true,  title: "Agresividad hacia el aro (FTA/FGA)" },
   ];
 
@@ -147,7 +161,7 @@ function _fourFactorsCard(av, teamName) {
 // ── Record badge ────────────────────────────────────────────────────────────
 function _recordCard(record, teamName) {
   if (!record) return "";
-  const pct = record.win_pct != null ? (record.win_pct * 100).toFixed(0) + "%" : "—";
+  const pct = PCT0(record.win_pct);
   return `
     <div class="card" style="display:flex;align-items:center;gap:var(--sp-5);flex-wrap:wrap">
       <div>
@@ -269,20 +283,14 @@ function _gamesTable(games, page) {
     ${pagination}`;
 }
 
+// El borrado se autoriza con la sesión (login_required); no pide token (C-11 RF-14).
 function _showDeleteModal(count, ids) {
-  const hasToken = !!localStorage.getItem("adminToken");
-  const tokenNote = hasToken
-    ? `<p class="token-note">Token configurado. <a href="#" id="lnk-change-token">Cambiar</a></p>`
-    : `<p class="token-note token-missing">Token de administrador requerido:</p>
-       <input id="admin-token-input" type="password" placeholder="Token de administrador" class="token-input" />`;
-
   const backdrop = document.createElement("div");
   backdrop.className = "modal-backdrop";
   backdrop.innerHTML = `
     <div class="modal">
       <h3>Eliminar partido${count > 1 ? "s" : ""}</h3>
       <p>¿Eliminar ${count} partido${count > 1 ? "s" : ""}? Se eliminará toda la información asociada (estadísticas, jugadores, tiros). Esta acción no se puede deshacer.</p>
-      ${tokenNote}
       <div class="modal-actions">
         <button class="btn btn-ghost btn-sm" id="btn-cancel-delete">Cancelar</button>
         <button class="btn btn-danger btn-sm" id="btn-confirm-delete">Eliminar</button>
@@ -296,20 +304,7 @@ function _showDeleteModal(count, ids) {
       backdrop.remove();
       return;
     }
-    if (e.target.id === "lnk-change-token") {
-      e.preventDefault();
-      localStorage.removeItem("adminToken");
-      backdrop.remove();
-      _showDeleteModal(count, ids);
-      return;
-    }
     if (e.target.id === "btn-confirm-delete") {
-      const tokenInput = backdrop.querySelector("#admin-token-input");
-      if (tokenInput) {
-        const val = tokenInput.value.trim();
-        if (!val) { toast("Ingresa el token de administrador", "err"); return; }
-        localStorage.setItem("adminToken", val);
-      }
       const btn = e.target;
       btn.disabled = true;
       btn.textContent = "Eliminando…";
@@ -324,12 +319,7 @@ function _showDeleteModal(count, ids) {
         refreshTeamSelector();
         refreshCompareSelectors();
       } catch (err) {
-        if (err.message.includes("autorizado") || err.message.includes("401")) {
-          localStorage.removeItem("adminToken");
-          toast("Token incorrecto. Intenta de nuevo.", "err");
-        } else {
-          toast(err.message, "err");
-        }
+        toast(err.message, "err");
         btn.disabled = false;
         btn.textContent = "Eliminar";
       }
@@ -513,7 +503,7 @@ function _leagueTableHTML(teams) {
       <td>${t.games}</td>
       <td>${DEC2(t.oer)}</td>
       <td>${DEC2(t.der)}</td>
-      <td class="${t.net_rating >= 0 ? 'above-avg' : 'below-avg'}">${DEC2(t.net_rating)}</td>
+      <td class="${t.net_rating == null ? '' : t.net_rating >= 0 ? 'above-avg' : 'below-avg'}">${DEC2(t.net_rating)}</td>
       <td>${PCT(t.efg_pct)}</td>
       <td>${PCT(t.ts_pct)}</td>
       <td>${PCT(t.or_pct)}</td>
@@ -731,11 +721,12 @@ function _filteredLog(gameLog, n) {
 function _renderUsageRanking(players) {
   const el = document.getElementById("usage-ranking");
   if (!el || !players?.length) return;
-  const maxUso = players[0]?.uso_pct || 1;
+  const maxUso = players[0]?.uso_pct || 1;   // `|| 1`: solo guarda de la división
   const rows = players.map(p => {
-    const pct = p.uso_pct ? (p.uso_pct * 100).toFixed(1) + "%" : "—";
-    const bar = p.uso_pct ? Math.round((p.uso_pct / maxUso) * 100) : 0;
-    const pts = p.pts ? p.pts.toFixed(1) : "—";
+    // Un 0 real se muestra como 0; solo el nulo es "—" (C-11 RF-5)
+    const pct = PCT(p.uso_pct);
+    const bar = p.uso_pct != null ? Math.round((p.uso_pct / maxUso) * 100) : 0;
+    const pts = DEC1(p.pts);
     return `
       <tr class="clickable-row" data-player="${p.name}">
         <td style="font-weight:600">${p.name}</td>
@@ -776,7 +767,8 @@ function _renderTeamContent(main, data, n) {
   const filtered = _filteredLog(byComp, n);
   // sin filtro alguno → usar los promedios/record ya calculados por el backend
   const unfiltered = !n && !_teamComp;
-  const av  = unfiltered ? data.averages : _computeAvg(filtered);
+  const av  = unfiltered ? { ...data.averages, null_reasons: data.null_reasons } : _computeAvg(filtered);
+  const rs  = av.null_reasons || {};   // razón de cada nulo (C-11 RF-4)
   // Promedio de liga de la COMPETENCIA activa, no del subconjunto en pantalla:
   // el filtro de últimos N no participa de esta selección (Feature 14 RF-1/RF-2).
   const lg  = data.leagues?.[_teamComp || ""] ?? data.league;
@@ -787,58 +779,57 @@ function _renderTeamContent(main, data, n) {
     <div class="card">
       <div class="card-title">Eficiencia</div>
       <div class="stat-grid">
-        ${statBox("OER", av.oer, DEC2(av.oer), "oer", lg)}
-        ${statBox("DER", av.der, DEC2(av.der), "der", lg, false)}
-        ${statBox("Net Rating", av.net_rating, DEC2(av.net_rating), "net_rating", lg)}
-        ${statBox("Pace", av.pace, DEC2(av.pace), "pace", lg)}
-        ${statBox("PPT", av.pps, DEC2(av.pps), "pps", lg)}
-        ${statBox("FT Rate", av.ft_rate, DEC2(av.ft_rate), "ft_rate", lg)}
+        ${statBox("OER", av.oer, DEC2(av.oer), "oer", lg, true, rs.oer)}
+        ${statBox("DER", av.der, DEC2(av.der), "der", lg, false, rs.der)}
+        ${statBox("Net Rating", av.net_rating, DEC2(av.net_rating), "net_rating", lg, true, rs.net_rating)}
+        ${statBox("Pace", av.pace, DEC2(av.pace), "pace", lg, true, rs.pace)}
+        ${statBox("PPT", av.pps, DEC2(av.pps), "pps", lg, true, rs.pps)}
+        ${statBox("FT Rate", av.ft_rate, DEC2(av.ft_rate), "ft_rate", lg, true, rs.ft_rate)}
       </div>
     </div>
     ${_fourFactorsCard(av, data.team_name)}
     <div class="card">
       <div class="card-title">Tiro</div>
       <div class="stat-grid">
-        ${statBox("eFG%", av.efg_pct, PCT(av.efg_pct), "efg_pct", lg)}
-        ${statBox("TS%", av.ts_pct, PCT(av.ts_pct), "ts_pct", lg)}
-        ${statBox("FG2%", av.fg2_pct, PCT(av.fg2_pct), "fg2_pct", lg)}
-        ${statBox("FG3%", av.fg3_pct, PCT(av.fg3_pct), "fg3_pct", lg)}
-        ${statBox("FT%", av.ft_pct, PCT(av.ft_pct), "ft_pct", lg)}
-        ${statBox("Uso 3P", av.fg3_uso, PCT(av.fg3_uso), "fg3_uso", lg)}
+        ${statBox("eFG%", av.efg_pct, PCT(av.efg_pct), "efg_pct", lg, true, rs.efg_pct)}
+        ${statBox("TS%", av.ts_pct, PCT(av.ts_pct), "ts_pct", lg, true, rs.ts_pct)}
+        ${statBox("FG2%", av.fg2_pct, PCT(av.fg2_pct), "fg2_pct", lg, true, rs.fg2_pct)}
+        ${statBox("FG3%", av.fg3_pct, PCT(av.fg3_pct), "fg3_pct", lg, true, rs.fg3_pct)}
+        ${statBox("FT%", av.ft_pct, PCT(av.ft_pct), "ft_pct", lg, true, rs.ft_pct)}
+        ${statBox("Uso 3P", av.fg3_uso, PCT(av.fg3_uso), "fg3_uso", lg, true, rs.fg3_uso)}
       </div>
       ${_shotDetailGrid(av, data.totals, lg)}
     </div>
     <div class="card">
       <div class="card-title">Rebotes & Misc</div>
       <div class="stat-grid">
-        ${statBox("OR%", av.or_pct, PCT(av.or_pct), "or_pct", lg)}
-        ${statBox("DR%", av.dr_pct, PCT(av.dr_pct), "dr_pct", lg)}
-        ${statBox("Reb%", av.trb_pct, PCT(av.trb_pct), "trb_pct", lg)}
-        ${statBox("TO", av.tov, DEC2(av.tov), "to_ratio", lg, false)}
-        ${statBox("AS", av.ast, DEC2(av.ast), "ast_ratio", lg)}
+        ${statBox("OR%", av.or_pct, PCT(av.or_pct), "or_pct", lg, true, rs.or_pct)}
+        ${statBox("DR%", av.dr_pct, PCT(av.dr_pct), "dr_pct", lg, true, rs.dr_pct)}
+        ${statBox("Reb%", av.trb_pct, PCT(av.trb_pct), "trb_pct", lg, true, rs.trb_pct)}
+        ${statBox("TO", av.tov, DEC2(av.tov), "to_ratio", lg, false, rs.tov)}
+        ${statBox("AS", av.ast, DEC2(av.ast), "ast_ratio", lg, true, rs.ast)}
       </div>
     </div>
     <div class="card">
       <div class="card-title">Defensa avanzada</div>
       <div class="stat-grid">
-        ${statBox("Robos", av.stl, DEC2(av.stl), "stl", lg)}
-        ${statBox("Tapones", av.blk, DEC2(av.blk), "blk", lg)}
-        ${statBox("Stops", av.stocks, DEC2(av.stocks), "stocks", lg)}
-        ${statBox("Def Playmaking", av.def_playmaking, DEC2(av.def_playmaking), "def_playmaking", lg)}
-        ${statBox("DEF/TO Ratio", av.def_to_ratio, DEC2(av.def_to_ratio), "def_to_ratio", lg)}
+        ${statBox("Robos", av.stl, DEC2(av.stl), "stl", lg, true, rs.stl)}
+        ${statBox("Tapones", av.blk, DEC2(av.blk), "blk", lg, true, rs.blk)}
+        ${statBox("Stops", av.stocks, DEC2(av.stocks), "stocks", lg, true, rs.stocks)}
+        ${statBox("Def Playmaking", av.def_playmaking, DEC2(av.def_playmaking), "def_playmaking", lg, true, rs.def_playmaking)}
+        ${statBox("DEF/TO Ratio", av.def_to_ratio, DEC2(av.def_to_ratio), "def_to_ratio", lg, true, rs.def_to_ratio)}
       </div>
     </div>
-    ${(av.paint_pts || av.second_chance_pts || av.pts_from_tov || av.bench_pts || av.fast_break_pts) ? `
     <div class="card">
       <div class="card-title">Desglose ofensivo</div>
       <div class="stat-grid">
-        ${statBox("PtsEnPint",       av.paint_pts,         DEC2(av.paint_pts),         null, null, false)}
-        ${statBox("Seg. Op.",  av.second_chance_pts,  DEC2(av.second_chance_pts), null, null, false)}
-        ${statBox("Ptos/PER",  av.pts_from_tov,       DEC2(av.pts_from_tov),      null, null, false)}
-        ${statBox("Banca",     av.bench_pts,          DEC2(av.bench_pts),         null, null, false)}
-        ${statBox("PCA",       av.fast_break_pts,     DEC2(av.fast_break_pts),    null, null, false)}
+        ${statBox("PtsEnPint",       av.paint_pts,         DEC2(av.paint_pts),         null, null, false, rs.paint_pts)}
+        ${statBox("Seg. Op.",  av.second_chance_pts,  DEC2(av.second_chance_pts), null, null, false, rs.second_chance_pts)}
+        ${statBox("Ptos/PER",  av.pts_from_tov,       DEC2(av.pts_from_tov),      null, null, false, rs.pts_from_tov)}
+        ${statBox("Banca",     av.bench_pts,          DEC2(av.bench_pts),         null, null, false, rs.bench_pts)}
+        ${statBox("PCA",       av.fast_break_pts,     DEC2(av.fast_break_pts),    null, null, false, rs.fast_break_pts)}
       </div>
-    </div>` : ""}
+    </div>
     <div class="card">
       <div class="card-title">Game log</div>
       <div class="table-wrap">
@@ -849,20 +840,22 @@ function _renderTeamContent(main, data, n) {
             <th>OR%</th><th>DR%</th><th>TO%</th>
           </tr></thead>
           <tbody>
-            ${filtered.map(g => `
+            ${filtered.map(g => {
+              const c = (k, f) => fmtOrNull(g[k], f, g.null_reasons?.[k]);
+              return `
               <tr>
                 <td class="td-muted">${_fmtDate(g.date)}</td>
                 <td>${g.opponent}</td>
                 <td class="td-muted">${g.home_away}</td>
                 <td class="td-result">${g.pts}</td>
-                <td>${DEC2(g.oer)}</td>
-                <td>${DEC2(g.der)}</td>
-                <td>${PCT(g.efg_pct)}</td>
-                <td>${PCT(g.ts_pct)}</td>
-                <td>${PCT(g.or_pct)}</td>
-                <td>${PCT(g.dr_pct)}</td>
-                <td>${PCT(g.to_pct)}</td>
-              </tr>`).join("")}
+                <td>${c("oer", DEC2)}</td>
+                <td>${c("der", DEC2)}</td>
+                <td>${c("efg_pct", PCT)}</td>
+                <td>${c("ts_pct", PCT)}</td>
+                <td>${c("or_pct", PCT)}</td>
+                <td>${c("dr_pct", PCT)}</td>
+                <td>${c("to_pct", PCT)}</td>
+              </tr>`; }).join("")}
           </tbody>
         </table>
       </div>
@@ -1001,7 +994,7 @@ async function renderTeamOnOff(teamCode, playerName) {
       </tr>`;
     };
     const sample = (side, data) => data.possessions
-      ? `${side}: ${data.possessions} pos · ${Math.round(data.seconds / 60)}' en cancha`
+      ? `${side}: ${DEC1(data.possessions)} pos · ${Math.round(data.seconds / 60)}' en cancha`
       : `${side}: sin muestra`;
 
     box.innerHTML = `
@@ -1051,7 +1044,7 @@ async function renderTeamLineup(teamCode, players) {
     const m = r.metrics;
     const lead = (l, key) => l ? `${l.name} (${l[key]})` : "—";
     const smallSample = r.sample.possessions < 10
-      ? `<p class="empty below-avg" style="margin-top:8px">Muestra chica (${r.sample.possessions} posesiones) — tomar con cuidado</p>`
+      ? `<p class="empty below-avg" style="margin-top:8px">Muestra chica (${DEC1(r.sample.possessions)} posesiones) — tomar con cuidado</p>`
       : "";
     box.innerHTML = `
       <div class="card">
@@ -1064,7 +1057,7 @@ async function renderTeamLineup(teamCode, players) {
           ${statBox("TS%", m.ts_pct, PCT(m.ts_pct), null, null)}
         </div>
         <p class="td-muted" style="margin-top:8px">
-          ${r.sample.possessions} posesiones · ${Math.round(r.sample.seconds / 60)}' en cancha ·
+          ${DEC1(r.sample.possessions)} posesiones · ${Math.round(r.sample.seconds / 60)}' en cancha ·
           ${r.games_used} partido(s) usado(s)${r.games_excluded ? ` (${r.games_excluded} excluido(s) por datos inconsistentes)` : ""}
         </p>
         ${smallSample}
@@ -1077,7 +1070,7 @@ async function renderTeamLineup(teamCode, players) {
             </tr></thead>
             <tbody><tr>
               <td>${DEC2(m.oer)}</td><td>${DEC2(m.der)}</td><td>${DEC2(m.net_rating)}</td>
-              <td>${PCT(m.efg_pct)}</td><td>${PCT(m.ts_pct)}</td><td>${r.sample.possessions}</td>
+              <td>${PCT(m.efg_pct)}</td><td>${PCT(m.ts_pct)}</td><td>${DEC1(r.sample.possessions)}</td>
               <td>${r.raw.pts}</td><td>${r.raw.pts_against}</td><td>${r.raw.reb}</td>
               <td>${r.raw.orb}</td><td>${r.raw.drb}</td><td>${r.raw.ast}</td>
               <td>${r.raw.tov}</td><td>${r.raw.stl}</td><td>${r.raw.blk}</td>
@@ -1126,7 +1119,6 @@ async function renderCompare() {
       const a = avA, b = avB;
       // Sin dato → "—", nunca 0 (Feature 12 RF-4)
       const N1 = v => v != null ? Math.round(v) : "—";
-      const D1 = v => v != null ? Number(v).toFixed(1) : "—";
       // Ganador/perdedor: clase neutra si falta cualquiera de los dos lados — un nulo
       // no se compara ni se pinta con color de rendimiento (RF-3)
       const winCls = (va, vb, lowerBetter = false) =>
@@ -1143,9 +1135,9 @@ async function renderCompare() {
         </tr>`;
       };
       const rawRow = (label, va, vb, lowerBetter = false) => `<tr>
-          <td class="${winCls(va, vb, lowerBetter)}">${D1(va)}</td>
+          <td class="${winCls(va, vb, lowerBetter)}">${DEC1(va)}</td>
           <td class="lbl">${label}</td>
-          <td class="${winCls(vb, va, lowerBetter)}">${D1(vb)}</td>
+          <td class="${winCls(vb, va, lowerBetter)}">${DEC1(vb)}</td>
         </tr>`;
 
       const pfA = a.pf, pfB = b.pf, oppPfA = a.opp_pf, oppPfB = b.opp_pf;
@@ -1247,8 +1239,6 @@ const SC_courtBg = "#f3f6fa", SC_paintBg = "#c7d8ec", SC_restrictBg = "#b4c8e6",
 // Heatmap por PPT (puntos por tiro), umbrales calcados de la imagen de referencia.
 // La fórmula no cambió con C-03 — solo el nombre —, así que los colores son idénticos.
 const _scBoxFill = ppt => ppt >= 1.00 ? "#79b13f" : ppt >= 0.85 ? "#ef8b3a" : "#df574c";
-const _scDec2 = v => v.toFixed(2).replace(".", ",");
-const _scDec1 = v => v.toFixed(1).replace(".", ",");
 
 function _scHCirc(r) {
   return `M${SC_cx - r},${SC_cy} A${r},${r} 0 0,0 ${SC_cx + r},${SC_cy} Z`;
@@ -1266,12 +1256,14 @@ function _scSpoke(deg) {
 // partido + total de temporada) y los 4 PPT. Compartido por Equipo y Jugador.
 function _shotDetailGrid(av, totals, lg) {
   const t = totals || {};
+  const rs = av?.null_reasons || {};
   // "promedio (total)" — el promedio ya viene del backend; el total también, para no
   // arrastrar el redondeo de multiplicar promedio × partidos (Feature 16 §9).
   const cell = (label, avgKey, totKey) => {
     const a = av?.[avgKey], n = t[totKey];
-    const disp = a != null ? `${DEC2(a)}<span style="font-size:9px;color:var(--muted)"> (${n ?? 0})</span>` : "—";
-    return statBox(label, a, disp, null, null);
+    // Total ausente → "—", nunca "(0)" (C-11 RF-4)
+    const disp = `${DEC2(a)}<span style="font-size:9px;color:var(--muted)"> (${n ?? "—"})</span>`;
+    return statBox(label, a, disp, null, null, true, rs[avgKey]);
   };
   return `
     <div class="card-title" style="margin-top:14px;font-size:11px;color:var(--muted)">Detalle de tiro — promedio (total temporada)</div>
@@ -1285,10 +1277,10 @@ function _shotDetailGrid(av, totals, lg) {
     </div>
     <div class="card-title" style="margin-top:14px;font-size:11px;color:var(--muted)">Puntos por tiro</div>
     <div class="stat-grid">
-      ${statBox("PPT",    av.pps,    DEC2(av.pps),    "pps",    lg)}
-      ${statBox("PPT 2",  av.ppt_2,  DEC2(av.ppt_2),  "ppt_2",  lg)}
-      ${statBox("PPT 3",  av.ppt_3,  DEC2(av.ppt_3),  "ppt_3",  lg)}
-      ${statBox("PPT TL", av.ppt_ft, DEC2(av.ppt_ft), "ppt_ft", lg)}
+      ${statBox("PPT",    av.pps,    DEC2(av.pps),    "pps",    lg, true, rs.pps)}
+      ${statBox("PPT 2",  av.ppt_2,  DEC2(av.ppt_2),  "ppt_2",  lg, true, rs.ppt_2)}
+      ${statBox("PPT 3",  av.ppt_3,  DEC2(av.ppt_3),  "ppt_3",  lg, true, rs.ppt_3)}
+      ${statBox("PPT TL", av.ppt_ft, DEC2(av.ppt_ft), "ppt_ft", lg, true, rs.ppt_ft)}
     </div>`;
 }
 
@@ -1297,10 +1289,10 @@ function _scLbl(zones, totalShots, key, lx, ly) {
   if (!z?.attempts) return '';
   // C-03: cada zona muestra % de acierto, eFG% y PPT. El indicador "P/F" se retiró:
   // era esta misma fórmula (puntos de la zona / intentos) mal etiquetada.
-  const share = _scDec1((z.attempts / totalShots) * 100);
-  const ppt   = z.ppt != null ? _scDec2(z.ppt) : '—';
-  const fg    = _scDec1(z.pct * 100) + '%';
-  const efg   = z.efg != null ? _scDec1(z.efg * 100) + '%' : '—';
+  const share = DEC1((z.attempts / totalShots) * 100);
+  const ppt   = z.ppt != null ? DEC2(z.ppt) : '—';
+  const fg    = DEC1(z.pct * 100) + '%';
+  const efg   = z.efg != null ? DEC1(z.efg * 100) + '%' : '—';
   const bg    = _scBoxFill(z.ppt);
   const w = 54, h = 44, r = 4;
   const x0 = lx - w / 2, y0 = ly - h / 2;
@@ -1314,8 +1306,8 @@ function _scLbl(zones, totalShots, key, lx, ly) {
 
 function _scBadge(summary) {
   if (!summary) return '';
-  const pf  = summary.ppt     != null ? _scDec2(summary.ppt) : '—';   // C-03: era "P/F"
-  const efg = summary.efg_pct != null ? _scDec1(summary.efg_pct * 100) + ' %' : '—';
+  const pf  = summary.ppt     != null ? DEC2(summary.ppt) : '—';   // C-03: era "P/F"
+  const efg = summary.efg_pct != null ? DEC1(summary.efg_pct * 100) + ' %' : '—';
   const cw = 70, ch = 38, bx = SC_cR - 2 * cw, by = SC_cT + 2;
   return `
     <rect x="${bx}"      y="${by}" width="${cw}" height="${ch}" rx="4" fill="#ef8b3a"/>
@@ -1419,7 +1411,8 @@ async function renderPlayer(teamCode, playerName) {
 function _renderPlayerContent(main, data, comp) {
   const { teamCode, playerName } = _playerCtx;
   const log  = _filterByComp(data.game_log, comp);
-  const av   = comp ? _computeAvg(log) : data.averages;
+  const av   = comp ? _computeAvg(log) : { ...data.averages, null_reasons: data.null_reasons };
+  const rs   = av.null_reasons || {};   // razón de cada nulo (C-11 RF-4)
   // Promedio de liga de la COMPETENCIA activa (Feature 14 RF-1/RF-2)
   const lg   = data.leagues?.[comp || ""] ?? data.league;
   const comps = _logComps(data.game_log);
@@ -1433,58 +1426,58 @@ function _renderPlayerContent(main, data, comp) {
       <div class="card">
         <div class="card-title">Producción ofensiva</div>
         <div class="stat-grid">
-          ${statBox("OER", av.oer, DEC2(av.oer), "oer", lg)}
-          ${statBox("USO%", av.uso_pct, PCT(av.uso_pct), "uso_pct", lg)}
-          ${statBox("PPP", av.ppp, DEC2(av.ppp), "ppp", lg)}
-          ${statBox("PPT", av.pps, DEC2(av.pps), "pps", lg)}
-          ${statBox("eFG%", av.efg_pct, PCT(av.efg_pct), "efg_pct", lg)}
-          ${statBox("TS%", av.ts_pct, PCT(av.ts_pct), "ts_pct", lg)}
-          ${statBox("FT Rate", av.ft_rate, DEC2(av.ft_rate), "ft_rate", lg)}
+          ${statBox("OER", av.oer, DEC2(av.oer), "oer", lg, true, rs.oer)}
+          ${statBox("USO%", av.uso_pct, PCT(av.uso_pct), "uso_pct", lg, true, rs.uso_pct)}
+          ${statBox("PPP", av.ppp, DEC2(av.ppp), "ppp", lg, true, rs.ppp)}
+          ${statBox("PPT", av.pps, DEC2(av.pps), "pps", lg, true, rs.pps)}
+          ${statBox("eFG%", av.efg_pct, PCT(av.efg_pct), "efg_pct", lg, true, rs.efg_pct)}
+          ${statBox("TS%", av.ts_pct, PCT(av.ts_pct), "ts_pct", lg, true, rs.ts_pct)}
+          ${statBox("FT Rate", av.ft_rate, DEC2(av.ft_rate), "ft_rate", lg, true, rs.ft_rate)}
         </div>
       </div>
       <div class="card">
         <div class="card-title">Por posesión y por minuto</div>
         <div class="stat-grid">
-          ${statBox("AS/pos",  av.as_pos,  DEC2(av.as_pos),  "as_pos",  lg)}
-          ${statBox("PER/pos", av.tov_pos, DEC2(av.tov_pos), "tov_pos", lg, false)}
-          ${statBox("PTS/pos", av.pts_pos, DEC2(av.pts_pos), "pts_pos", lg)}
-          ${statBox("RO/min",  av.orb_min, DEC2(av.orb_min), "orb_min", lg)}
-          ${statBox("RD/min",  av.drb_min, DEC2(av.drb_min), "drb_min", lg)}
+          ${statBox("AS/pos",  av.as_pos,  DEC2(av.as_pos),  "as_pos",  lg, true, rs.as_pos)}
+          ${statBox("PER/pos", av.tov_pos, DEC2(av.tov_pos), "tov_pos", lg, false, rs.tov_pos)}
+          ${statBox("PTS/pos", av.pts_pos, DEC2(av.pts_pos), "pts_pos", lg, true, rs.pts_pos)}
+          ${statBox("RO/min",  av.orb_min, DEC2(av.orb_min), "orb_min", lg, true, rs.orb_min)}
+          ${statBox("RD/min",  av.drb_min, DEC2(av.drb_min), "drb_min", lg, true, rs.drb_min)}
         </div>
       </div>
       <div class="card">
         <div class="card-title">Tiro</div>
         <div class="stat-grid">
-          ${statBox("FG2%", av.fg2_pct, PCT(av.fg2_pct), "fg2_pct", lg)}
-          ${statBox("FG3%", av.fg3_pct, PCT(av.fg3_pct), "fg3_pct", lg)}
-          ${statBox("FT%", av.ft_pct, PCT(av.ft_pct), "ft_pct", lg)}
-          ${statBox("Uso 2P", av.fg2_uso, PCT(av.fg2_uso), "fg2_uso", lg)}
-          ${statBox("Uso 3P", av.fg3_uso, PCT(av.fg3_uso), "fg3_uso", lg)}
+          ${statBox("FG2%", av.fg2_pct, PCT(av.fg2_pct), "fg2_pct", lg, true, rs.fg2_pct)}
+          ${statBox("FG3%", av.fg3_pct, PCT(av.fg3_pct), "fg3_pct", lg, true, rs.fg3_pct)}
+          ${statBox("FT%", av.ft_pct, PCT(av.ft_pct), "ft_pct", lg, true, rs.ft_pct)}
+          ${statBox("Uso 2P", av.fg2_uso, PCT(av.fg2_uso), "fg2_uso", lg, true, rs.fg2_uso)}
+          ${statBox("Uso 3P", av.fg3_uso, PCT(av.fg3_uso), "fg3_uso", lg, true, rs.fg3_uso)}
         </div>
         ${_shotDetailGrid(av, data.totals, lg)}
       </div>
       <div class="card">
         <div class="card-title">Rebotes & distribución</div>
         <div class="stat-grid">
-          ${statBox("OR%", av.or_pct, PCT(av.or_pct), "or_pct", lg)}
-          ${statBox("DR%", av.dr_pct, PCT(av.dr_pct), "dr_pct", lg)}
-          ${statBox("TO", av.tov, DEC2(av.tov), "to_ratio", lg, false)}
-          ${statBox("AS", av.ast, DEC2(av.ast), "ast_ratio", lg)}
-          ${statBox("AST/TO", av.ast_to, DEC2(av.ast_to), "ast_ratio", lg)}
-          ${statBox("% Reb Equipo", av.reb_share, PCT(av.reb_share), "reb_share", lg)}
-          ${statBox("% RebOf Equipo", av.oreb_share, PCT(av.oreb_share), "oreb_share", lg)}
-          ${statBox("% RebDef Equipo", av.dreb_share, PCT(av.dreb_share), "dreb_share", lg)}
+          ${statBox("OR%", av.or_pct, PCT(av.or_pct), "or_pct", lg, true, rs.or_pct)}
+          ${statBox("DR%", av.dr_pct, PCT(av.dr_pct), "dr_pct", lg, true, rs.dr_pct)}
+          ${statBox("TO", av.tov, DEC2(av.tov), "to_ratio", lg, false, rs.tov)}
+          ${statBox("AS", av.ast, DEC2(av.ast), "ast_ratio", lg, true, rs.ast)}
+          ${statBox("AST/TO", av.ast_to, DEC2(av.ast_to), "ast_ratio", lg, true, rs.ast_to)}
+          ${statBox("% Reb Equipo", av.reb_share, PCT(av.reb_share), "reb_share", lg, true, rs.reb_share)}
+          ${statBox("% RebOf Equipo", av.oreb_share, PCT(av.oreb_share), "oreb_share", lg, true, rs.oreb_share)}
+          ${statBox("% RebDef Equipo", av.dreb_share, PCT(av.dreb_share), "dreb_share", lg, true, rs.dreb_share)}
         </div>
       </div>
       <div class="card">
         <div class="card-title">Defensa avanzada</div>
         <div class="stat-grid">
-          ${statBox("Robos", av.stl, DEC2(av.stl), "stl", lg)}
-          ${statBox("Tapones", av.blk, DEC2(av.blk), "blk", lg)}
-          ${statBox("Stops", av.stocks, DEC2(av.stocks), "stocks", lg)}
-          ${statBox("Def Playmaking", av.def_playmaking, DEC2(av.def_playmaking), "def_playmaking", lg)}
-          ${statBox("DEF/TO Ratio", av.def_to_ratio, DEC2(av.def_to_ratio), "def_to_ratio", lg)}
-          ${statBox("Impacto Físico", av.physical_impact, DEC2(av.physical_impact), "physical_impact", lg)}
+          ${statBox("Robos", av.stl, DEC2(av.stl), "stl", lg, true, rs.stl)}
+          ${statBox("Tapones", av.blk, DEC2(av.blk), "blk", lg, true, rs.blk)}
+          ${statBox("Stops", av.stocks, DEC2(av.stocks), "stocks", lg, true, rs.stocks)}
+          ${statBox("Def Playmaking", av.def_playmaking, DEC2(av.def_playmaking), "def_playmaking", lg, true, rs.def_playmaking)}
+          ${statBox("DEF/TO Ratio", av.def_to_ratio, DEC2(av.def_to_ratio), "def_to_ratio", lg, true, rs.def_to_ratio)}
+          ${statBox("Impacto Físico", av.physical_impact, DEC2(av.physical_impact), "physical_impact", lg, true, rs.physical_impact)}
         </div>
       </div>
       <div class="chart-grid">
@@ -1510,7 +1503,16 @@ function _renderPlayerContent(main, data, comp) {
               <th>OER</th><th>eFG%</th><th>TS%</th>
             </tr></thead>
             <tbody>
-              ${log.map(g => `
+              ${log.map(g => {
+                // DNP: el partido figura, pero sin números — no jugó, no son ceros (C-11 RF-10)
+                if (g.played === false) return `
+                <tr>
+                  <td class="td-muted">${_fmtDate(g.date)}</td>
+                  <td>${g.opponent}</td>
+                  <td colspan="11" class="td-muted null-val" title="No jugó (DNP)">DNP</td>
+                </tr>`;
+                const c = (k, f) => fmtOrNull(g[k], f, g.null_reasons?.[k]);
+                return `
                 <tr>
                   <td class="td-muted">${_fmtDate(g.date)}</td>
                   <td>${g.opponent}</td>
@@ -1522,10 +1524,10 @@ function _renderPlayerContent(main, data, comp) {
                   <td>${g.drb}</td>
                   <td>${g.ast}</td>
                   <td>${g.tov}</td>
-                  <td>${DEC2(g.oer)}</td>
-                  <td>${PCT(g.efg_pct)}</td>
-                  <td>${PCT(g.ts_pct)}</td>
-                </tr>`).join("")}
+                  <td>${c("oer", DEC2)}</td>
+                  <td>${c("efg_pct", PCT)}</td>
+                  <td>${c("ts_pct", PCT)}</td>
+                </tr>`; }).join("")}
             </tbody>
           </table>
         </div>
@@ -1666,7 +1668,11 @@ function _renderSearchResults(rows) {
   if (!rows.length) { box.innerHTML = `<p class="empty">Ningún jugador cumple los filtros</p>`; return; }
   const k = _searchSort.key;
   const sorted = [...rows].sort((a, b) => _cmpNullsLast(a[k], b[k], _searchSort.dir));
-  const fmt = (c, v) => c.txt ? (v || "—") : c.int ? (v ?? "—") : c.pct ? PCT(v) : DEC2(v);
+  const fmt = (c, p) => {
+    const v = p[c.key];
+    if (c.txt) return v || "—";
+    return fmtOrNull(v, c.int ? String : c.pct ? PCT : DEC2, p.null_reasons?.[c.key]);
+  };
   box.innerHTML = `
     <div class="card">
       <div class="table-wrap">
@@ -1675,7 +1681,7 @@ function _renderSearchResults(rows) {
           <tbody>
             ${sorted.map(p => `
               <tr data-team="${p.team_code}" data-player="${p.player.replace(/"/g,'&quot;')}">
-                ${SEARCH_COLS.map(c => `<td>${fmt(c, p[c.key])}</td>`).join("")}
+                ${SEARCH_COLS.map(c => `<td>${fmt(c, p)}</td>`).join("")}
               </tr>`).join("")}
           </tbody>
         </table>

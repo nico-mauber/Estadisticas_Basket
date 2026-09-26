@@ -34,7 +34,7 @@ La navegación es por `#hash` o botones de tab. No hay routing del servidor.
 | **Comparar** | `#compare` | Radar de tres polígonos (equipo A, equipo B, promedio liga) + box score FIBA |
 | **Buscar** | `#search` | Buscador avanzado de jugadores: filtros combinables (nombre, equipo, competencia, posición, rangos mín/máx de métricas) sobre todos los jugadores de la base; tabla ordenable; fila → vista Jugador |
 
-**Vista Equipo — card "Desglose ofensivo":** se renderiza solo si hay datos (>0) en PtsEnPint / Seg. Op. / Ptos/PER / Banca / PCA (columnas `paint_pts`, `second_chance_pts`, `pts_from_tov`, `bench_pts`, `fast_break_pts`). *(Seg. Op. y PCA se poblaban en 0 por claves FIBA mal escritas — corregido en `fiba_fetcher.py`: `PointsSecondChance`/`PointsFastBreak`.)*
+**Vista Equipo — card "Desglose ofensivo":** siempre visible: PtsEnPint / Seg. Op. / Ptos/PER / Banca / PCA (columnas `paint_pts`, `second_chance_pts`, `pts_from_tov`, `bench_pts`, `fast_break_pts`). Si la competencia no publica un campo se ve "—" con la razón "La competencia no registra este dato" (C-11). *(Seg. Op. y PCA se poblaban en 0 por claves FIBA mal escritas — corregido en `fiba_fetcher.py`: `PointsSecondChance`/`PointsFastBreak`.)*
 
 **Filtro por competencia (Feature 09):** helpers compartidos `_logComps`/`_filterByComp`/`_compOptions`. Selectores en **Liga** (refetch `api.league(comp)`), **Equipo** (`#team-comp`, filtra el `game_log` y recomputa con `_computeAvg`; compone con las pills Últ. N), **Comparar** (`#compare-comp`) y **Jugador** (`#player-comp`, `renderPlayer`→`_renderPlayerContent`). Cada `<select>` se oculta si hay ≤1 competencia. `_computeAvg` incluye las keys de jugador `uso_pct`/`ast_to`.
 
@@ -95,13 +95,32 @@ Lógica principal. Funciones clave:
 | `_renderLeague()` | Renderiza tabla de liga con sort clickeable |
 | `_renderTeamContent(data)` | Record card + Four Factors + métricas + shot chart + game log |
 | `_renderPlayerContent(data)` | Métricas jugador + shot chart por zonas + game log |
-| `_computeAvg(gameLog, keys)` | Promedia un array de partidos sobre las keys pedidas. Excluye las entradas con `played === false` (DNP) |
+| `_computeAvg(gameLog)` | Promedia un array de partidos (filtro de competencia / últimos N). Excluye las entradas con `played === false` (DNP). `def_to_ratio` es acumulado (pooled). Devuelve además `null_reasons` para las claves nulas (la razón común de los partidos, o `sin_intentos`) |
 | `_cmpNullsLast(av, bv, dir)` | **Comparador único de tablas ordenables.** Ver "Orden de nulos" abajo |
 | `_fourFactorsCard(av, name)` | Tabla Four Factors equipo vs rival con color-coding |
 | `_recordCard(record, name)` | Display W/L con porcentaje, local, visitante |
-| `_colorCell(val, avg, invert)` | Color verde/rojo relativo al promedio de liga |
 | `statClass(value, avg, hib)` | Clase de rendimiento; devuelve `"neutral"` si el valor o el promedio son `null` |
-| `statBox(label, value, display, leagueKey, league, hib)` | Card de métrica. Contexto: **solo `Ø {promedio}`** — el indicador `↑ {mejor}` se retiró (ver abajo) |
+| `statBox(label, value, display, leagueKey, league, hib, reason)` | Card de métrica. Contexto: **solo `Ø {promedio}`** — el indicador `↑ {mejor}` se retiró (ver abajo). Si `value` es nulo muestra `nullDisplay(reason)` |
+
+### `core/format.js` — formato numérico y nulos (C-11)
+
+Único punto de formateo de números de la UI. **Coma decimal es-UY** en toda la app ("1,09", "60,0%",
+DA-36); no usar `toFixed` para texto visible (solo para coordenadas SVG o datos numéricos de Chart.js).
+Chart.js usa `Chart.defaults.locale = "es-UY"` para ticks y tooltips por defecto.
+
+| Export | Descripción |
+|---|---|
+| `fmtNumber(v, decimals)` | Número con coma decimal, sin separador de miles; nulo → "—" |
+| `PCT`, `PCT0`, `DEC1`, `DEC2` | Porcentaje con 1 / 0 decimales, número con 1 / 2 decimales |
+| `isNull(v)` | `null`, `undefined`, `NaN` o `±Infinity` |
+| `nullDisplay(reason)` | `<span class="null-val" title="…">—</span>`: "—" gris con la razón en el title |
+| `fmtOrNull(v, fmt, reason)` | Valor formateado, o `nullDisplay(reason)` si es nulo |
+| `NULL_REASON_LABELS` | Copy de cada código de `null_reasons` (ver `docs/api.md`) |
+
+Reglas de nulos en la UI: un nulo se ve "—" (nunca 0, `null`, `NaN`); un 0 real se ve 0; un nulo nunca
+recibe color de rendimiento; una resta o complemento con un operando nulo da nulo (RebOf% rival en
+Four Factors). En el game log de jugador un partido DNP se muestra como fila "DNP" sin números, y en
+la evolución queda como hueco.
 
 ### Contexto de las cards de stat
 
@@ -159,7 +178,7 @@ El mismo mapa se muestra en dos lugares: en la vista **Jugador** (`renderPlayer`
 
 ## Service Worker (`sw.js`)
 
-Cache name: `smart-basket-v9`
+Cache name: `smart-basket-v10`
 
 **Estrategia:**
 - `install`: pre-cachea los archivos estáticos listados en `STATIC[]`
@@ -171,8 +190,11 @@ Cache name: `smart-basket-v9`
 **Assets cacheados:**
 ```js
 "/", "/manifest.json", "/css/style.css",
-"/js/app.js", "/js/api.js", "/js/charts.js", "/js/chart.umd.min.js"
+"/js/app.js", "/js/api.js", "/js/charts.js", "/js/core/format.js", "/js/chart.umd.min.js"
 ```
+
+Todo módulo ES nuevo que importe `app.js` debe agregarse a `STATIC` (y subir `CACHE`): el fetch
+cache-first no guarda respuestas nuevas, así que un módulo fuera de la lista rompe la app offline.
 
 ## PWA
 

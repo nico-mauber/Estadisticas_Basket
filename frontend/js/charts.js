@@ -2,6 +2,7 @@
  * Smart-Basket chart helpers — Chart.js v4
  * All functions destroy previous instance before re-creating.
  */
+import { PCT, PCT0, DEC2, fmtNumber } from "./core/format.js";
 
 const _instances = {};
 
@@ -34,6 +35,8 @@ function _applyDefaults() {
   Chart.defaults.color = C.text;
   Chart.defaults.font.family = "Inter, system-ui, sans-serif";
   Chart.defaults.font.size = 12;
+  // Ticks y tooltips por defecto con coma decimal es-UY (DA-36)
+  Chart.defaults.locale = "es-UY";
 }
 
 // ── Normalize a value to 0-100 relative to league ──────────────────────────
@@ -117,7 +120,7 @@ export function drawRadar(canvasId, averages, league, label = "Equipo") {
         legend: { position: "bottom", labels: { boxWidth: 12, padding: 16 } },
         tooltip: {
           callbacks: {
-            label: ctx => `${ctx.dataset.label}: ${ctx.raw.toFixed(0)}/100`,
+            label: ctx => `${ctx.dataset.label}: ${fmtNumber(ctx.raw, 0)}/100`,
           },
         },
       },
@@ -181,7 +184,7 @@ export function drawCompareRadar(canvasId, avgA, avgB, league, labelA, labelB) {
       },
       plugins: {
         legend: { position: "bottom", labels: { boxWidth: 12, padding: 16 } },
-        tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: ${ctx.raw.toFixed(0)}/100` } },
+        tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: ${fmtNumber(ctx.raw, 0)}/100` } },
       },
     },
   });
@@ -252,7 +255,7 @@ export function drawEvolution(canvasId, gameLog, leagueOerAvg) {
           grid: { display: false },
           title: { display: true, text: "eFG%", color: C.blue, font: { size: 11 } },
           position: "right",
-          ticks: { color: C.blue, callback: v => v + "%" },
+          ticks: { color: C.blue, callback: v => fmtNumber(v, Number.isInteger(v) ? 0 : 1) + "%" },
         },
       },
       plugins: {
@@ -279,8 +282,9 @@ export function drawPlayerEvolution(canvasId, gameLog) {
       datasets: [
         {
           label: "Puntos",
-          // Partido sin dato: se omite el punto, no se dibuja en 0 (Feature 12 RF-8)
-          data: sorted.map(g => g.pts ?? null),
+          // Partido sin dato o DNP: se omite el punto, no se dibuja en 0 (C-11 RF-10).
+          // El partido queda en el eje: el hueco muestra que no jugó.
+          data: sorted.map(g => g.played === false ? null : (g.pts ?? null)),
           borderColor: C.accent,
           backgroundColor: C.accentA,
           borderWidth: 2,
@@ -291,7 +295,7 @@ export function drawPlayerEvolution(canvasId, gameLog) {
         },
         {
           label: "OER",
-          data: sorted.map(g => g.oer == null ? null : +g.oer.toFixed(3)),
+          data: sorted.map(g => g.played === false || g.oer == null ? null : +g.oer.toFixed(3)),
           borderColor: C.green,
           backgroundColor: "transparent",
           borderWidth: 2,
@@ -320,6 +324,13 @@ export function drawPlayerEvolution(canvasId, gameLog) {
       },
       plugins: {
         legend: { position: "bottom", labels: { boxWidth: 12, padding: 16 } },
+        tooltip: {
+          callbacks: {
+            title: items => items.length
+              ? labels[items[0].dataIndex] + (sorted[items[0].dataIndex].played === false ? " · No jugó (DNP)" : "")
+              : "",
+          },
+        },
       },
     },
   });
@@ -339,8 +350,8 @@ export function drawLeagueScatter(canvasId, teams, axis = _DEFAULT_AXIS) {
   if (!canvas || !teams?.length) return;
 
   const { xKey, yKey, xName, yName, xTitle, yTitle, xPct, yPct } = axis;
-  const fx = v => v == null ? "—" : (xPct ? (v * 100).toFixed(1) + "%" : (+v).toFixed(2));
-  const fy = v => v == null ? "—" : (yPct ? (v * 100).toFixed(1) + "%" : (+v).toFixed(2));
+  const fx = v => xPct ? PCT(v) : DEC2(v);
+  const fy = v => yPct ? PCT(v) : DEC2(v);
 
   const valid = teams.filter(t => t[xKey] != null && t[yKey] != null);
   if (!valid.length) return;
@@ -395,12 +406,12 @@ export function drawLeagueScatter(canvasId, teams, axis = _DEFAULT_AXIS) {
         x: {
           grid: { color: C.grid },
           title: { display: true, text: xTitle, color: C.muted },
-          ticks: { color: C.muted, callback: v => xPct ? (v * 100).toFixed(0) + "%" : v },
+          ticks: { color: C.muted, callback: v => xPct ? PCT0(v) : DEC2(v) },
         },
         y: {
           grid: { color: C.grid },
           title: { display: true, text: yTitle, color: C.muted },
-          ticks: { color: C.muted, callback: v => yPct ? (v * 100).toFixed(0) + "%" : v },
+          ticks: { color: C.muted, callback: v => yPct ? PCT0(v) : DEC2(v) },
           reverse: false,
         },
       },

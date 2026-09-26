@@ -66,6 +66,8 @@ Stats de box score por equipo por partido. Incluye stats del rival pre-calculada
 **Restricción única:** `(game_id, team_code)`
 
 > Las 6 columnas de desglose (`opp_pf` … `fast_break_pts`) provienen del box score FIBA. Partidos importados antes de su incorporación las muestran en `0` hasta reimportar.
+>
+> `paint_pts`, `second_chance_pts`, `pts_from_tov`, `bench_pts` y `fast_break_pts` se guardan **`NULL`** si FIBA no manda la clave (la competencia no publica el dato) y `0` solo si FIBA informa 0 (C-11). El `DEFAULT 0` de la columna solo aplica a filas viejas; reimportar un partido reescribe el valor.
 
 ---
 
@@ -82,7 +84,7 @@ Stats individuales por jugador por partido.
 | `jersey` | TEXT | Número de camiseta |
 | `minutes` | TEXT | Minutos jugados (formato `MM:SS`) |
 | `position` | TEXT DEFAULT `''` | Posición FIBA (`playingPosition`: G/F/C/PG/PF...). Vacío en partidos importados antes de su incorporación hasta reimportar |
-| `plus_minus` | INTEGER DEFAULT 0 | Plus/Minus del partido (`sPlusMinusPoints` FIBA; puede ser negativo) |
+| `plus_minus` | INTEGER DEFAULT 0 | Plus/Minus del partido (`sPlusMinusPoints` FIBA; puede ser negativo). `NULL` si FIBA no manda la clave (C-11) |
 | `starter` | INTEGER DEFAULT 0 | 1=titular en ese partido (`starter` FIBA). Base para reconstruir el quinteto inicial (lineups/on-off) |
 | `pts` | INTEGER | |
 | `fgm` / `fga` | INTEGER | |
@@ -166,3 +168,7 @@ python backend/database.py
 ```
 
 `init_db(app)` crea todas las tablas con `db.create_all()` (idempotente). Al arrancar `app.py` también corre `upgrade_db(app)`, que aplica `ALTER TABLE ADD COLUMN` para las columnas nuevas sobre DBs existentes — silencioso e idempotente (ignora columnas ya presentes). No requiere herramienta de migración externa.
+
+### Regla para columnas nuevas (C-11, vinculante)
+
+Toda columna nueva que guarde un dato publicado por FIBA se crea **sin valor por defecto** (`NULL` = "no importado todavía" o "la competencia no lo publica"), y la ingesta escribe `0` **solo** cuando FIBA informa 0. Un `DEFAULT 0` haría indistinguible "no hay dato" de "vale cero", y ese cero falso entraría en promedios y rankings.

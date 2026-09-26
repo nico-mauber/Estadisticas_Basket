@@ -6,7 +6,9 @@ Fuentes: Dean Oliver — *Basketball on Paper*; Guía de scouting FUBB.
 >
 > **Reb Share** (y sus variantes ofensiva y defensiva) también es tasa: vale `null` cuando el total del equipo es 0 o no hay dato de equipo para ese partido.
 
-> **Partidos DNP.** Un partido con 0 minutos disputados **no cuenta como partido jugado**: queda fuera de todos los promedios del jugador, de tasa *y* de conteo. Predicado único: `played(minutes)` en `stats_engine.py`. Un partido **con** minutos y 0 puntos sí cuenta —ese 0 es real—, así que esto no contradice la regla de arriba: primero se descarta el DNP (no jugó), después el nulo (jugó sin dato). Ver `sdd/specs/12-nulos-orden-color-dnp/`.
+> **Partidos DNP.** Un partido con 0 minutos disputados **no cuenta como partido jugado**: queda fuera de todos los promedios del jugador, de tasa *y* de conteo. Predicado único: `played(minutes)` en `stats_engine.py`. Un partido **con** minutos y 0 puntos sí cuenta —ese 0 es real—, así que esto no contradice la regla de arriba: primero se descarta el DNP (no jugó), después el nulo (jugó sin dato). En el game log el DNP figura sin números y en la evolución queda como hueco (sin punto). Ver `sdd/specs/12-nulos-orden-color-dnp/`.
+
+> **Dato que la competencia no registra.** Los campos de desglose de FIBA (`paint_pts`, `second_chance_pts`, `pts_from_tov`, `bench_pts`, `fast_break_pts`) y el `plus_minus` de jugador no los publican todas las competencias. Si FIBA no manda la clave, la ingesta guarda `NULL` y la métrica vale `null` (razón `no_registrado`); `0` solo cuando FIBA informa 0. Los `null` no entran en promedios. Ver `sdd/specs/v2/fase-1-confiabilidad/01-C-11-tratamiento-de-nulos/`.
 
 ## Abreviaturas
 
@@ -211,8 +213,13 @@ Calculadas sobre las stats crudas del rival en ese partido:
 |---------|---------|-------------|
 | **Stops** | `STL + BLK` | Actividad defensiva — robos + tapones |
 | **Def Playmaking** | `STL + BLK − TOV` | Impacto neto defensivo |
-| **Def TO Ratio** | `(STL + BLK + DR) / TOV` | Eficiencia defensiva global; alto = mejor |
+| **Def TO Ratio** | `(STL + BLK + DR) / TOV` | Eficiencia defensiva global; alto = mejor. Promedio de temporada **acumulado** (`Σ(STL+BLK+DR) / ΣTOV`), como AS/PER |
 | **Physical Impact** *(jugador)* | `TRB + STL` | Impacto físico total |
+
+> **Sin centinelas.** AS/PER y Def TO Ratio con 0 pérdidas valen `null` (razón `sin_perdidas`), por
+> partido y en el acumulado. Antes valían `99.0`, un número inventado que entraba en los promedios y
+> producía comparaciones imposibles ("↑ 9900.0%"). "Jugó sin perder la pelota" se lee en PER = 0.
+> Ver `sdd/specs/v2/fase-1-confiabilidad/01-C-11-tratamiento-de-nulos/`.
 
 ---
 
