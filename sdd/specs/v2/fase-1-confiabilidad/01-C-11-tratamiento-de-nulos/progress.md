@@ -1,6 +1,6 @@
 # Progress — C-11: Tratamiento de nulos en toda la app
 
-> **Estado:** ✅ Completado (2026-09-26) · rama `v2`, sin commitear
+> **Estado:** ✅ Completado (2026-09-26) · rama `v2`, commit `0c1571d`
 > Reglas: `sdd/04-implement.md`. Tareas: [tasks.md](tasks.md).
 
 ## Decisiones humanas aplicadas
