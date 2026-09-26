@@ -8,7 +8,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from database import db, init_db, upgrade_db, Game, TeamGameStats, PlayerGameStats, Shot, PbpEvent, DB_PATH
 from stats_engine import (calc_team_stats, calc_player_stats, league_averages,
                           _parse_minutes, played, norm_name, resolve_identity,
-                          season_ast_to)
+                          season_ast_to, season_def_to_ratio, null_reasons)
 from fiba_fetcher import fetch_game_data
 from clutch import team_clutch
 import lineups
@@ -425,6 +425,10 @@ def team_stats(team_code: str):
         if not opp:
             continue
         adv = calc_team_stats(t, _opp_dict(opp))
+        # Desglose FIBA: NULL = la competencia no lo publica; se devuelve null, no 0 (C-11 RF-11)
+        adv.update({k: t.get(k) for k in
+                    ("paint_pts", "second_chance_pts", "pts_from_tov", "bench_pts", "fast_break_pts")})
+        adv["opp_pf"] = t.get("opp_pf", 0)
         game_info = Game.query.filter_by(game_id=row.game_id).first()
         game_stats.append({
             "game_id":       row.game_id,
@@ -434,12 +438,7 @@ def team_stats(team_code: str):
             "opponent_code": opp.team_code,
             "home_away":     "L" if row.is_home else "V",
             **adv,
-            "opp_pf":            t.get("opp_pf",            0),
-            "paint_pts":         t.get("paint_pts",         0),
-            "second_chance_pts": t.get("second_chance_pts", 0),
-            "pts_from_tov":      t.get("pts_from_tov",      0),
-            "bench_pts":         t.get("bench_pts",         0),
-            "fast_break_pts":    t.get("fast_break_pts",    0),
+            "null_reasons":  null_reasons(adv),   # C-11 RF-3
         })
 
     # Población de liga POR COMPETENCIA (Feature 14 RF-1): comparar contra un promedio
@@ -484,11 +483,14 @@ def team_stats(team_code: str):
     ]
     averages = {k: _avg(k) for k in keys}
     # AS/PER de temporada — mismo criterio acumulado que en jugador (C-04 / Feature 15 RF-7)
-    averages["ast_to"] = season_ast_to(sum(g.get("ast", 0) or 0 for g in game_stats),
-                                       sum(g.get("tov", 0) or 0 for g in game_stats))
+    def _sum(key):
+        return sum(g.get(key, 0) or 0 for g in game_stats)
+
+    averages["ast_to"] = season_ast_to(_sum("ast"), _sum("tov"))
+    # DEF/TO acumulado (pooled, DA-02): sin centinela, un partido sin pérdidas no se pierde (C-11)
+    averages["def_to_ratio"] = season_def_to_ratio(_sum("stl"), _sum("blk"), _sum("drb"), _sum("tov"))
     # C-07: totales de temporada, además del promedio por partido (Feature 16 RF-5)
-    totals = {k: sum(g.get(k, 0) or 0 for g in game_stats)
-              for k in ("fga2", "fgm2", "fga3", "fgm3", "fta", "ftm")}
+    totals = {k: _sum(k) for k in ("fga2", "fgm2", "fga3", "fgm3", "fta", "ftm")}
 
     wins      = sum(1 for g in game_stats if g.get("pts", 0) > g.get("opp_pts", 0))
     losses    = len(game_stats) - wins
@@ -511,6 +513,7 @@ def team_stats(team_code: str):
         "games":     len(game_stats),
         "record":    record,
         "averages":  averages,
+        "null_reasons": null_reasons(averages),   # razón de cada null de `averages` (C-11 RF-3)
         "league":    league,     # = leagues[""] — se conserva por compatibilidad
         "leagues":   leagues,    # promedio de liga por competencia (Feature 14 RF-1)
         "totals":    totals,     # totales de temporada (Feature 16 RF-5)
@@ -609,14 +612,16 @@ def player_stats(team_code: str, player_name: str):
         else:
             adv["reb_share"] = adv["oreb_share"] = adv["dreb_share"] = None
 
+        is_played = played(row.minutes)
         game_log.append({
             "game_id":       row.game_id,
             "date":          game_info.date if game_info else "",
             "competition":   game_info.competition if game_info else "",
             "opponent":      opp.team_name  if opp else "",
             "opponent_code": opp.team_code  if opp else "",
-            "played":        played(row.minutes),   # false = DNP (Feature 12 RF-6)
-            **adv
+            "played":        is_played,   # false = DNP (Feature 12 RF-6)
+            **adv,
+            "null_reasons":  null_reasons(adv, played=is_played),   # C-11 RF-3
         })
 
     # Población de liga POR COMPETENCIA (Feature 14 RF-1); "" es el agregado.
@@ -676,11 +681,14 @@ def player_stats(team_code: str, player_name: str):
     averages = {k: _avg(k) for k in keys}
     # AS/PER de temporada: cociente de los TOTALES, no promedio de los ratios por
     # partido (Feature 15 RF-7 / C-04). Solo sobre partidos jugados.
-    averages["ast_to"] = season_ast_to(sum(g["ast"] for g in played_log),
-                                       sum(g["tov"] for g in played_log))
+    def _sum(key):
+        return sum(g.get(key, 0) or 0 for g in played_log)
+
+    averages["ast_to"] = season_ast_to(_sum("ast"), _sum("tov"))
+    # DEF/TO acumulado (pooled, DA-02), mismo criterio que AS/PER (C-11)
+    averages["def_to_ratio"] = season_def_to_ratio(_sum("stl"), _sum("blk"), _sum("drb"), _sum("tov"))
     # C-07: totales de temporada sobre los partidos JUGADOS (Feature 16 RF-5 + Feature 12 RF-6)
-    totals = {k: sum(g.get(k, 0) or 0 for g in played_log)
-              for k in ("fga2", "fgm2", "fga3", "fgm3", "fta", "ftm")}
+    totals = {k: _sum(k) for k in ("fga2", "fgm2", "fga3", "fgm3", "fta", "ftm")}
 
     return jsonify({
         "player":    player_name,
@@ -688,6 +696,8 @@ def player_stats(team_code: str, player_name: str):
         "team_name": rows[0].team_name,
         "games":     len(played_log),   # partidos JUGADOS (excluye DNP) — Feature 12 RF-7
         "averages":  averages,
+        # Sin partidos jugados, todo `averages` es null por DNP (C-11 RF-3)
+        "null_reasons": null_reasons(averages, played=bool(played_log)),
         "league":    league,     # = leagues[""] — se conserva por compatibilidad
         "leagues":   leagues,    # promedio de liga por competencia (Feature 14 RF-1)
         "totals":    totals,     # totales de temporada (Feature 16 RF-5)
@@ -873,7 +883,8 @@ def search_players():
             else:
                 adv["reb_share"] = adv["oreb_share"] = adv["dreb_share"] = None
             per_game.append(adv)
-            pm_vals.append(pr.plus_minus if pr.plus_minus is not None else 0)
+            if pr.plus_minus is not None:   # NULL = la competencia no lo registra (C-11 RF-11)
+                pm_vals.append(pr.plus_minus)
             min_vals.append(_parse_minutes(pr.minutes))
 
         def _avg_metric(k):
@@ -901,6 +912,9 @@ def search_players():
         # AS/PER de temporada — mismo criterio acumulado (C-04 / Feature 15 RF-7)
         rec["ast_to"] = season_ast_to(sum(gm.get("ast", 0) or 0 for gm in per_game),
                                       sum(gm.get("tov", 0) or 0 for gm in per_game))
+        stat_keys = metric_keys + count_keys + ["minutes", "plus_minus", "ast_to"]
+        rec["null_reasons"] = null_reasons({k: rec[k] for k in stat_keys},
+                                           played=bool(per_game))   # C-11 RF-3
         result.append(rec)
 
     result.sort(key=lambda r: r["player"])

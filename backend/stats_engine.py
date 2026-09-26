@@ -169,7 +169,8 @@ def calc_team_stats(t: dict, opp: dict) -> dict:
     t_blk = t.get("blk", 0)
     stocks         = t_stl + t_blk
     def_playmaking = t_stl + t_blk - t["tov"]
-    def_to_ratio   = _safe_div(t_stl + t_blk + t["drb"], t["tov"]) if t["tov"] else (99.0 if (t_stl + t_blk + t["drb"]) > 0 else 0.0)
+    # Sin pérdidas el cociente no está definido → None, nunca un centinela 99.0 (C-11 / DA-07)
+    def_to_ratio   = _safe_div(t_stl + t_blk + t["drb"], t["tov"])
 
     return {
         # Possessions
@@ -248,6 +249,45 @@ def season_ast_to(total_ast, total_tov):
     return _safe_div(total_ast or 0, total_tov or 0)
 
 
+def season_def_to_ratio(total_stl, total_blk, total_drb, total_tov):
+    """DEF/TO de temporada = (ROB + TAP + RD) acumulados / PER acumuladas. `None` si no hubo pérdidas.
+
+    Cociente de totales (pooled, DA-02), mismo criterio que `season_ast_to`.
+    """
+    return _safe_div((total_stl or 0) + (total_blk or 0) + (total_drb or 0), total_tov or 0)
+
+
+# ── Razón de un nulo (C-11 RF-3) ─────────────────────────────────────────────
+# Campos del box de FIBA que no todas las competencias publican: si FIBA no manda la
+# clave, la ingesta guarda NULL (fiba_fetcher.py) y el nulo significa "no registrado".
+FIBA_OPTIONAL_FIELDS = frozenset({
+    "paint_pts", "second_chance_pts", "pts_from_tov", "bench_pts", "fast_break_pts",
+    "plus_minus",
+})
+
+
+def null_reason(key: str, *, played: bool = True) -> str:
+    """Código de por qué la métrica `key` vale None. Ver docs/api.md §"Nulos con razón".
+
+    - `dnp`: el jugador no disputó minutos en ese partido.
+    - `no_registrado`: la competencia no publica ese campo.
+    - `sin_perdidas`: AS/PER o DEF/TO con 0 pérdidas (cociente no definido).
+    - `sin_intentos`: cualquier otra tasa con denominador 0.
+    """
+    if not played:
+        return "dnp"
+    if key in FIBA_OPTIONAL_FIELDS:
+        return "no_registrado"
+    if key in ("ast_to", "def_to_ratio"):
+        return "sin_perdidas"
+    return "sin_intentos"
+
+
+def null_reasons(metrics: dict, *, played: bool = True) -> dict:
+    """`{clave: código}` para cada clave de `metrics` cuyo valor es None."""
+    return {k: null_reason(k, played=played) for k, v in metrics.items() if v is None}
+
+
 def calc_player_stats(p: dict, team_pos: float, team: dict = None, game_minutes: int = 40,
                       opp: dict = None) -> dict:
     """Player advanced stats.
@@ -281,7 +321,7 @@ def calc_player_stats(p: dict, team_pos: float, team: dict = None, game_minutes:
     to_pct  = _safe_div(p["tov"], fga + 0.44 * fta + p["tov"])
     to_ratio = _safe_div(p["tov"], plays)
     as_pct  = _safe_div(p["ast"], fgm) if fgm else None
-    ast_to  = _safe_div(p["ast"], p["tov"]) if p["tov"] else (float("inf") if p["ast"] > 0 else 0.0)
+    ast_to  = _safe_div(p["ast"], p["tov"])   # 0 pérdidas → None (C-11 / DA-07)
     ast_ratio = _safe_div(p["ast"], plays)
     peso_1p = _safe_div(ftm, pts)
     peso_2p = _safe_div(2 * p["fgm2"], pts)
@@ -325,7 +365,7 @@ def calc_player_stats(p: dict, team_pos: float, team: dict = None, game_minutes:
     blk_v = p.get("blk", 0)
     stocks         = stl_v + blk_v
     def_playmaking = stl_v + blk_v - p["tov"]
-    def_to_ratio   = _safe_div(stl_v + blk_v + p["drb"], p["tov"]) if p["tov"] else (99.0 if (stl_v + blk_v + p["drb"]) > 0 else 0.0)
+    def_to_ratio   = _safe_div(stl_v + blk_v + p["drb"], p["tov"])   # 0 pérdidas → None (C-11 / DA-07)
     physical_impact = p.get("trb", p["orb"] + p["drb"]) + stl_v
 
     return {
@@ -350,7 +390,7 @@ def calc_player_stats(p: dict, team_pos: float, team: dict = None, game_minutes:
         "to_ratio":       to_ratio,
         "as_pct":         as_pct,
         "ast_ratio":      ast_ratio,
-        "ast_to":         ast_to if ast_to != float("inf") else 99.0,
+        "ast_to":         ast_to,
         "peso_1p":        peso_1p,
         "peso_2p":        peso_2p,
         "peso_3p":        peso_3p,

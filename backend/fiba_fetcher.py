@@ -275,14 +275,17 @@ def _parse_fiba_json(raw: dict, source_url: str = "") -> dict:
         is_home = (i == 0)
         tno = int(tk) if str(tk).isdigit() else (i + 1)
 
-        # Team totals are flat on t with prefix "tot_s"
-        def ti(suffixes):
+        # Team totals are flat on t with prefix "tot_s".
+        # `default` = valor si FIBA no manda ninguna de las claves. Un 0 informado por FIBA
+        # se devuelve como 0 (no se confunde con "clave ausente").
+        def ti(suffixes, default=0):
             for s in suffixes:
-                v = t.get("tot_s" + s) or t.get(s)
-                if v is not None:
-                    try: return int(float(str(v)))
-                    except: pass
-            return 0
+                for k in ("tot_s" + s, s):
+                    v = t.get(k)
+                    if v is not None and v != "":
+                        try: return int(float(str(v)))
+                        except (ValueError, TypeError): pass
+            return default
 
         team_code = (t.get("code") or t.get("codeInternational") or t.get("shortName") or f"T{tk}").strip().upper()
         tno_to_code[tno] = team_code
@@ -306,11 +309,13 @@ def _parse_fiba_json(raw: dict, source_url: str = "") -> dict:
             "stl":  ti(["Steals"]),
             "blk":  ti(["Blocks"]),
             "pf":   ti(["FoulsPersonal"]),
-            "paint_pts":         ti(["PointsInThePaint", "PaintPoints"]),
-            "second_chance_pts": ti(["PointsSecondChance", "SecondChancePoints"]),
-            "pts_from_tov":      ti(["PointsFromTurnovers"]),
-            "bench_pts":         ti(["BenchPoints"]),
-            "fast_break_pts":    ti(["PointsFastBreak", "FastBreakPoints"]),
+            # Desglose opcional: no todas las competencias lo publican. Clave ausente → None
+            # ("la competencia no registra el dato"), nunca 0 (C-11 RF-11).
+            "paint_pts":         ti(["PointsInThePaint", "PaintPoints"], default=None),
+            "second_chance_pts": ti(["PointsSecondChance", "SecondChancePoints"], default=None),
+            "pts_from_tov":      ti(["PointsFromTurnovers"], default=None),
+            "bench_pts":         ti(["BenchPoints"], default=None),
+            "fast_break_pts":    ti(["PointsFastBreak", "FastBreakPoints"], default=None),
         }
         team_row["fgm"] = team_row["fgm2"] + team_row["fgm3"]
         team_row["fga"] = team_row["fga2"] + team_row["fga3"]
@@ -346,7 +351,7 @@ def _parse_fiba_json(raw: dict, source_url: str = "") -> dict:
                     "jersey":      str(p.get("shirtNumber") or ""),
                     "minutes":     str(p.get("sMinutes") or p.get("Min") or "0:00"),
                     "position":    (p.get("playingPosition") or "").strip(),
-                    "plus_minus":  _i(p, ["sPlusMinusPoints"]),
+                    "plus_minus":  _i(p, ["sPlusMinusPoints"], default=None),   # ausente → None (C-11 RF-11)
                     "starter":     int(p.get("starter") or 0),
                     "pts":  pi(["Points"]),
                     "fgm2": pi(["TwoPointersMade"]),
