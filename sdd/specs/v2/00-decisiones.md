@@ -24,4 +24,7 @@ las necesita.
 | C-11 RF-10 | DNP en evolución: el partido queda en el eje, sin punto en ninguna serie | 2026-09-26 |
 | F-11 alcance | Versión acotada: competencias (alias, estado, fusión, reasignación), ingesta en `ingest.py` (archivo crudo, upsert de tiros/pbp, minutos reales, coordenadas, fix `OVERTIME`), reproceso y panel de calidad. **Diferido**: columnas para requisitos futuros (cada dueño agrega las suyas y reprocesa), `cache.py`/`data_version`, `repository.py`, competencia por defecto (DA-14 → C-02) | 2026-09-26 |
 | F-11 borrador | Una competencia en `borrador` oculta todo: sus partidos no entran en ningún cálculo ni listado fuera de la sección Datos | 2026-09-26 |
+| C-05 §9 | Se aplican las 3 propuestas: búsqueda de la palabra `pep` sin distinguir mayúsculas en `frontend/`, `backend/` (sin `venv/`) y `docs/`, excluido `sdd/`; `docs/database.md` describe `paint_pts` sin la sigla vieja; toda etiqueta futura de `paint_pts` es `PtsEnPint` | 2026-09-26 |
+| C-10 §9 | Se aplican las 4 propuestas: la flecha indica la dirección en pantalla del mejor rendimiento y se deriva de la dirección de la métrica (sin invertir escalas); rótulos internos "Prom. <métrica>" sin flecha; métricas neutrales sin flecha; recuperos y puntos "mayor es mejor" | 2026-09-26 |
+| C-06 alcance | Completo: umbral y ventana en un único lugar del backend, título desde la respuesta, recuento que cierra, prórrogas `OVERTIME` en la ventana, filtro de competencia de Equipo y validación estricta (400) de `margin`/`window_secs` | 2026-09-26 |
 

@@ -8,7 +8,7 @@ from database import db, init_db, upgrade_db, Game, TeamGameStats, PlayerGameSta
 from stats_engine import (calc_team_stats, calc_player_stats, league_averages,
                           _parse_minutes, played, norm_name, resolve_identity,
                           season_ast_to, season_def_to_ratio, null_reasons)
-from clutch import team_clutch
+from clutch import team_clutch, MARGIN_RANGE, WINDOW_RANGE
 import lineups
 import competitions
 import data_quality
@@ -838,16 +838,22 @@ def game_pbp(game_id: str):
 
 # ── Lineups / ON-OFF / Clutch (motor de quintetos + cierres) ─────────────────
 
-def _team_pbp_games(team_code: str) -> list[dict]:
+def _team_game_ids(team_code: str, comp_id: int | None = None) -> set[str]:
+    """Partidos visibles del equipo, opcionalmente de una sola competencia."""
+    q = _visible(TeamGameStats.query.filter_by(team_code=team_code), TeamGameStats)
+    if comp_id:
+        q = q.filter(TeamGameStats.game_id.in_(
+            db.session.query(Game.game_id).filter_by(competition_id=comp_id)))
+    return {tr.game_id for tr in q.all()}
+
+
+def _team_pbp_games(team_code: str, comp_id: int | None = None) -> list[dict]:
     """Partidos del equipo con pbp: [{game_id, events, player_rows, opp_code}, ...].
 
-    Base compartida por Feature 03 (lineups) y Feature 04 (on/off).
+    Base compartida por Feature 03 (lineups), Feature 04 (on/off) y cierres.
     """
-    game_ids = {
-        tr.game_id for tr in _visible(TeamGameStats.query.filter_by(team_code=team_code), TeamGameStats).all()
-    }
     games = []
-    for gid in game_ids:
+    for gid in _team_game_ids(team_code, comp_id):
         events = [
             _to_dict(e) for e in
             PbpEvent.query.filter_by(game_id=gid).order_by(PbpEvent.action_number).all()
@@ -924,22 +930,52 @@ def onoff_route(team_code: str, player_name: str):
 def clutch_team(team_code: str):
     """Cierre del equipo: agregado ("mini-partido") + desglose por partido (Feature 05 v2).
 
-    Solo cuentan los cierres con diferencia ≤ margen (default 15) al minuto 5:00.
-    Ver sdd/specs/05-clutch/spec.md §10.
+    Solo cuentan los cierres con diferencia ≤ `margin` al entrar a la ventana. Sin
+    `?margin`/`?window_secs` usa los defaults de clutch.py (C-06). `?competition=<id>`
+    limita el universo. Ver sdd/specs/05-clutch/spec.md §10.
     """
     team_code = team_code.upper()
-    row = _visible(TeamGameStats.query.filter_by(team_code=team_code), TeamGameStats).first()
+    try:
+        margin = _int_arg("margin", *MARGIN_RANGE)
+        window_secs = _int_arg("window_secs", *WINDOW_RANGE)
+        comp_id = competitions.resolve(request.args.get("competition"))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except CompetitionError as e:
+        return jsonify({"error": str(e)}), e.status
+
+    row = (_visible(TeamGameStats.query.filter_by(team_code=team_code), TeamGameStats)
+           .join(Game, Game.game_id == TeamGameStats.game_id)
+           .order_by(Game.date.desc(), Game.game_id.desc()).first())   # nombre más reciente
     if not row:
         return jsonify({"error": "Equipo no encontrado"}), 404
+    game_ids = _team_game_ids(team_code, comp_id)
+    if not game_ids:
+        return jsonify({"error": "El equipo no tiene partidos en la competencia seleccionada."}), 404
 
-    games = _team_pbp_games(team_code)
+    games = _team_pbp_games(team_code, comp_id)
     if not games:
         return jsonify({"error": "Equipo sin play-by-play. Reimportá sus partidos."}), 404
 
-    margin = request.args.get("margin", type=int)
-    if margin is None or margin < 0:
-        margin = 10   # C-06: partido cerrado = dif ≤ 10 (antes 15)
-    return jsonify(team_clutch(games, team_code, row.team_name, margin))
+    result = team_clutch(games, team_code, row.team_name, margin, window_secs,
+                         games_without_pbp=len(game_ids) - len(games))
+    comp = competitions.get(comp_id) if comp_id else None
+    result["competition"] = {"id": comp.id, "label": competitions.label(comp)} if comp else None
+    return jsonify(result)
+
+
+def _int_arg(name: str, lo: int, hi: int) -> int | None:
+    """Query param entero opcional en [lo, hi]. Ausente → None; inválido → ValueError."""
+    raw = request.args.get(name)
+    if raw is None or raw == "":
+        return None
+    try:
+        value = int(raw)
+    except ValueError:
+        value = None
+    if value is None or not lo <= value <= hi:
+        raise ValueError(f"El parámetro {name} debe ser un número entero entre {lo} y {hi}.")
+    return value
 
 
 # ── League ─────────────────────────────────────────────────────────────────

@@ -91,7 +91,7 @@ Stats de box score por equipo por partido. Incluye stats del rival pre-calculada
 | `opp_orb` / `opp_drb` | INTEGER | Rebotes del rival |
 | `opp_tov` | INTEGER | Pérdidas del rival |
 | `opp_pf` | INTEGER | Faltas del rival (faltas recibidas) |
-| `paint_pts` | INTEGER | Puntos en la pintura. **Etiqueta de UI: `PtsEnPint`** (antes `PeP`) — la columna NO se renombra (C-05 / Constitución 5) |
+| `paint_pts` | INTEGER | Puntos en la pintura. **Etiqueta de UI: `PtsEnPint`** — la columna NO se renombra (C-05 / Constitución 5) |
 | `second_chance_pts` | INTEGER | Puntos de segunda oportunidad (PtsSegCh) |
 | `pts_from_tov` | INTEGER | Puntos tras pérdida rival (PtPer) |
 | `bench_pts` | INTEGER | Puntos del banco |

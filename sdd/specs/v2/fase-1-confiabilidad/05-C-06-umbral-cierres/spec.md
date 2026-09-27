@@ -3,7 +3,7 @@
 > **ID:** C-06 · **Prioridad:** P1 · **Fase y orden:** 1·05
 > **Depende de:** C-11 Grupo 0 (P-00) — [`../01-C-11-tratamiento-de-nulos/spec.md`](../01-C-11-tratamiento-de-nulos/spec.md) · F-11 (universo de competencia y constantes de período) — [`../02-F-11-calidad-datos-competencias/spec.md`](../02-F-11-calidad-datos-competencias/spec.md)
 > **Habilita:** F-13, F-04, F-06
-> **Estado:** Borrador (agente) — pendiente de revisión humana (gate Paso 1)
+> **Estado:** Implementado (2026-09-26) — ver [progress.md](progress.md)
 > **Fuente:** Especificación v2 §2 · C-06 y §1.3 S9 ([`../../00-especificacion-cliente-v2.md`](../../00-especificacion-cliente-v2.md)) · Arquitectura §1.0, §1.1 (`clutch.py`), §1.5 D-09, §3.2 (`clutch.margin`, `clutch.window_secs`), §4, §6 ([`../../00-arquitectura-transversal.md`](../../00-arquitectura-transversal.md))
 
 ## 0. Contexto y situación actual

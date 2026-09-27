@@ -376,15 +376,25 @@ Todos los jugadores de la base con sus promedios, para el buscador avanzado (una
 
 ## GET `/api/clutch/<team_code>`
 
-Cierres del equipo (Feature 05 **v2**): rendimiento en los **últimos 5 minutos** (último período REGULAR con reloj ≤ 5:00 + prórrogas) **de partidos apretados** — solo cuentan los partidos con diferencia ≤ `margin` (default 15) al minuto 5:00. Devuelve un **agregado** ("mini-partido" del equipo, todos sus cierres sumados) **más un desglose por partido**. Filtro `?margin=<n>` opcional. Ver `sdd/specs/05-clutch/spec.md §10`.
+Cierres del equipo (Feature 05 **v2**, C-06): rendimiento en la **ventana de cierre** (último período REGULAR con reloj ≤ `window_secs` + todas las prórrogas) **de partidos apretados** — solo cuentan los partidos con diferencia ≤ `margin` al entrar a la ventana. Devuelve un **agregado** ("mini-partido" del equipo, todos sus cierres sumados) **más un desglose por partido**. Ver `sdd/specs/05-clutch/spec.md §10` y `sdd/specs/v2/fase-1-confiabilidad/05-C-06-umbral-cierres/`.
+
+**Query (todos opcionales):**
+- `margin` — umbral de partido cerrado, entero 0–40. Default **10** (`clutch.DEFAULT_MARGIN`).
+- `window_secs` — ventana de cierre en segundos, entero 60–600. Default **300** (`clutch.DEFAULT_WINDOW_SECS`).
+- `competition` — id de competencia (o texto de FIBA legado): el universo son solo los partidos del equipo en ella. Sin el parámetro, todas las competencias publicadas.
+
+Los defaults viven solo en `backend/clutch.py` (F-13 los hará configurables). La respuesta devuelve los valores usados y **el frontend arma el título con ellos**.
 
 > Reemplaza al antiguo `GET /api/clutch?team=` (una fila por equipo-partido, en la vista Liga). El análisis se movió a la vista **Equipo**.
 
 **Response:**
 ```json
 {
-  "team_code": "HYM", "team_name": "Hebraica Macabi", "margin": 15,
-  "games_qualified": 2, "games_excluded": 0,
+  "team_code": "HYM", "team_name": "Hebraica Macabi",
+  "margin": 10, "window_secs": 300,
+  "competition": { "id": 1, "label": "Liga de Ascenso 2026" },
+  "games_total": 2, "games_with_pbp": 2, "games_without_pbp": 0,
+  "games_qualified": 2, "games_excluded": 0, "games_without_clutch_events": 0,
   "clutch_record": "1-1-0",
   "aggregate": {
     "pts_for": 21, "pts_against": 18, "point_diff": 3,
@@ -396,7 +406,7 @@ Cierres del equipo (Feature 05 **v2**): rendimiento en los **últimos 5 minutos*
   "per_game": [
     {
       "game_id": "2820499", "date": "2026-04-28",
-      "opponent_code": "CNF", "home_away": "V", "entry_margin": 6,
+      "opponent_code": "CNF", "home_away": "V", "entry_margin": 6, "overtime_periods": 0,
       "pts": 16, "opp_pts": 12, "point_diff": 4,
       "off_rating": 1.16, "def_rating": 0.96, "efg_pct": 0.577, "ts_pct": 0.542,
       "possessions": 13.8, "tov": 1, "ast": 5, "reb": 6,
@@ -408,11 +418,14 @@ Cierres del equipo (Feature 05 **v2**): rendimiento en los **últimos 5 minutos*
 }
 ```
 
-- **Calificación por ventana:** un partido entra solo si al minuto 5:00 (último evento con `clock_secs > 300` del REGULAR final) la diferencia absoluta era ≤ `margin`. Si no, suma a `games_excluded` (paliza) y no aporta al agregado. `entry_margin` = esa diferencia por partido.
-- `aggregate` = suma de las stats crudas de todos los cierres calificados; tasas recalculadas sobre la suma (`null` si 0 posesiones). `aggregate.point_diff == pts_for − pts_against`.
+- `competition` = `{id, label}` de la competencia pedida, o `null` si no se filtró.
+- **Calificación por ventana:** un partido entra solo si al abrir la ventana (último evento con `clock_secs > window_secs` del REGULAR final) la diferencia absoluta era ≤ `margin`. Si no, suma a `games_excluded` y no aporta al agregado. `entry_margin` = esa diferencia por partido.
+- **Recuento que cierra:** `games_qualified + games_excluded + games_without_clutch_events == games_with_pbp` y `games_with_pbp + games_without_pbp == games_total`. `games_without_clutch_events` = calificó por diferencia pero no hay eventos de cierre de ambos equipos.
+- **Prórrogas:** todos los eventos con `period_type` `OVERTIME` (o el legado `OT`) entran en la ventana. `per_game[].overtime_periods` = cantidad de prórrogas del partido.
+- `aggregate` = suma de las stats crudas de todos los cierres calificados; tasas recalculadas sobre la suma (`null` si 0 posesiones o 0 intentos). `aggregate.point_diff == pts_for − pts_against`.
 - `clutch_record` = `ganados-perdidos-empatados` de los cierres calificados (`pts > / < / == opp_pts`).
 - Faltas desde `pbp_events`: `fouls_committed` (`foul`), `fouls_drawn` (`foulon`).
-- **Errores:** `404` — equipo inexistente o sin play-by-play. Con `games_qualified == 0`, `aggregate` trae conteos 0 y tasas `null`.
+- **Errores:** `400` — `margin`/`window_secs` fuera de rango o no enteros ("El parámetro margin debe ser un número entero entre 0 y 40."), o competencia inexistente. `404` — equipo inexistente ("Equipo no encontrado"), sin partidos en la competencia pedida ("El equipo no tiene partidos en la competencia seleccionada.") o sin play-by-play ("Equipo sin play-by-play. Reimportá sus partidos."). Con `games_qualified == 0`, `aggregate` trae conteos 0 y tasas `null`.
 
 ---
 

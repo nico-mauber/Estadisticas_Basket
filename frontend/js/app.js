@@ -1,6 +1,6 @@
 import { api, setUnauthorizedHandler } from "./api.js";
 import { drawRadar, drawEvolution, drawPlayerEvolution, drawLeagueScatter, drawCompareRadar, resetZoom } from "./charts.js";
-import { PCT, PCT0, DEC1, DEC2, isNull, nullDisplay, fmtOrNull } from "./core/format.js";
+import { PCT, PCT0, DEC1, DEC2, fmtNumber, isNull, nullDisplay, fmtOrNull } from "./core/format.js";
 
 // ── Toast ──────────────────────────────────────────────────────────────────
 function toast(msg, type = "ok") {
@@ -741,26 +741,48 @@ let _leagueMap      = "ef";
 let _leagueComp     = ""; // "" = todas las competencias
 
 // Scatter map presets — each defines the X/Y axes for el mapa de liga.
+// Cada eje declara la dirección de su métrica (`higher` | `lower` | `neutral`) y el título se arma
+// con `_mapAxis`: nunca escribir la flecha a mano (C-10). `xLabel`/`yLabel` = nombre largo del
+// título si difiere del corto (`xName`/`yName`, usado en tooltip y línea de promedio).
 const LEAGUE_MAPS = [
   {
     id: "ef", label: "Eficiencia (OER / DER)",
-    axis: { xKey: "oer", xName: "OER", xTitle: "OER  (→ mejor ataque)", xPct: false,
-            yKey: "der", yName: "DER", yTitle: "DER  (↓ mejor defensa)", yPct: false },
+    axis: { xKey: "oer", xName: "OER", xDir: "higher", xQual: "mejor ataque", xPct: false,
+            yKey: "der", yName: "DER", yDir: "lower",  yQual: "mejor defensa", yPct: false },
     hint: "Derecha = mejor ataque (OER alto) &nbsp;|&nbsp; Abajo = mejor defensa (DER bajo) &nbsp;|&nbsp; Abajo-derecha = elite",
   },
   {
     id: "reb", label: "Rebotes (OR% / DR%)",
-    axis: { xKey: "or_pct", xName: "OR%", xTitle: "OR%  (→ mejor)", xPct: true,
-            yKey: "dr_pct", yName: "DR%", yTitle: "DR%  (↑ mejor)", yPct: true },
-    hint: "Arriba-derecha = domina ambos tableros (ofensivo y defensivo)",
+    axis: { xKey: "or_pct", xName: "OR%", xDir: "higher", xQual: "mejor", xPct: true,
+            yKey: "dr_pct", yName: "DR%", yDir: "higher", yQual: "mejor", yPct: true },
+    hint: "Derecha = mejor rebote ofensivo &nbsp;|&nbsp; Arriba = mejor rebote defensivo &nbsp;|&nbsp; Arriba-derecha = domina ambos tableros",
   },
   {
     id: "rec", label: "Recuperos / Puntos",
-    axis: { xKey: "stl", xName: "Recuperos", xTitle: "Recuperos por partido  (→ más robos)", xPct: false,
-            yKey: "pts", yName: "Puntos", yTitle: "Puntos por partido  (↑ más puntos)", yPct: false },
+    axis: { xKey: "stl", xName: "Recuperos", xLabel: "Recuperos por partido", xDir: "higher", xQual: "más robos", xPct: false,
+            yKey: "pts", yName: "Puntos",    yLabel: "Puntos por partido",    yDir: "higher", yQual: "más puntos", yPct: false },
     hint: "Derecha = más robos &nbsp;|&nbsp; Arriba = más puntos &nbsp;|&nbsp; Arriba-derecha = elite",
   },
 ];
+
+// Flecha hacia el lado de la pantalla donde está el mejor rendimiento. El eje Y no está invertido
+// (`reverse: false` en drawLeagueScatter): los valores crecen hacia arriba.
+const AXIS_ARROWS = { x: { higher: "→", lower: "←" }, y: { higher: "↑", lower: "↓" } };
+
+function _axisTitle(name, dir, orient, qual) {
+  const arrow = AXIS_ARROWS[orient][dir];
+  return arrow ? `${name}  (${arrow} ${qual})` : name;   // métrica neutral: sin flecha de "mejor"
+}
+
+function _mapAxis(a) {
+  return {
+    ...a,
+    xTitle: _axisTitle(a.xLabel || a.xName, a.xDir, "x", a.xQual),
+    yTitle: _axisTitle(a.yLabel || a.yName, a.yDir, "y", a.yQual),
+    xAvgLabel: `Prom. ${a.xName}`,
+    yAvgLabel: `Prom. ${a.yName}`,
+  };
+}
 
 const LEAGUE_COLS = [
   { key: null,           label: "#" },
@@ -880,7 +902,7 @@ function _drawLeagueMap() {
       &nbsp;&nbsp;·&nbsp;&nbsp;
       <span style="color:var(--muted)">🖱 rueda = zoom &nbsp;·&nbsp; arrastrar = mover &nbsp;·&nbsp; pellizcar = zoom táctil</span>`;
   }
-  drawLeagueScatter("chart-scatter", _leagueTeams, map.axis);
+  drawLeagueScatter("chart-scatter", _leagueTeams, _mapAxis(map.axis));
 }
 
 async function renderLeague() {
@@ -944,14 +966,18 @@ async function renderLeague() {
   }
 }
 
-// ── Clutch por equipo (últimos 5 min, dif ≤ `margin`) — dentro de Equipo (Feat 05 v2) ──
+// ── Clutch por equipo (últimos N min, dif ≤ `margin`) — dentro de Equipo (Feat 05 v2) ──
+// Umbral y ventana salen siempre de la respuesta (`margin`, `window_secs`): nunca escribir
+// esos números acá (C-06). Antes de la respuesta el título dice solo "Cierres".
 let _clutchData = null;
 let _clutchSort = { key: "date", dir: -1 };
+let _clutchReq  = 0;   // descarta respuestas viejas al cambiar de equipo o competencia
 
 const CLUTCH_COLS = [
   { key: "date", label: "Fecha", date: true },
   { key: "opponent_code", label: "Rival", txt: true }, { key: "home_away", label: "L/V", txt: true },
-  { key: "entry_margin", label: "Δ@5:00", int: true },
+  { key: "entry_margin", label: d => `Δ@${_clock(d.window_secs)}`, int: true },
+  { key: "overtime_periods", label: "PR", title: "Prórrogas", ot: true },
   { key: "point_diff", label: "Dif", diff: true }, { key: "pts", label: "Pts", int: true },
   { key: "off_rating", label: "Off" }, { key: "def_rating", label: "Def" },
   { key: "efg_pct", label: "eFG%", pct: true }, { key: "ts_pct", label: "TS%", pct: true },
@@ -961,32 +987,48 @@ const CLUTCH_COLS = [
   { key: "top_finisher", label: "Finaliza", leader: "pts" }, { key: "top_creator", label: "Crea", leader: "ast" },
 ];
 
+// Segundos → reloj de juego "m:ss" (300 → "5:00").
+const _clock = s => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+
+function _clutchTitle(d) {
+  if (!d) return `<div class="card-title">Cierres</div>`;
+  const min = d.window_secs / 60;
+  return `<div class="card-title">Cierres (últimos ${fmtNumber(min, Number.isInteger(min) ? 0 : 1)} min, dif ≤ ${d.margin})</div>`;
+}
+
+// Recuento que cierra: calificados + excluidos + sin eventos de cierre + sin play-by-play = partidos del equipo.
+function _clutchCount(d) {
+  const parts = [`${d.games_qualified} calificado(s)`,
+                 `${d.games_excluded} excluido(s) por diferencia mayor a ${d.margin}`];
+  if (d.games_without_clutch_events) parts.push(`${d.games_without_clutch_events} sin eventos de cierre`);
+  if (d.games_without_pbp) parts.push(`${d.games_without_pbp} sin play-by-play`);
+  return (d.competition ? `${esc(d.competition.label)} · ` : "") + parts.join(" · ");
+}
+
 async function renderTeamClutch(teamCode) {
   const box = document.getElementById("team-clutch");
   if (!box) return;
-  // El umbral sale del backend, no de un literal: vivía duplicado y por eso la
-  // leyenda quedaba desincronizada (Feature 18 RF-4). Antes de la respuesta todavía
-  // no se conoce, así que loading y error usan el default.
-  const CLUTCH_MARGIN_DEFAULT = 10;
-  const titleFor = m => `<div class="card-title">Cierres (últimos 5 min, dif ≤ ${m})</div>`;
-  box.innerHTML = `<div class="card">${titleFor(CLUTCH_MARGIN_DEFAULT)}<p class="empty"><span class="spinner"></span>Calculando cierres...</p></div>`;
+  const req = ++_clutchReq;
+  box.innerHTML = `<div class="card">${_clutchTitle(null)}<p class="empty"><span class="spinner"></span>Calculando cierres...</p></div>`;
+  let d;
   try {
-    _clutchData = await api.clutchTeam(teamCode);
+    d = await api.clutchTeam(teamCode, _teamComp);
   } catch (e) {
-    box.innerHTML = `<div class="card">${titleFor(CLUTCH_MARGIN_DEFAULT)}<p class="empty below-avg">${e.message || "No se pudieron cargar los cierres"}</p></div>`;
+    if (req === _clutchReq) box.innerHTML = `<div class="card">${_clutchTitle(null)}<p class="empty below-avg">${e.message || "No se pudieron cargar los cierres"}</p></div>`;
     return;
   }
-  const d = _clutchData;
-  const title = titleFor(d.margin ?? CLUTCH_MARGIN_DEFAULT);
+  if (req !== _clutchReq) return;   // llegó tarde: otro equipo o competencia elegidos
+  _clutchData = d;
+  const title = _clutchTitle(d);
   if (!d.games_qualified) {
-    box.innerHTML = `<div class="card">${title}<p class="empty">Sin cierres apretados: los ${d.games_excluded} partido(s) con play-by-play se definieron por más de ${d.margin} al minuto 5:00.</p></div>`;
+    box.innerHTML = `<div class="card">${title}<p class="empty">Sin cierres apretados: ${_clutchCount(d)}.</p></div>`;
     return;
   }
   const a = d.aggregate;
   box.innerHTML = `
     <div class="card">
       ${title}
-      <p class="td-muted">Agregado del equipo en cierres apretados — récord <strong>${d.clutch_record}</strong> · ${d.games_qualified} calificado(s)${d.games_excluded ? ` · ${d.games_excluded} excluido(s) por paliza` : ""}</p>
+      <p class="td-muted">Agregado del equipo en cierres apretados — récord <strong>${d.clutch_record}</strong> · ${_clutchCount(d)}</p>
       <div class="stat-grid">
         ${statBox("Dif", a.point_diff, (a.point_diff > 0 ? "+" : "") + a.point_diff, null, null)}
         ${statBox("Off", a.off_rating, DEC2(a.off_rating), null, null)}
@@ -1017,6 +1059,7 @@ function _drawClutchTable() {
   const cell = (c, r) => {
     const v = r[c.key];
     if (c.leader) return v ? `${v.name} (${v[c.leader]})` : "—";
+    if (c.ot)     return v || "";   // sin prórroga: celda vacía
     if (c.date)   return _fmtDate(v);
     if (c.diff)   { if (v == null) return "—";   // sin dato: ni color ni valor crudo (RF-3/RF-4)
                     const cls = v > 0 ? "above-avg" : v < 0 ? "below-avg" : ""; return `<span class="${cls}">${v > 0 ? "+" : ""}${v}</span>`; }
@@ -1026,7 +1069,7 @@ function _drawClutchTable() {
     return DEC2(v);
   };
   t.innerHTML = `
-    <thead><tr>${CLUTCH_COLS.map(c => `<th data-key="${c.key}">${c.label}</th>`).join("")}</tr></thead>
+    <thead><tr>${CLUTCH_COLS.map(c => `<th data-key="${c.key}"${c.title ? ` title="${c.title}"` : ""}>${typeof c.label === "function" ? c.label(_clutchData) : c.label}</th>`).join("")}</tr></thead>
     <tbody>${sorted.map(r => `<tr>${CLUTCH_COLS.map(c => `<td>${cell(c, r)}</td>`).join("")}</tr>`).join("")}</tbody>`;
   t.querySelectorAll("th").forEach(th => th.addEventListener("click", () => {
     const key = th.dataset.key;
@@ -2191,6 +2234,7 @@ function renderApp() {
     if (!_teamData) return;
     _teamComp = e.target.value;
     _renderTeamContent(document.getElementById("team-main"), _teamData, _teamLastN);
+    renderTeamClutch(_teamData.team_code);   // los cierres se calculan en el backend por competencia
   });
 
   const logoutBtn = document.getElementById("btn-logout");

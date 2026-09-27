@@ -1,21 +1,28 @@
-"""Clutch (últimos 5 minutos del partido) — agregación sobre pbp_events. Feature 05.
+"""Clutch (cierres de partido) — agregación sobre pbp_events. Feature 05 · C-06.
 
-Ventana clutch = último período REGULAR con clock_secs <= 300 + todos los eventos OT.
+Ventana clutch = último período REGULAR con clock_secs <= window_secs + todas las prórrogas.
 Métricas con fórmulas de docs/metrics.md; semántica null de Feature 08 (tasa con
 denominador 0 → None).
 """
 from stats_engine import _safe_div
 
-CLUTCH_SECS = 300
+# Único lugar del umbral de partido cerrado y de la ventana de cierre (C-06). La ruta y el
+# frontend los leen de la respuesta; F-13 los reemplaza por la configuración.
+DEFAULT_MARGIN = 10          # partido cerrado = diferencia ≤ 10 al entrar a la ventana (antes 15)
+DEFAULT_WINDOW_SECS = 300    # últimos 5 minutos del último período regular
+MARGIN_RANGE = (0, 40)       # valores aceptados en `?margin`
+WINDOW_RANGE = (60, 600)     # valores aceptados en `?window_secs`
+
+OVERTIME_TYPES = ("OVERTIME", "OT")   # FIBA manda OVERTIME; OT es el valor legado
 
 
-def _is_clutch(ev, last_regular):
-    if ev.get("period_type") == "OT":
+def _is_clutch(ev, last_regular, window_secs):
+    if ev.get("period_type") in OVERTIME_TYPES:
         return True
     return (
         ev.get("period_type") == "REGULAR"
         and ev.get("period") == last_regular
-        and (ev.get("clock_secs") or 0) <= CLUTCH_SECS
+        and (ev.get("clock_secs") or 0) <= window_secs
     )
 
 
@@ -74,16 +81,16 @@ def _leaders(evs):
     )
 
 
-def _entry_margin(evs, last_reg):
-    """Diferencia absoluta de marcador al abrir la ventana (minuto 5:00).
+def _entry_margin(evs, last_reg, window_secs):
+    """Diferencia absoluta de marcador al abrir la ventana (p. ej. minuto 5:00).
 
-    Toma el `s1`/`s2` corrido del último evento con `clock_secs > 300` del último
+    Toma el `s1`/`s2` corrido del último evento con `clock_secs > window_secs` del último
     período REGULAR (marcador al entrar al cierre). Sin evento previo → 0 (califica).
     Ver sdd/specs/05-clutch/spec.md §10.1.
     """
     pre = [e for e in evs
            if e.get("period_type") == "REGULAR" and e.get("period") == last_reg
-           and (e.get("clock_secs") or 0) > CLUTCH_SECS]
+           and (e.get("clock_secs") or 0) > window_secs]
     if not pre:
         return 0
     last = max(pre, key=lambda e: e.get("action_number") or 0)
@@ -106,16 +113,19 @@ def _box_metrics(tb, ob):
     }
 
 
-def team_clutch(games, team_code, team_name, margin=10):
+def team_clutch(games, team_code, team_name, margin=None, window_secs=None, games_without_pbp=0):
     """Cierre agregado ("mini-partido") + desglose por partido de UN equipo.
 
-    games: [{game_id, events, opp_code, info:{date, home_away}}, ...] (Feature 02).
-    Solo cuentan los partidos con diferencia ≤ `margin` al minuto 5:00 (§10.1).
-    Umbral por defecto 10 (C-06; antes 15). Ver sdd/specs/18-etiquetas-y-umbrales/.
-    Ver sdd/specs/05-clutch/spec.md §10.
+    games: partidos con pbp [{game_id, events, opp_code, info:{date, home_away}}, ...].
+    Solo cuentan los partidos con diferencia ≤ `margin` al entrar a la ventana (§10.1).
+    `margin`/`window_secs` en None → DEFAULT_MARGIN/DEFAULT_WINDOW_SECS (C-06).
+    `games_without_pbp`: partidos del equipo en el universo que no tienen pbp (solo se
+    informan, para que el recuento cierre). Ver sdd/specs/05-clutch/spec.md §10.
     """
+    margin = DEFAULT_MARGIN if margin is None else margin
+    window_secs = DEFAULT_WINDOW_SECS if window_secs is None else window_secs
     per_game, team_boxes, opp_boxes = [], [], []
-    excluded = wins = losses = ties = 0
+    excluded = without_events = wins = losses = ties = 0
 
     for g in games:
         evs = g["events"]
@@ -124,15 +134,17 @@ def team_clutch(games, team_code, team_name, margin=10):
                        if e.get("period_type") == "REGULAR" and e.get("period")]
         last_reg = max(reg_periods) if reg_periods else 4
 
-        em = _entry_margin(evs, last_reg)
+        em = _entry_margin(evs, last_reg, window_secs)
         if em > margin:
-            excluded += 1                       # paliza al 5:00 → no es un cierre
+            excluded += 1                       # paliza al entrar al cierre → no es un cierre
             continue
 
-        clutch = [e for e in evs if _is_clutch(e, last_reg)]
+        clutch = [e for e in evs if _is_clutch(e, last_reg, window_secs)]
         codes = {e.get("team_code") for e in clutch if e.get("team_code")}
         if team_code not in codes or opp not in codes:
-            continue                            # sin eventos de cierre de ambos equipos
+            without_events += 1                 # sin eventos de cierre de ambos equipos
+            continue
+        overtimes = len({e.get("period") for e in evs if e.get("period_type") in OVERTIME_TYPES})
 
         tb = _agg([e for e in clutch if e.get("team_code") == team_code])
         ob = _agg([e for e in clutch if e.get("team_code") == opp])
@@ -152,6 +164,7 @@ def team_clutch(games, team_code, team_name, margin=10):
             "opponent_code":   opp,
             "home_away":       gi.get("home_away", ""),
             "entry_margin":    em,
+            "overtime_periods": overtimes,
             "pts":             tb["pts"],
             "opp_pts":         ob["pts"],
             "point_diff":      pd,
@@ -186,8 +199,15 @@ def team_clutch(games, team_code, team_name, margin=10):
         "team_code":       team_code,
         "team_name":       team_name,
         "margin":          margin,
+        "window_secs":     window_secs,
+        # Recuento: qualified + excluded + without_clutch_events = with_pbp;
+        # with_pbp + without_pbp = total.
+        "games_total":     len(games) + games_without_pbp,
+        "games_with_pbp":  len(games),
+        "games_without_pbp": games_without_pbp,
         "games_qualified": len(per_game),
-        "games_excluded":  excluded,
+        "games_excluded":  excluded,             # diferencia mayor al umbral
+        "games_without_clutch_events": without_events,
         "clutch_record":   f"{wins}-{losses}-{ties}",
         "aggregate":       aggregate,
         "per_game":        per_game,
