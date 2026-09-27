@@ -47,12 +47,39 @@ def run():
     assert r.status_code == 429, f"6º intento debe ser 429 (rate-limit), fue {r.status_code}"
     print("OK  rate-limit (5 fallos -> 429)")
 
+    # ── Scenario admin (F-11, DA-18) ──────────────────────────────────────────
+    # Rutas de escritura con cuerpo inválido: un admin pasa el gate y recibe 400 (no se
+    # modifica nada); un no-admin recibe 403 antes de validar.
+    os.environ["AUTH_USERS"] = '{"nico": "%s", "juan": "%s"}' % (
+        generate_password_hash("clave123"), generate_password_hash("clave456"))
+    os.environ["ADMIN_USERS"] = "nico"
+    _reset_auth_cache()
+    writes = [("delete", "/api/games", {}), ("post", "/api/competitions", {"name": ""}),
+              ("post", "/api/reprocess", {"game_ids": []})]
+    ca, cj = A.app.test_client(), A.app.test_client()
+    assert ca.post("/api/login", json={"user": "nico", "password": "clave123"}).status_code == 200
+    assert cj.post("/api/login", json={"user": "juan", "password": "clave456"}).status_code == 200
+    assert ca.get("/api/me").get_json()["is_admin"] is True
+    assert cj.get("/api/me").get_json()["is_admin"] is False
+    for method, path, body in writes:
+        assert getattr(ca, method)(path, json=body).status_code == 400, f"admin {method} {path} → 400"
+        r = getattr(cj, method)(path, json=body)
+        assert r.status_code == 403, f"no-admin {method} {path} → 403, fue {r.status_code}"
+    assert cj.get("/api/league").status_code == 200, "no-admin conserva la lectura"
+    assert A.app.test_client().delete("/api/games", json={}).status_code == 401, "sin sesión → 401"
+
+    os.environ.pop("ADMIN_USERS", None)            # sin la variable, todos son admin
+    assert cj.get("/api/me").get_json()["is_admin"] is True
+    assert cj.delete("/api/games", json={}).status_code == 400
+    print("OK  permisos de administración (ADMIN_USERS)")
+
     # ── Scenario B: auth deshabilitado (sin AUTH_USERS) ───────────────────────
     os.environ.pop("AUTH_USERS", None)
     _reset_auth_cache()
     c3 = A.app.test_client()
     assert c3.get("/api/me").get_json()["auth_required"] is False
     assert c3.get("/api/league").status_code == 200, "sin auth, ruta abierta debe dar 200"
+    assert c3.get("/api/me").get_json()["is_admin"] is True, "app abierta: todos son admin"
     print("OK  escenario auth deshabilitado (app abierta)")
 
     print("\nTODOS LOS TESTS OK")

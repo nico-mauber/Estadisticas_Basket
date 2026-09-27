@@ -4,16 +4,18 @@ from datetime import timedelta
 from flask import Flask, jsonify, request, session
 from flask_cors import CORS
 from sqlalchemy import func
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from database import db, init_db, upgrade_db, Game, TeamGameStats, PlayerGameStats, Shot, PbpEvent, DB_PATH
 from stats_engine import (calc_team_stats, calc_player_stats, league_averages,
                           _parse_minutes, played, norm_name, resolve_identity,
                           season_ast_to, season_def_to_ratio, null_reasons)
-from fiba_fetcher import fetch_game_data
 from clutch import team_clutch
 import lineups
+import competitions
+import data_quality
+import ingest
+from competitions import CompetitionError
 from auth import (
-    login_required, auth_enabled, verify,
+    login_required, admin_required, is_admin, auth_enabled, verify,
     check_rate_limit, register_fail, clear_fails, client_ip,
 )
 
@@ -36,6 +38,8 @@ CORS(app, supports_credentials=True)
 
 init_db(app)
 upgrade_db(app)
+with app.app_context():
+    competitions.backfill()   # partidos sin competencia (idempotente, F-11 RF-4)
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────
@@ -69,6 +73,17 @@ SEED_URLS = [
 
 def _to_dict(obj) -> dict:
     return {c.name: getattr(obj, c.name) for c in obj.__table__.columns}
+
+
+def _visible(query, model):
+    """Excluye los partidos de competencias en borrador (F-11): solo se ven en Datos."""
+    return competitions.visible(query, model)
+
+
+def _comp_fields(game: Game | None, labels: dict) -> dict:
+    """competition_id + etiqueta de la competencia de un partido (para los selectores)."""
+    cid = game.competition_id if game else None
+    return {"competition_id": cid, "competition_label": labels.get(cid, {}).get("label")}
 
 
 def _opp_for(game_id: str, team_code: str) -> TeamGameStats | None:
@@ -187,198 +202,19 @@ def import_game():
         return jsonify({"error": "Se requiere campo 'url'"}), 400
 
     try:
-        game = fetch_game_data(url)
+        result = ingest.import_url(url)
     except ValueError as e:
         # ValueError covers bad URLs AND FibaSchemaError (upstream schema drift).
         # Log so a format change is visible in server logs, not just the UI.
+        db.session.rollback()
         app.logger.warning("Import rejected for %s: %s", url, e)
         return jsonify({"error": str(e)}), 400
     except Exception as e:
+        db.session.rollback()
         app.logger.error("Import failed: %s", e)
         return jsonify({"error": "No se pudo obtener datos de FIBA LiveStats. Verifica la URL."}), 502
 
-    game_id        = game["game_id"]
-    teams_imported = _persist_game(game)
-    return jsonify({"ok": True, "game_id": game_id, "teams": teams_imported})
-
-
-def _persist_game(game: dict) -> list[dict]:
-    """Upsert a parsed game (game + team/player/shot rows) and commit.
-
-    Shared by POST /api/import and POST /api/seed. Returns the list of
-    imported teams ({code, name}). Raises on DB error (caller handles).
-    """
-    game_id = game["game_id"]
-
-    # Upsert game
-    db.session.execute(
-        sqlite_insert(Game).values(
-            game_id     = game_id,
-            competition = game.get("competition"),
-            date        = game.get("date"),
-            home_team   = game.get("home_team"),
-            home_code   = game.get("home_code"),
-            away_team   = game.get("away_team"),
-            away_code   = game.get("away_code"),
-            home_score  = game.get("home_score"),
-            away_score  = game.get("away_score"),
-        ).on_conflict_do_update(
-            index_elements=["game_id"],
-            set_=dict(
-                competition = game.get("competition"),
-                date        = game.get("date"),
-                home_team   = game.get("home_team"),
-                home_code   = game.get("home_code"),
-                away_team   = game.get("away_team"),
-                away_code   = game.get("away_code"),
-                home_score  = game.get("home_score"),
-                away_score  = game.get("away_score"),
-            )
-        )
-    )
-
-    for t in game.get("teams", []):
-        db.session.execute(
-            sqlite_insert(TeamGameStats).values(
-                game_id   = game_id,
-                team_code = t["team_code"],
-                team_name = t["team_name"],
-                is_home   = t["is_home"],
-                pts  = t["pts"],  fgm  = t["fgm"],  fga  = t["fga"],
-                fgm2 = t["fgm2"], fga2 = t["fga2"],
-                fgm3 = t["fgm3"], fga3 = t["fga3"],
-                ftm  = t["ftm"],  fta  = t["fta"],
-                orb  = t["orb"],  drb  = t["drb"],  trb  = t["trb"],
-                ast  = t["ast"],  tov  = t["tov"],
-                stl  = t["stl"],  blk  = t["blk"],  pf   = t["pf"],
-                opp_pts  = t.get("opp_pts",  0),
-                opp_fga2 = t.get("opp_fga2", 0),
-                opp_fga3 = t.get("opp_fga3", 0),
-                opp_fta  = t.get("opp_fta",  0),
-                opp_orb  = t.get("opp_orb",  0),
-                opp_drb  = t.get("opp_drb",  0),
-                opp_tov  = t.get("opp_tov",  0),
-                opp_pf   = t.get("opp_pf",   0),
-                paint_pts         = t.get("paint_pts",         0),
-                second_chance_pts = t.get("second_chance_pts", 0),
-                pts_from_tov      = t.get("pts_from_tov",      0),
-                bench_pts         = t.get("bench_pts",         0),
-                fast_break_pts    = t.get("fast_break_pts",    0),
-            ).on_conflict_do_update(
-                index_elements=["game_id", "team_code"],
-                set_=dict(
-                    team_name = t["team_name"],
-                    pts  = t["pts"],  fgm  = t["fgm"],  fga  = t["fga"],
-                    fgm2 = t["fgm2"], fga2 = t["fga2"],
-                    fgm3 = t["fgm3"], fga3 = t["fga3"],
-                    ftm  = t["ftm"],  fta  = t["fta"],
-                    orb  = t["orb"],  drb  = t["drb"],  trb  = t["trb"],
-                    ast  = t["ast"],  tov  = t["tov"],
-                    stl  = t["stl"],  blk  = t["blk"],  pf   = t["pf"],
-                    opp_pts  = t.get("opp_pts",  0),
-                    opp_fga2 = t.get("opp_fga2", 0),
-                    opp_fga3 = t.get("opp_fga3", 0),
-                    opp_fta  = t.get("opp_fta",  0),
-                    opp_orb  = t.get("opp_orb",  0),
-                    opp_drb  = t.get("opp_drb",  0),
-                    opp_tov  = t.get("opp_tov",  0),
-                    opp_pf   = t.get("opp_pf",   0),
-                    paint_pts         = t.get("paint_pts",         0),
-                    second_chance_pts = t.get("second_chance_pts", 0),
-                    pts_from_tov      = t.get("pts_from_tov",      0),
-                    bench_pts         = t.get("bench_pts",         0),
-                    fast_break_pts    = t.get("fast_break_pts",    0),
-                )
-            )
-        )
-
-    for p in game.get("players", []):
-        db.session.execute(
-            sqlite_insert(PlayerGameStats).values(
-                game_id     = game_id,
-                team_code   = p["team_code"],
-                team_name   = p["team_name"],
-                player_name = p["player_name"],
-                jersey      = p.get("jersey"),
-                minutes     = p.get("minutes"),
-                position    = p.get("position", ""),
-                plus_minus  = p.get("plus_minus", 0),
-                starter     = p.get("starter", 0),
-                pts  = p["pts"],  fgm  = p["fgm"],  fga  = p["fga"],
-                fgm2 = p["fgm2"], fga2 = p["fga2"],
-                fgm3 = p["fgm3"], fga3 = p["fga3"],
-                ftm  = p["ftm"],  fta  = p["fta"],
-                orb  = p["orb"],  drb  = p["drb"],  trb  = p["trb"],
-                ast  = p["ast"],  tov  = p["tov"],
-                stl  = p["stl"],  blk  = p["blk"],  pf   = p["pf"],
-            ).on_conflict_do_update(
-                index_elements=["game_id", "team_code", "player_name"],
-                set_=dict(
-                    team_name = p["team_name"],
-                    jersey    = p.get("jersey"),
-                    minutes   = p.get("minutes"),
-                    position   = p.get("position", ""),
-                    plus_minus = p.get("plus_minus", 0),
-                    starter    = p.get("starter", 0),
-                    pts  = p["pts"],  fgm  = p["fgm"],  fga  = p["fga"],
-                    fgm2 = p["fgm2"], fga2 = p["fga2"],
-                    fgm3 = p["fgm3"], fga3 = p["fga3"],
-                    ftm  = p["ftm"],  fta  = p["fta"],
-                    orb  = p["orb"],  drb  = p["drb"],  trb  = p["trb"],
-                    ast  = p["ast"],  tov  = p["tov"],
-                    stl  = p["stl"],  blk  = p["blk"],  pf   = p["pf"],
-                )
-            )
-        )
-
-    for s in game.get("shots", []):
-        db.session.execute(
-            sqlite_insert(Shot).values(
-                game_id       = game_id,
-                team_code     = s["team_code"],
-                player_name   = s["player_name"],
-                x             = s["x"],
-                y             = s["y"],
-                made          = s["made"],
-                action_type   = s["action_type"],
-                sub_type      = s["sub_type"],
-                period        = s["period"],
-                action_number = s["action_number"],
-            ).on_conflict_do_nothing()
-        )
-
-    pbp = game.get("pbp", [])
-    if pbp:
-        # executemany en un solo statement (no un round-trip por evento) — con
-        # ~500 eventos/partido, insertar uno por uno hace que importar/sembrar
-        # varios partidos en un solo request exceda el timeout del worker.
-        db.session.execute(
-            sqlite_insert(PbpEvent).on_conflict_do_nothing(),
-            [
-                dict(
-                    game_id       = game_id,
-                    team_code     = ev["team_code"],
-                    player_name   = ev["player_name"],
-                    period        = ev["period"],
-                    period_type   = ev["period_type"],
-                    clock_secs    = ev["clock_secs"],
-                    s1            = ev["s1"],
-                    s2            = ev["s2"],
-                    action_type   = ev["action_type"],
-                    sub_type      = ev["sub_type"],
-                    success       = ev["success"],
-                    action_number = ev["action_number"],
-                )
-                for ev in pbp
-            ],
-        )
-
-    db.session.commit()
-
-    return [
-        {"code": t["team_code"], "name": t["team_name"]}
-        for t in game.get("teams", [])
-    ]
+    return jsonify({"ok": True, **result})
 
 
 # ── Games ──────────────────────────────────────────────────────────────────
@@ -386,8 +222,48 @@ def _persist_game(game: dict) -> list[dict]:
 @app.route("/api/games")
 @login_required
 def list_games():
-    games = Game.query.order_by(Game.date.desc(), Game.imported_at.desc()).all()
-    return jsonify([_to_dict(g) for g in games])
+    """Catálogo de partidos (sección Datos: incluye competencias en borrador).
+
+    `competition=<id>` filtra. Cada fila indica su competencia y su estado de datos.
+    """
+    q = Game.query
+    try:
+        comp_id = competitions.resolve(request.args.get("competition"))
+    except CompetitionError as e:
+        return jsonify({"error": str(e)}), e.status
+    if comp_id:
+        q = q.filter_by(competition_id=comp_id)
+    games = q.order_by(Game.date.desc(), Game.imported_at.desc()).all()
+    with_pbp = {gid for (gid,) in db.session.query(PbpEvent.game_id).distinct()}
+    with_coords = {gid for (gid,) in db.session.query(Shot.game_id)
+                   .filter(Shot.court_x.isnot(None)).distinct()}
+    labels = competitions.labels()
+    return jsonify([_game_row(g, labels, with_pbp, with_coords) for g in games])
+
+
+def _game_row(g: Game, labels: dict, with_pbp: set, with_coords: set) -> dict:
+    return {
+        **_to_dict(g),
+        **_comp_fields(g, labels),
+        "competition_status": labels.get(g.competition_id, {}).get("status"),
+        "has_pbp":         g.game_id in with_pbp,
+        "has_coords":      g.game_id in with_coords,
+        "needs_reprocess": ingest.needs_reprocess(g),
+    }
+
+
+@app.route("/api/games/<game_id>", methods=["PATCH"])
+@admin_required
+def assign_game(game_id: str):
+    """Reasigna un partido a otra competencia (sobrevive a reimportar y reprocesar)."""
+    comp_id = (request.get_json(force=True) or {}).get("competition_id")
+    if not isinstance(comp_id, int):
+        return jsonify({"error": "Se requiere competition_id entero."}), 400
+    try:
+        g = competitions.assign_game(game_id, comp_id)
+    except CompetitionError as e:
+        return jsonify({"error": str(e)}), e.status
+    return jsonify({**_to_dict(g), **_comp_fields(g, competitions.labels())})
 
 
 # ── Teams ─────────────────────────────────────────────────────────────────
@@ -395,32 +271,38 @@ def list_games():
 @app.route("/api/teams")
 @login_required
 def list_teams():
-    rows = (
-        db.session.query(
-            TeamGameStats.team_code,
-            TeamGameStats.team_name,
-            func.count().label("games"),
-        )
-        .group_by(TeamGameStats.team_code)
-        .order_by(TeamGameStats.team_name)
-        .all()
-    )
-    return jsonify([{"code": r.team_code, "name": r.team_name, "games": r.games} for r in rows])
+    # Nombre del equipo = el de su partido más reciente (el orden de las filas cambia al
+    # reprocesar, F-11), no el de una fila cualquiera del GROUP BY.
+    rows = (_visible(db.session.query(TeamGameStats.team_code, TeamGameStats.team_name, Game.date)
+                     .join(Game, Game.game_id == TeamGameStats.game_id), TeamGameStats)
+            .order_by(Game.date, Game.game_id).all())
+    teams: dict[str, dict] = {}
+    for code, name, _date in rows:
+        t = teams.setdefault(code, {"code": code, "games": 0})
+        t["name"] = name
+        t["games"] += 1
+    return jsonify(sorted(teams.values(), key=lambda t: t["name"]))
 
 
 @app.route("/api/team/<team_code>")
 @login_required
 def team_stats(team_code: str):
     team_code = team_code.upper()
-    rows = TeamGameStats.query.filter_by(team_code=team_code).all()
+    rows = _visible(TeamGameStats.query.filter_by(team_code=team_code), TeamGameStats).all()
     if not rows:
         return jsonify({"error": "Equipo no encontrado"}), 404
 
+    games_by_id = {g.game_id: g for g in Game.query.all()}
+    # Orden cronológico explícito: el orden de las filas cambia al reprocesar (F-11)
+    rows.sort(key=lambda r: ((games_by_id[r.game_id].date or "") if r.game_id in games_by_id else "", r.game_id))
     team_name = rows[-1].team_name
+    labels = competitions.labels()
 
     game_stats = []
     for row in rows:
+        game_info = games_by_id.get(row.game_id)
         t   = _to_dict(row)
+        t["minutes"] = game_info.minutes if game_info else 40   # PACE con prórrogas (F-11)
         opp = _opp_for(row.game_id, team_code)
         if not opp:
             continue
@@ -429,11 +311,11 @@ def team_stats(team_code: str):
         adv.update({k: t.get(k) for k in
                     ("paint_pts", "second_chance_pts", "pts_from_tov", "bench_pts", "fast_break_pts")})
         adv["opp_pf"] = t.get("opp_pf", 0)
-        game_info = Game.query.filter_by(game_id=row.game_id).first()
         game_stats.append({
             "game_id":       row.game_id,
             "date":          game_info.date if game_info else "",
             "competition":   game_info.competition if game_info else "",
+            **_comp_fields(game_info, labels),
             "opponent":      opp.team_name,
             "opponent_code": opp.team_code,
             "home_away":     "L" if row.is_home else "V",
@@ -442,17 +324,20 @@ def team_stats(team_code: str):
         })
 
     # Población de liga POR COMPETENCIA (Feature 14 RF-1): comparar contra un promedio
-    # que mezcla torneos distintos no da contexto real. La clave "" es el agregado.
-    game_comp = {g.game_id: (g.competition or "") for g in Game.query.all()}
+    # que mezcla torneos distintos no da contexto real. Clave = id de competencia (F-11);
+    # "" es el agregado.
+    game_comp = {gid: str(g.competition_id or "") for gid, g in games_by_id.items()}
     own_comps = {game_comp.get(r.game_id, "") for r in rows}
 
     all_adv = []
     by_comp: dict[str, list] = {}
-    for ar in TeamGameStats.query.all():
+    for ar in _visible(TeamGameStats.query, TeamGameStats).all():
         ao = _opp_for(ar.game_id, ar.team_code)
         if not ao:
             continue
-        adv = calc_team_stats(_to_dict(ar), _opp_dict(ao))
+        ad = _to_dict(ar)
+        ad["minutes"] = games_by_id[ar.game_id].minutes if ar.game_id in games_by_id else 40
+        adv = calc_team_stats(ad, _opp_dict(ao))
         all_adv.append(adv)
         by_comp.setdefault(game_comp.get(ar.game_id, ""), []).append(adv)
 
@@ -532,7 +417,7 @@ def team_players(team_code: str):
     # `resolve_identity` desempate por "más reciente".
     game_dates = {g.game_id: (g.date or "") for g in Game.query.all()}
     groups: dict[str, list] = {}
-    for pr in sorted(PlayerGameStats.query.filter_by(team_code=team_code).all(),
+    for pr in sorted(_visible(PlayerGameStats.query.filter_by(team_code=team_code), PlayerGameStats).all(),
                      key=lambda r: (game_dates.get(r.game_id, ""), r.game_id)):
         groups.setdefault(norm_name(pr.player_name), []).append(pr)
 
@@ -577,12 +462,13 @@ def player_stats(team_code: str, player_name: str):
     # Resolver por nombre NORMALIZADO: acepta cualquier grafía en la URL y devuelve
     # TODOS los partidos del jugador, aunque el nombre haya variado (Feature 13 RF-5).
     key  = norm_name(player_name)
-    rows = [r for r in PlayerGameStats.query.filter_by(team_code=team_code).all()
+    rows = [r for r in _visible(PlayerGameStats.query.filter_by(team_code=team_code), PlayerGameStats).all()
             if norm_name(r.player_name) == key]
     if not rows:
         return jsonify({"error": "Jugador no encontrado"}), 404
     rows.sort(key=lambda r: r.game_id)
     player_name, _pos = resolve_identity(rows)   # grafía real para la respuesta (RF-4)
+    labels = competitions.labels()
 
     game_log = []
     for row in rows:
@@ -617,6 +503,7 @@ def player_stats(team_code: str, player_name: str):
             "game_id":       row.game_id,
             "date":          game_info.date if game_info else "",
             "competition":   game_info.competition if game_info else "",
+            **_comp_fields(game_info, labels),
             "opponent":      opp.team_name  if opp else "",
             "opponent_code": opp.team_code  if opp else "",
             "played":        is_played,   # false = DNP (Feature 12 RF-6)
@@ -624,8 +511,8 @@ def player_stats(team_code: str, player_name: str):
             "null_reasons":  null_reasons(adv, played=is_played),   # C-11 RF-3
         })
 
-    # Población de liga POR COMPETENCIA (Feature 14 RF-1); "" es el agregado.
-    game_comp = {g.game_id: (g.competition or "") for g in Game.query.all()}
+    # Población de liga POR COMPETENCIA (Feature 14 RF-1); clave = id de competencia, "" = agregado.
+    game_comp = {g.game_id: str(g.competition_id or "") for g in Game.query.all()}
     own_comps = {game_comp.get(r.game_id, "") for r in rows}
 
     # La población de liga necesita equipo y rival de cada ficha: sin ellos, OR%/DR%/
@@ -635,7 +522,7 @@ def player_stats(team_code: str, player_name: str):
 
     all_adv = []
     by_comp: dict[str, list] = {}
-    for ap in PlayerGameStats.query.all():
+    for ap in _visible(PlayerGameStats.query, PlayerGameStats).all():
         pp = _to_dict(ap)
         pp.setdefault("trb", pp["orb"] + pp["drb"])
         tr_own = all_team_rows.get((ap.game_id, ap.team_code))
@@ -743,19 +630,19 @@ def _zones_from_shots(rows):
 @login_required
 def player_shots(team_code: str, player_name: str):
     team_code = team_code.upper()
-    rows = Shot.query.filter_by(team_code=team_code, player_name=player_name).all()
+    rows = _visible(Shot.query.filter_by(team_code=team_code, player_name=player_name), Shot).all()
     zones, total_fga, total_pts, fgm2, fgm3, has_coordinates = _zones_from_shots(rows)
 
-    games = db.session.query(Shot.game_id).filter_by(
+    games = _visible(db.session.query(Shot.game_id).filter_by(
         team_code=team_code, player_name=player_name
-    ).distinct().count()
+    ), Shot).distinct().count()
 
-    pgs = db.session.query(
+    pgs = _visible(db.session.query(
         func.sum(PlayerGameStats.pts).label("pts"),
         func.sum(PlayerGameStats.fga).label("fga"),
         func.sum(PlayerGameStats.fta).label("fta"),
         func.sum(PlayerGameStats.tov).label("tov"),
-    ).filter_by(team_code=team_code, player_name=player_name).first()
+    ).filter_by(team_code=team_code, player_name=player_name), PlayerGameStats).first()
 
     ppp = None
     if pgs and pgs.fga:
@@ -781,17 +668,17 @@ def player_shots(team_code: str, player_name: str):
 def team_shots(team_code: str):
     """Mapa de tiro AGREGADO del equipo (todos sus jugadores)."""
     team_code = team_code.upper()
-    rows = Shot.query.filter_by(team_code=team_code).all()
+    rows = _visible(Shot.query.filter_by(team_code=team_code), Shot).all()
     zones, total_fga, total_pts, fgm2, fgm3, has_coordinates = _zones_from_shots(rows)
 
-    games = db.session.query(Shot.game_id).filter_by(team_code=team_code).distinct().count()
+    games = _visible(db.session.query(Shot.game_id).filter_by(team_code=team_code), Shot).distinct().count()
 
-    tgs = db.session.query(
+    tgs = _visible(db.session.query(
         func.sum(TeamGameStats.pts).label("pts"),
         func.sum(TeamGameStats.fga).label("fga"),
         func.sum(TeamGameStats.fta).label("fta"),
         func.sum(TeamGameStats.tov).label("tov"),
-    ).filter_by(team_code=team_code).first()
+    ).filter_by(team_code=team_code), TeamGameStats).first()
 
     ppp = None
     if tgs and tgs.fga:
@@ -824,11 +711,12 @@ def search_players():
     """
     games     = {g.game_id: g for g in Game.query.all()}
     team_rows = {(tr.game_id, tr.team_code): tr for tr in TeamGameStats.query.all()}
+    labels    = competitions.labels()
 
     # Identidad por nombre NORMALIZADO: dos grafías del mismo nombre son un solo
     # jugador (Feature 13 RF-1/RF-2). Orden estable por fecha del partido para que
     # `resolve_identity` pueda desempatar por "más reciente".
-    all_prs = sorted(PlayerGameStats.query.all(),
+    all_prs = sorted(_visible(PlayerGameStats.query, PlayerGameStats).all(),
                      key=lambda r: ((games[r.game_id].date if r.game_id in games else ""), r.game_id))
     groups = {}
     for pr in all_prs:
@@ -855,8 +743,8 @@ def search_players():
             # La competencia sale de TODAS las fichas: estar convocado sin jugar
             # igual ubica al jugador en esa competencia.
             g = games.get(pr.game_id)
-            if g and g.competition:
-                comps.add(g.competition)
+            if g and g.competition_id in labels:
+                comps.add(labels[g.competition_id]["label"])
 
             # Un DNP no entra en ningún promedio (Feature 12 RF-6).
             if not played(pr.minutes):
@@ -956,7 +844,7 @@ def _team_pbp_games(team_code: str) -> list[dict]:
     Base compartida por Feature 03 (lineups) y Feature 04 (on/off).
     """
     game_ids = {
-        tr.game_id for tr in TeamGameStats.query.filter_by(team_code=team_code).all()
+        tr.game_id for tr in _visible(TeamGameStats.query.filter_by(team_code=team_code), TeamGameStats).all()
     }
     games = []
     for gid in game_ids:
@@ -1009,13 +897,15 @@ def onoff_route(team_code: str, player_name: str):
     if not games:
         return jsonify({"error": "Equipo no encontrado o sin play-by-play"}), 404
 
-    if not PlayerGameStats.query.filter_by(team_code=team_code, player_name=player_name).first():
+    if not _visible(PlayerGameStats.query.filter_by(team_code=team_code, player_name=player_name),
+                    PlayerGameStats).first():
         return jsonify({"error": "Sin datos ON/OFF para este jugador"}), 404
 
     result = lineups.onoff_stats(games, team_code, player_name)
 
     uso_vals = []
-    for pr in PlayerGameStats.query.filter_by(team_code=team_code, player_name=player_name).all():
+    for pr in _visible(PlayerGameStats.query.filter_by(team_code=team_code, player_name=player_name),
+                       PlayerGameStats).all():
         p = _to_dict(pr)
         p.setdefault("trb", p["orb"] + p["drb"])
         team_row = TeamGameStats.query.filter_by(game_id=pr.game_id, team_code=team_code).first()
@@ -1038,7 +928,7 @@ def clutch_team(team_code: str):
     Ver sdd/specs/05-clutch/spec.md §10.
     """
     team_code = team_code.upper()
-    row = TeamGameStats.query.filter_by(team_code=team_code).first()
+    row = _visible(TeamGameStats.query.filter_by(team_code=team_code), TeamGameStats).first()
     if not row:
         return jsonify({"error": "Equipo no encontrado"}), 404
 
@@ -1056,23 +946,111 @@ def clutch_team(team_code: str):
 
 @app.route("/api/competitions")
 @login_required
-def competitions():
-    """Lista de competencias distintas (para los selects de filtro por competencia)."""
-    rows = db.session.query(Game.competition).distinct().all()
-    return jsonify(sorted({c for (c,) in rows if c}))
+def list_competitions():
+    """Competencias (F-11). Sin parámetros, solo las publicadas (selectores); con
+    `include_hidden=1` también las en borrador (sección Datos)."""
+    include_hidden = request.args.get("include_hidden") in ("1", "true")
+    return jsonify(competitions.list_competitions(include_hidden))
+
+
+@app.route("/api/competitions", methods=["POST"])
+@admin_required
+def create_competition():
+    body = request.get_json(force=True) or {}
+    try:
+        comp = competitions.create(body.get("name"), body.get("season"))
+    except CompetitionError as e:
+        return jsonify({"error": str(e)}), e.status
+    return jsonify(competitions.describe(comp)), 201
+
+
+@app.route("/api/competitions/<int:comp_id>", methods=["PATCH"])
+@admin_required
+def update_competition(comp_id: int):
+    try:
+        comp = competitions.update(comp_id, request.get_json(force=True) or {})
+    except CompetitionError as e:
+        return jsonify({"error": str(e)}), e.status
+    return jsonify(competitions.describe(comp))
+
+
+@app.route("/api/competitions/<int:comp_id>/merge", methods=["POST"])
+@admin_required
+def merge_competition(comp_id: int):
+    """Fusiona `source_id` en `comp_id`: partidos y alias pasan a la destino."""
+    source_id = (request.get_json(force=True) or {}).get("source_id")
+    if not isinstance(source_id, int):
+        return jsonify({"error": "Se requiere source_id entero."}), 400
+    try:
+        return jsonify({"ok": True, **competitions.merge(comp_id, source_id)})
+    except CompetitionError as e:
+        return jsonify({"error": str(e)}), e.status
+
+
+# ── Calidad de datos + reproceso (F-11) ─────────────────────────────────────
+
+@app.route("/api/data-quality")
+@login_required
+def data_quality_report():
+    try:
+        comp_id = competitions.resolve(request.args.get("competition"))
+    except CompetitionError as e:
+        return jsonify({"error": str(e)}), e.status
+    if not comp_id:
+        return jsonify({"error": "Elegí una competencia."}), 400
+    comp = competitions.get(comp_id)
+    return jsonify({"competition": competitions.describe(comp), **data_quality.report(comp_id)})
+
+
+@app.route("/api/reprocess", methods=["POST"])
+@admin_required
+def reprocess():
+    """Re-ejecuta la ingesta por lotes sobre `{game_ids: [...]}` o `{competition_id}`, con
+    `offset` (default 0). El cliente repite con `next_offset` mientras no sea null; el tamaño
+    del lote lo decide el backend (`ingest.REPROCESS_BATCH`)."""
+    body = request.get_json(force=True) or {}
+    batch, offset = ingest.REPROCESS_BATCH, body.get("offset", 0)
+    if not isinstance(offset, int) or offset < 0:
+        return jsonify({"error": "offset debe ser un entero ≥ 0."}), 400
+    if body.get("game_ids") is not None:
+        ids = body["game_ids"]
+        if not isinstance(ids, list) or not ids:
+            return jsonify({"error": "Se requiere al menos un game_id."}), 400
+        all_ids = [str(i) for i in ids]
+    else:
+        comp_id = body.get("competition_id")
+        if not isinstance(comp_id, int):
+            return jsonify({"error": "Se requiere competition_id entero o game_ids."}), 400
+        try:
+            competitions.get(comp_id)
+        except CompetitionError as e:
+            return jsonify({"error": str(e)}), e.status
+        all_ids = [gid for (gid,) in db.session.query(Game.game_id)
+                   .filter_by(competition_id=comp_id).order_by(Game.game_id)]
+    chunk = all_ids[offset:offset + batch]
+    result = ingest.reprocess_games(chunk)
+    nxt = offset + batch
+    return jsonify({**result, "total": len(all_ids), "next_offset": nxt if nxt < len(all_ids) else None})
 
 
 @app.route("/api/league")
 @login_required
 def league_overview():
     codes    = db.session.query(TeamGameStats.team_code).distinct().all()
-    all_rows = TeamGameStats.query.all()
+    games_by_id = {g.game_id: g for g in Game.query.all()}
+    minutes  = {gid: g.minutes or 40 for gid, g in games_by_id.items()}
+    # orden cronológico: rows[-1] es el partido más reciente de cada equipo
+    all_rows = sorted(_visible(TeamGameStats.query, TeamGameStats).all(),
+                      key=lambda r: ((games_by_id[r.game_id].date or "") if r.game_id in games_by_id else "", r.game_id))
 
-    # Filtro opcional por competencia: mantiene solo los partidos de esa competencia
-    # (evita mezclar competencias en el ranking y sus promedios).
-    comp = (request.args.get("competition") or "").strip()
-    if comp:
-        comp_gids = {g.game_id for g in Game.query.filter_by(competition=comp).all()}
+    # Filtro opcional por competencia (id; acepta el texto de FIBA por compatibilidad):
+    # mantiene solo los partidos de esa competencia (evita mezclar competencias).
+    try:
+        comp_id = competitions.resolve(request.args.get("competition"))
+    except CompetitionError as e:
+        return jsonify({"error": str(e)}), e.status
+    if comp_id:
+        comp_gids = {g.game_id for g in Game.query.filter_by(competition_id=comp_id).all()}
         all_rows = [r for r in all_rows if r.game_id in comp_gids]
 
     result = []
@@ -1087,7 +1065,9 @@ def league_overview():
             ao = _opp_for(row.game_id, code)
             if not ao:
                 continue
-            adv_list.append(calc_team_stats(_to_dict(row), _opp_dict(ao)))
+            t = _to_dict(row)
+            t["minutes"] = minutes.get(row.game_id, 40)   # PACE con prórrogas (F-11)
+            adv_list.append(calc_team_stats(t, _opp_dict(ao)))
 
         if not adv_list:
             continue
@@ -1136,7 +1116,7 @@ def league_overview():
 # ── Delete games ──────────────────────────────────────────────────────────
 
 @app.route("/api/games", methods=["DELETE"])
-@login_required
+@admin_required
 def delete_games():
     body = request.get_json(force=True) or {}
     ids  = body.get("game_ids", [])
@@ -1145,7 +1125,7 @@ def delete_games():
 
     games = Game.query.filter(Game.game_id.in_(ids)).all()
     for g in games:
-        db.session.delete(g)  # cascade removes team_stats, player_stats, shots
+        db.session.delete(g)  # cascade: stats, tiros, pbp y JSON archivado
     db.session.commit()
 
     return jsonify({"ok": True, "deleted": len(games)})
@@ -1184,6 +1164,7 @@ def me():
         "user":          session.get("user"),
         "auth_required": auth_enabled(),
         "seed_enabled":  _seed_enabled(),
+        "is_admin":      is_admin(),
     })
 
 
@@ -1202,11 +1183,10 @@ def seed_games():
     results = []
     for url in SEED_URLS:
         try:
-            game  = fetch_game_data(url)
-            teams = _persist_game(game)
+            res = ingest.import_url(url)
             results.append({
-                "url": url, "ok": True, "game_id": game["game_id"],
-                "teams": " vs ".join(t["name"] for t in teams),
+                "url": url, "ok": True, "game_id": res["game_id"],
+                "teams": " vs ".join(t["name"] for t in res["teams"]),
             })
         except Exception as e:
             db.session.rollback()

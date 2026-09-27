@@ -5,6 +5,13 @@ const BASE = "";
 let _onUnauthorized = null;
 export function setUnauthorizedHandler(fn) { _onUnauthorized = fn; }
 
+const JSON_HEADERS = { "Content-Type": "application/json" };
+const send = (path, method, body) => apiFetch(path, { method, headers: JSON_HEADERS, body: JSON.stringify(body) });
+const qs = params => {
+  const q = new URLSearchParams(Object.entries(params).filter(([, v]) => v !== "" && v != null)).toString();
+  return q ? `?${q}` : "";
+};
+
 async function apiFetch(path, opts = {}) {
   const res = await fetch(BASE + path, { credentials: "same-origin", ...opts });
   if (res.status === 401 && _onUnauthorized && path !== "/api/login") {
@@ -24,7 +31,7 @@ export const api = {
   me:            ()   => apiFetch("/api/me"),
   // Data
   importGame:    url  => apiFetch("/api/import", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url }) }),
-  games:         ()   => apiFetch("/api/games"),
+  games:         (comp) => apiFetch(`/api/games${qs({ competition: comp })}`),
   teams:         ()         => apiFetch("/api/teams"),
   team:          code       => apiFetch(`/api/team/${encodeURIComponent(code)}`),
   players:       code       => apiFetch(`/api/players/${encodeURIComponent(code)}`),
@@ -35,8 +42,15 @@ export const api = {
   clutchTeam:    team => apiFetch(`/api/clutch/${encodeURIComponent(team)}`),
   lineup:        (code, players) => apiFetch(`/api/lineup/${encodeURIComponent(code)}?players=${players.map(encodeURIComponent).join("|")}`),
   onoff:         (code, name) => apiFetch(`/api/onoff/${encodeURIComponent(code)}/${encodeURIComponent(name)}`),
-  league:        (comp) => apiFetch(`/api/league${comp ? `?competition=${encodeURIComponent(comp)}` : ""}`),
-  competitions:  ()   => apiFetch("/api/competitions"),
-  deleteGames:   (ids) => apiFetch("/api/games", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ game_ids: ids }) }),
+  league:        (comp) => apiFetch(`/api/league${qs({ competition: comp })}`),
+  deleteGames:   (ids) => send("/api/games", "DELETE", { game_ids: ids }),
   seed:          ()   => apiFetch("/api/seed", { method: "POST" }),
+  // Datos: competencias, calidad y reproceso (F-11)
+  competitions:      (includeHidden) => apiFetch(`/api/competitions${includeHidden ? "?include_hidden=1" : ""}`),
+  createCompetition: body         => send("/api/competitions", "POST", body),
+  updateCompetition: (id, body)   => send(`/api/competitions/${id}`, "PATCH", body),
+  mergeCompetition:  (id, srcId)  => send(`/api/competitions/${id}/merge`, "POST", { source_id: srcId }),
+  assignGame:        (gid, compId) => send(`/api/games/${encodeURIComponent(gid)}`, "PATCH", { competition_id: compId }),
+  dataQuality:       comp         => apiFetch(`/api/data-quality${qs({ competition: comp })}`),
+  reprocess:         body         => send("/api/reprocess", "POST", body),
 };

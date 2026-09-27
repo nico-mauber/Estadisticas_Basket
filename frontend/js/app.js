@@ -108,15 +108,26 @@ function _computeAvg(gameLog) {
 }
 
 // ── Filtro por competencia (compartido: Liga/Equipo/Comparar/Jugador) ────────
+// Por id de competencia (F-11): el texto de FIBA puede renombrarse o fusionarse.
+// `comps` = [{id, label}] (de /api/competitions o del game log).
 function _logComps(gameLog) {
-  return [...new Set((gameLog || []).map(g => g.competition).filter(Boolean))].sort();
+  const byId = new Map();
+  (gameLog || []).forEach(g => {
+    if (g.competition_id != null) byId.set(String(g.competition_id), g.competition_label || "—");
+  });
+  return [...byId].map(([id, label]) => ({ id, label })).sort((a, b) => a.label.localeCompare(b.label));
 }
 function _filterByComp(gameLog, comp) {
-  return comp ? (gameLog || []).filter(g => g.competition === comp) : gameLog;
+  return comp ? (gameLog || []).filter(g => String(g.competition_id) === String(comp)) : gameLog;
 }
-function _compOptions(comps, selected = "") {
-  return `<option value="">Todas las competencias</option>` +
-    comps.map(c => `<option value="${c}"${c === selected ? " selected" : ""}>${c}</option>`).join("");
+function _compOptions(comps, selected = "", allLabel = "Todas las competencias") {
+  return `<option value="">${allLabel}</option>` +
+    comps.map(c => `<option value="${c.id}"${String(c.id) === String(selected) ? " selected" : ""}>${esc(c.label)}</option>`).join("");
+}
+
+// Escapa texto para insertarlo en HTML (nombres editables por el usuario, p. ej. competencias).
+function esc(v) {
+  return String(v ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
 // ── Four Factors card ──────────────────────────────────────────────────────
@@ -233,6 +244,10 @@ let selectedGames = new Set();
 let _seedEnabled  = false;  // dev-only seed button (set from /api/me at boot)
 let _authRequired = false;  // whether the backend requires login
 let _authUser     = null;   // logged-in username (when auth required)
+let _isAdmin      = false;  // puede modificar datos (F-11, /api/me → is_admin)
+let _importTab    = "importar";   // importar · calidad · competencias (F-11)
+let _catalogComp  = "";     // filtro del catálogo por competencia
+let _qualityComp  = "";     // competencia elegida en Calidad de datos
 
 function _fmtDate(d) {
   if (!d) return "—";
@@ -241,8 +256,18 @@ function _fmtDate(d) {
   return d;
 }
 
-function _gamesTable(games, page) {
-  if (!games.length) return '<p class="empty">Sin partidos aún.</p>';
+// Estado de datos de un partido en el catálogo (F-11)
+function _dataBadges(g) {
+  const b = [];
+  if (g.competition_status === "borrador") b.push('<span class="badge badge-muted">Borrador</span>');
+  if (!g.has_pbp) b.push('<span class="badge badge-warn">Sin PBP</span>');
+  else if (!g.has_coords) b.push('<span class="badge badge-muted">Sin coordenadas</span>');
+  if (g.needs_reprocess) b.push('<span class="badge badge-warn">Reprocesar</span>');
+  return b.join(" ") || '<span class="badge badge-ok">OK</span>';
+}
+
+function _gamesTable(games, page, emptyMsg = "Sin partidos aún.") {
+  if (!games.length) return `<p class="empty">${emptyMsg}</p>`;
   const totalPages = Math.ceil(games.length / PAGE_SIZE);
   const slice = games.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE);
 
@@ -267,7 +292,8 @@ function _gamesTable(games, page) {
       <td class="td-team">${g.home_team || "—"}</td>
       <td class="td-result">${g.home_score ?? "—"} – ${g.away_score ?? "—"}</td>
       <td class="td-team">${g.away_team || "—"}</td>
-      <td class="td-comp">${g.competition || "—"}</td>
+      <td class="td-comp">${esc(g.competition_label || g.competition || "—")}</td>
+      <td>${_dataBadges(g)}</td>
     </tr>`;
   }).join("");
 
@@ -275,7 +301,7 @@ function _gamesTable(games, page) {
     <div class="table-wrap">
       <table>
         <thead><tr>
-          ${cbHeader}<th>Fecha</th><th>Local</th><th>Result.</th><th>Visitante</th><th>Competencia</th>
+          ${cbHeader}<th>Fecha</th><th>Local</th><th>Result.</th><th>Visitante</th><th>Competencia</th><th>Estado</th>
         </tr></thead>
         <tbody>${rows}</tbody>
       </table>
@@ -283,58 +309,123 @@ function _gamesTable(games, page) {
     ${pagination}`;
 }
 
-// El borrado se autoriza con la sesión (login_required); no pide token (C-11 RF-14).
+// Tras un cambio de datos (importar, borrar, reprocesar, editar competencias) los
+// selectores y el buscador cacheado quedan viejos.
+function _afterDataChange() {
+  _searchData = null;
+  refreshTeamSelector();
+  refreshCompareSelectors();
+}
+
+// El borrado se autoriza con la sesión (admin, F-11); no pide token (C-11 RF-14).
 function _showDeleteModal(count, ids) {
-  const backdrop = document.createElement("div");
-  backdrop.className = "modal-backdrop";
-  backdrop.innerHTML = `
-    <div class="modal">
-      <h3>Eliminar partido${count > 1 ? "s" : ""}</h3>
-      <p>¿Eliminar ${count} partido${count > 1 ? "s" : ""}? Se eliminará toda la información asociada (estadísticas, jugadores, tiros). Esta acción no se puede deshacer.</p>
-      <div class="modal-actions">
-        <button class="btn btn-ghost btn-sm" id="btn-cancel-delete">Cancelar</button>
-        <button class="btn btn-danger btn-sm" id="btn-confirm-delete">Eliminar</button>
-      </div>
-    </div>`;
-
-  document.body.appendChild(backdrop);
-
-  backdrop.addEventListener("click", async e => {
-    if (e.target === backdrop || e.target.id === "btn-cancel-delete") {
-      backdrop.remove();
-      return;
-    }
-    if (e.target.id === "btn-confirm-delete") {
-      const btn = e.target;
-      btn.disabled = true;
-      btn.textContent = "Eliminando…";
-      try {
-        await api.deleteGames(ids);
-        toast(`${count} partido${count > 1 ? "s" : ""} eliminado${count > 1 ? "s" : ""}`);
-        selectMode = false;
-        selectedGames.clear();
-        importPage = 0;
-        backdrop.remove();
-        renderImport();
-        refreshTeamSelector();
-        refreshCompareSelectors();
-      } catch (err) {
-        toast(err.message, "err");
-        btn.disabled = false;
-        btn.textContent = "Eliminar";
-      }
-    }
+  _formModal({
+    title: `Eliminar partido${count > 1 ? "s" : ""}`,
+    text: `¿Eliminar ${count} partido${count > 1 ? "s" : ""}? Se eliminará toda la información asociada (estadísticas, jugadores, tiros). Esta acción no se puede deshacer.`,
+    confirm: "Eliminar", danger: true,
+    onSubmit: async () => {
+      await api.deleteGames(ids);
+      toast(`${count} partido${count > 1 ? "s" : ""} eliminado${count > 1 ? "s" : ""}`);
+      selectMode = false;
+      selectedGames.clear();
+      importPage = 0;
+      renderImport();
+      _afterDataChange();
+    },
   });
 }
 
-async function renderImport(allGames) {
-  const games = allGames || await api.games().catch(() => []);
-  const sec   = document.getElementById("sec-import");
+// Modal con formulario. `fields`: [{name, label, type: "text"|"select", value, options:[{value,label}]}].
+// Si `onSubmit(values)` lanza, se muestra el error y el modal queda abierto.
+function _formModal({ title, text = "", fields = [], confirm = "Guardar", danger = false, onSubmit }) {
+  const field = f => f.type === "select"
+    ? `<label class="modal-field">${f.label}<select name="${f.name}">${f.options.map(o =>
+        `<option value="${o.value}"${String(o.value) === String(f.value ?? "") ? " selected" : ""}>${esc(o.label)}</option>`).join("")}</select></label>`
+    : `<label class="modal-field">${f.label}<input name="${f.name}" type="text" value="${esc(f.value)}" placeholder="${esc(f.placeholder)}"></label>`;
+  const backdrop = document.createElement("div");
+  backdrop.className = "modal-backdrop";
+  backdrop.innerHTML = `
+    <form class="modal">
+      <h3>${title}</h3>
+      ${text ? `<p>${text}</p>` : ""}
+      ${fields.map(field).join("")}
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost btn-sm" data-cancel>Cancelar</button>
+        <button type="submit" class="btn btn-sm${danger ? " btn-danger" : ""}">${confirm}</button>
+      </div>
+    </form>`;
+  document.body.appendChild(backdrop);
+  const form = backdrop.querySelector("form");
+  backdrop.addEventListener("click", e => {
+    if (e.target === backdrop || e.target.hasAttribute("data-cancel")) backdrop.remove();
+  });
+  form.addEventListener("submit", async e => {
+    e.preventDefault();
+    const btn = form.querySelector('[type="submit"]');
+    btn.disabled = true;
+    try {
+      await onSubmit(Object.fromEntries(new FormData(form)));
+      backdrop.remove();
+    } catch (err) {
+      toast(err.message, "err");
+      btn.disabled = false;
+    }
+  });
+  form.querySelector("input, select")?.focus();
+}
 
-  const deleteBtnStyle = selectMode && selectedGames.size > 0 ? "" : "display:none";
-  const selectBtnLabel = selectMode ? "Cancelar" : "Seleccionar partidos";
+// Reproceso por lotes (F-11): el backend procesa un lote por petición y el cliente encadena
+// con `next_offset`. `onProgress(hechos, total)` actualiza la UI.
+async function _runReprocess(target, onProgress) {
+  const body = target.competitionId != null ? { competition_id: target.competitionId } : { game_ids: target.gameIds };
+  let processed = 0, failed = [], total = target.gameIds ? target.gameIds.length : 0;
+  try {
+    let offset = 0;
+    while (offset != null) {
+      const r = await api.reprocess({ ...body, offset });
+      processed += r.processed.length; failed = failed.concat(r.failed); total = r.total;
+      offset = r.next_offset;
+      onProgress?.(processed + failed.length, total);
+    }
+    toast(`Reprocesados ${processed} partidos (${failed.length} con error).`, failed.length ? "err" : "ok");
+    failed.slice(0, 3).forEach(f => toast(`No se pudo reprocesar ${f.game_id}: ${f.error}`, "err"));
+  } catch (e) {
+    toast(`El reproceso se detuvo en ${processed + failed.length} de ${total}: ${e.message}`, "err");
+  }
+  _afterDataChange();
+}
 
+const IMPORT_TABS = [["importar", "Importar"], ["calidad", "Calidad de datos"], ["competencias", "Competencias"]];
+
+// Sección Datos (F-11): pestañas Importar · Calidad de datos · Competencias.
+function renderImport() {
+  const sec = document.getElementById("sec-import");
   sec.innerHTML = `
+    <div class="filter-pills import-tabs">
+      ${IMPORT_TABS.map(([id, lbl]) =>
+        `<button class="filter-pill${id === _importTab ? " active" : ""}" data-tab="${id}">${lbl}</button>`).join("")}
+    </div>
+    <div id="import-tab"></div>`;
+  sec.querySelectorAll("[data-tab]").forEach(b => b.addEventListener("click", () => {
+    _importTab = b.dataset.tab;
+    renderImport();
+  }));
+  const el = document.getElementById("import-tab");
+  if (_importTab === "calidad") return _renderQualityTab(el);
+  if (_importTab === "competencias") return _renderCompetitionsTab(el);
+  return _renderImportTab(el);
+}
+
+const _compLabel = c => c.status === "borrador" ? `${c.label} (borrador)` : c.label;
+
+async function _renderImportTab(el) {
+  const comps = await api.competitions(true).catch(() => []);
+  if (!comps.some(c => String(c.id) === String(_catalogComp))) _catalogComp = "";
+  const games = await api.games(_catalogComp).catch(() => null);
+  if (!el.isConnected) return;   // se cambió de pestaña mientras cargaba
+  const hasSel = selectMode && selectedGames.size > 0;
+
+  el.innerHTML = `
     <div class="card">
       <div class="card-title">Importar partido desde FIBA LiveStats</div>
       <div class="import-panel">
@@ -350,14 +441,25 @@ async function renderImport(allGames) {
     </div>
     <div class="card">
       <div class="games-header">
-        <div class="card-title" style="margin:0">Partidos importados (${games.length})</div>
+        <div class="card-title" style="margin:0">Partidos importados (${games ? games.length : 0})</div>
         <div class="games-header-actions">
-          <button class="btn btn-ghost btn-sm" id="btn-select-mode">${selectBtnLabel}</button>
-          <button class="btn-delete-sel" id="btn-delete-sel" style="${deleteBtnStyle}">🗑 Eliminar seleccionados</button>
+          ${comps.length > 1 ? `<select id="catalog-comp" class="map-select">${_compOptions(
+            comps.map(c => ({ id: c.id, label: _compLabel(c) })), _catalogComp)}</select>` : ""}
+          ${_isAdmin ? `<button class="btn btn-ghost btn-sm" id="btn-select-mode">${selectMode ? "Cancelar" : "Seleccionar partidos"}</button>` : ""}
         </div>
       </div>
-      <div id="games-table">${_gamesTable(games, importPage)}</div>
+      ${_isAdmin && selectMode ? `
+      <div class="games-header-actions sel-actions" id="sel-actions" style="${hasSel ? "" : "display:none"}">
+        ${comps.length > 1 ? '<button class="btn btn-ghost btn-sm" id="btn-move-sel">Mover a competencia…</button>' : ""}
+        <button class="btn btn-ghost btn-sm" id="btn-reprocess-sel">Reprocesar</button>
+        <button class="btn-delete-sel" id="btn-delete-sel">🗑 Eliminar</button>
+      </div>` : ""}
+      <div id="games-table">${games
+        ? _gamesTable(games, importPage, _catalogComp ? "No hay partidos en esta competencia." : "Sin partidos aún.")
+        : '<p class="empty below-avg">No se pudo cargar el catálogo de partidos.</p>'}</div>
     </div>`;
+
+  const refresh = () => renderImport();
 
   document.getElementById("btn-import").addEventListener("click", async () => {
     const url = document.getElementById("url-input").value.trim();
@@ -368,40 +470,267 @@ async function renderImport(allGames) {
     try {
       const res = await api.importGame(url);
       const teamNames = (res.teams || []).map(t => t.name).join(" vs ");
-      toast(`Partido importado: ${teamNames}`);
+      toast(`Partido importado: ${teamNames}${res.competition_label ? ` · ${res.competition_label}` : ""}`);
       importPage = 0;
-      renderImport();
-      refreshTeamSelector();
-      refreshCompareSelectors();
+      refresh();
+      _afterDataChange();
     } catch (e) {
-      toast(e.message, "err");
+      toast(navigator.onLine === false ? "Sin conexión. Revisá tu red e intentá de nuevo." : e.message, "err");
     } finally {
       btn.disabled = false;
       btn.textContent = "Importar";
     }
   });
 
-  const seedBtn = document.getElementById("btn-seed");
-  if (seedBtn) {
-    seedBtn.addEventListener("click", async () => {
-      seedBtn.disabled = true;
-      seedBtn.innerHTML = '<span class="spinner"></span>Importando partidos...';
-      try {
-        const res = await api.seed();
-        toast(`Seed: ${res.imported} importados, ${res.failed} fallidos`,
-              res.failed ? "err" : "ok");
-        importPage = 0;
-        renderImport();
-        refreshTeamSelector();
-        refreshCompareSelectors();
-      } catch (e) {
-        toast(e.message, "err");
-      } finally {
-        seedBtn.disabled = false;
-        seedBtn.textContent = "⚡ Agregar partidos (dev)";
-      }
+  document.getElementById("btn-seed")?.addEventListener("click", async e => {
+    const seedBtn = e.currentTarget;
+    seedBtn.disabled = true;
+    seedBtn.innerHTML = '<span class="spinner"></span>Importando partidos...';
+    try {
+      const res = await api.seed();
+      toast(`Seed: ${res.imported} importados, ${res.failed} fallidos`, res.failed ? "err" : "ok");
+      importPage = 0;
+      refresh();
+      _afterDataChange();
+    } catch (err) {
+      toast(err.message, "err");
+      seedBtn.disabled = false;
+      seedBtn.textContent = "⚡ Agregar partidos (dev)";
+    }
+  });
+
+  document.getElementById("catalog-comp")?.addEventListener("change", e => {
+    _catalogComp = e.target.value;
+    importPage = 0;
+    selectedGames.clear();   // no actuar sobre partidos que el filtro dejó fuera de vista
+    refresh();
+  });
+
+  document.getElementById("btn-select-mode")?.addEventListener("click", () => {
+    selectMode = !selectMode;
+    selectedGames.clear();
+    refresh();
+  });
+
+  el.querySelectorAll(".row-cb").forEach(cb => cb.addEventListener("change", () => {
+    cb.checked ? selectedGames.add(cb.dataset.id) : selectedGames.delete(cb.dataset.id);
+    cb.closest("tr")?.classList.toggle("selected-row", cb.checked);
+    const actions = document.getElementById("sel-actions");
+    if (actions) actions.style.display = selectedGames.size ? "" : "none";
+  }));
+
+  const page = delta => { importPage += delta; refresh(); };
+  document.getElementById("pg-prev")?.addEventListener("click", () => page(-1));
+  document.getElementById("pg-next")?.addEventListener("click", () => page(1));
+
+  document.getElementById("btn-delete-sel")?.addEventListener("click", () => {
+    if (selectedGames.size) _showDeleteModal(selectedGames.size, [...selectedGames]);
+  });
+
+  document.getElementById("btn-move-sel")?.addEventListener("click", () => {
+    const ids = [...selectedGames];
+    _formModal({
+      title: "Mover a competencia",
+      text: `${ids.length} partido${ids.length > 1 ? "s" : ""} pasan a la competencia elegida. La asignación se conserva al reprocesar.`,
+      fields: [{ name: "comp", label: "Competencia", type: "select",
+                 options: comps.map(c => ({ value: c.id, label: _compLabel(c) })) }],
+      confirm: "Mover",
+      onSubmit: async v => {
+        let moved = 0;
+        try {
+          for (const id of ids) { await api.assignGame(id, Number(v.comp)); moved++; }
+        } finally {
+          if (moved) {
+            selectMode = false;
+            selectedGames.clear();
+            refresh();
+            _afterDataChange();
+          }
+        }
+        toast(`${moved} partido${moved > 1 ? "s" : ""} movido${moved > 1 ? "s" : ""}.`);
+      },
     });
+  });
+
+  document.getElementById("btn-reprocess-sel")?.addEventListener("click", async e => {
+    const btn = e.currentTarget, ids = [...selectedGames];
+    btn.disabled = true;
+    await _runReprocess({ gameIds: ids }, (done, total) => { btn.textContent = `Reprocesando ${done} de ${total}…`; });
+    selectMode = false;
+    selectedGames.clear();
+    refresh();
+  });
+}
+
+// Orden y copy de los chequeos del informe de calidad (F-11)
+const QUALITY_CHECKS = [
+  ["games_without_pbp",       "Partidos sin play-by-play"],
+  ["games_missing_data",      "Partidos con datos básicos faltantes"],
+  ["games_needing_reprocess", "Partidos pendientes de reproceso"],
+  ["pbp_box_mismatch",        "Play-by-play que no cuadra con el box score"],
+  ["lineup_inconsistencies",  "Quintetos inconsistentes"],
+  ["games_without_coords",    "Partidos sin coordenadas de tiro"],
+  ["null_fields",             "Campos nulos"],
+  ["possible_duplicates",     "Jugadores posiblemente duplicados"],
+  ["possession_gaps",         "Posesiones que no cerraron correctamente"],
+];
+
+function _qualityCheckCard(title, c, key) {
+  if (!c) return "";
+  const incomplete = c.counts_as_incomplete;
+  const badge = c.status === "ok" ? '<span class="badge badge-ok">OK</span>'
+    : c.status === "no_disponible" ? '<span class="badge badge-muted">No disponible</span>'
+    : `<span class="badge ${incomplete ? "badge-warn" : "badge-muted"}">${c.count} ${incomplete ? "incompleto(s)" : "aviso(s)"}</span>`;
+  let body = "";
+  if (c.status === "no_disponible") {
+    body = '<p class="td-muted">Disponible cuando se implemente el motor de posesiones.</p>';
+  } else if (key === "null_fields") {
+    body = `<div class="table-wrap"><table>
+      <thead><tr><th>Campo</th><th style="text-align:right">Nulos</th><th style="text-align:right">%</th></tr></thead>
+      <tbody>${c.items.map(i => `<tr>
+        <td>${i.label}</td><td style="text-align:right">${i.nulls} / ${i.total}</td>
+        <td style="text-align:right" class="${i.nulls ? "" : "td-muted"}">${PCT(i.pct)}</td></tr>`).join("")}</tbody>
+    </table></div>`;
+  } else if (c.items.length) {
+    const line = key === "possible_duplicates"
+      ? i => `<li><b>${i.team_code}</b> · ${i.variants.map(v => `${esc(v.player_name)} (${v.games} PJ)`).join(" / ")}</li>`
+      : i => `<li>${_fmtDate(i.date)} · ${esc(i.label)}${i.team_code ? ` · <b>${i.team_code}</b>` : ""}${i.detail ? ` — <span class="td-muted">${esc(i.detail)}</span>` : ""}</li>`;
+    body = `<details${c.items.length <= 5 ? " open" : ""}><summary>Ver ${c.items.length}</summary>
+      <ul class="quality-items">${c.items.map(line).join("")}</ul></details>`;
   }
+  return `
+    <div class="card quality-check">
+      <div class="games-header"><div class="card-title" style="margin:0">${title}</div>${badge}</div>
+      ${body}
+    </div>`;
+}
+
+async function _renderQualityTab(el) {
+  el.innerHTML = '<p class="empty"><span class="spinner"></span>Revisando la competencia…</p>';
+  const comps = await api.competitions(true).catch(() => null);
+  if (!el.isConnected) return;   // se cambió de pestaña mientras cargaba
+  if (!comps) { el.innerHTML = '<p class="empty below-avg">No se pudo generar el informe de calidad.</p>'; return; }
+  if (!comps.length) {
+    el.innerHTML = '<p class="empty">Todavía no hay competencias. Importá un partido para crear la primera.</p>';
+    return;
+  }
+  if (!comps.some(c => String(c.id) === String(_qualityComp))) _qualityComp = String(comps[0].id);
+
+  const requested = _qualityComp;
+  let rep;
+  try { rep = await api.dataQuality(requested); }
+  catch { if (requested === _qualityComp) el.innerHTML = '<p class="empty below-avg">No se pudo generar el informe de calidad.</p>'; return; }
+  if (!el.isConnected || requested !== _qualityComp) return;   // llegó tarde: otra competencia elegida
+  const comp = rep.competition, s = rep.summary;
+  const isDraft = comp.status === "borrador";
+
+  el.innerHTML = `
+    <div class="card">
+      <div class="games-header">
+        <select id="quality-comp" class="map-select">${comps.map(c =>
+          `<option value="${c.id}"${String(c.id) === _qualityComp ? " selected" : ""}>${esc(_compLabel(c))}</option>`).join("")}</select>
+        ${_isAdmin ? `<div class="games-header-actions">
+          <button class="btn btn-ghost btn-sm" id="btn-reprocess-comp"${s.games ? "" : " disabled"}>Reprocesar competencia</button>
+          <button class="btn btn-sm${isDraft ? "" : " btn-ghost"}" id="btn-publish">${isDraft ? "Publicar" : "Pasar a borrador"}</button>
+        </div>` : ""}
+      </div>
+      ${s.games ? `
+      <div class="quality-summary">
+        <span class="badge ${s.ready_to_publish ? "badge-ok" : "badge-warn"}">${s.ready_to_publish ? "Lista para publicar" : "Revisar antes de publicar"}</span>
+        <span>${s.games} partidos · ${s.incomplete_games} incompletos · ${isDraft ? "en borrador (oculta fuera de Datos)" : "publicada"}</span>
+      </div>` : '<p class="empty">Esta competencia no tiene partidos.</p>'}
+    </div>
+    ${s.games ? QUALITY_CHECKS.map(([k, t]) => _qualityCheckCard(t, rep.checks[k], k)).join("") : ""}`;
+
+  document.getElementById("quality-comp").addEventListener("change", e => {
+    _qualityComp = e.target.value;
+    _renderQualityTab(el);
+  });
+
+  document.getElementById("btn-reprocess-comp")?.addEventListener("click", async e => {
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    await _runReprocess({ competitionId: comp.id }, (done, total) => { btn.textContent = `Reprocesando ${done} de ${total}…`; });
+    _renderQualityTab(el);
+  });
+
+  document.getElementById("btn-publish")?.addEventListener("click", () => {
+    const setStatus = async status => {
+      await api.updateCompetition(comp.id, { status });
+      toast(status === "publicada" ? "Competencia publicada." : "Competencia pasada a borrador.");
+      _afterDataChange();
+      _renderQualityTab(el);
+    };
+    if (isDraft && s.incomplete_games === 0) return setStatus("publicada").catch(err => toast(err.message, "err"));
+    _formModal(isDraft
+      ? { title: "Publicar competencia", text: `Hay ${s.incomplete_games} partidos incompletos. ¿Publicar igual?`,
+          confirm: "Publicar igual", onSubmit: () => setStatus("publicada") }
+      : { title: "Pasar a borrador", text: "Sus partidos dejan de verse en Liga, Equipo, Jugador, Comparar y Buscar hasta que la publiques.",
+          confirm: "Pasar a borrador", onSubmit: () => setStatus("borrador") });
+  });
+}
+
+async function _renderCompetitionsTab(el) {
+  el.innerHTML = '<p class="empty"><span class="spinner"></span>Cargando competencias…</p>';
+  const comps = await api.competitions(true).catch(() => null);
+  if (!el.isConnected) return;   // se cambió de pestaña mientras cargaba
+  if (!comps) { el.innerHTML = '<p class="empty below-avg">No se pudieron cargar las competencias.</p>'; return; }
+
+  el.innerHTML = `
+    <div class="card">
+      <div class="games-header">
+        <div class="card-title" style="margin:0">Competencias y temporadas</div>
+        ${_isAdmin ? '<button class="btn btn-ghost btn-sm" id="btn-new-comp">Nueva competencia</button>' : ""}
+      </div>
+      ${comps.length ? `
+      <div class="table-wrap"><table>
+        <thead><tr><th>Competencia</th><th>Estado</th><th>PJ</th><th>Equipos</th><th>Fechas</th>${_isAdmin ? "<th></th>" : ""}</tr></thead>
+        <tbody>${comps.map(c => `
+          <tr data-id="${c.id}">
+            <td class="td-team">${esc(c.label)}</td>
+            <td><span class="badge ${c.status === "publicada" ? "badge-ok" : "badge-muted"}">${c.status === "publicada" ? "Publicada" : "Borrador"}</span></td>
+            <td>${c.games}</td>
+            <td>${c.teams}</td>
+            <td class="td-muted">${c.first_date ? `${_fmtDate(c.first_date)} – ${_fmtDate(c.last_date)}` : "—"}</td>
+            ${_isAdmin ? `<td class="comp-actions">
+              <button class="btn btn-ghost btn-sm" data-act="edit">Editar</button>
+              ${comps.length > 1 ? '<button class="btn btn-ghost btn-sm" data-act="merge">Fusionar en…</button>' : ""}
+            </td>` : ""}
+          </tr>`).join("")}</tbody>
+      </table></div>` : '<p class="empty">Todavía no hay competencias. Importá un partido para crear la primera.</p>'}
+    </div>`;
+
+  const done = msg => { toast(msg); _afterDataChange(); _renderCompetitionsTab(el); };
+  const statusOptions = [{ value: "publicada", label: "Publicada" }, { value: "borrador", label: "Borrador (oculta fuera de Datos)" }];
+
+  document.getElementById("btn-new-comp")?.addEventListener("click", () => _formModal({
+    title: "Nueva competencia",
+    fields: [{ name: "name", label: "Nombre", placeholder: "Liga Uruguaya de Básquetbol" },
+             { name: "season", label: "Temporada (opcional)", placeholder: "2025/2026" }],
+    onSubmit: async v => { await api.createCompetition(v); done("Competencia guardada."); },
+  }));
+
+  el.querySelectorAll("[data-act]").forEach(btn => btn.addEventListener("click", () => {
+    const c = comps.find(x => String(x.id) === btn.closest("tr").dataset.id);
+    if (btn.dataset.act === "edit") {
+      _formModal({
+        title: "Editar competencia",
+        fields: [{ name: "name", label: "Nombre", value: c.name },
+                 { name: "season", label: "Temporada (opcional)", value: c.season || "" },
+                 { name: "status", label: "Estado", type: "select", value: c.status, options: statusOptions }],
+        onSubmit: async v => { await api.updateCompetition(c.id, v); done("Competencia guardada."); },
+      });
+    } else {
+      _formModal({
+        title: `Fusionar «${esc(c.label)}»`,
+        text: `Todos sus partidos (${c.games}) pasan a la competencia elegida y «${esc(c.label)}» deja de existir.`,
+        fields: [{ name: "target", label: "Fusionar en", type: "select",
+                   options: comps.filter(x => x.id !== c.id).map(x => ({ value: x.id, label: _compLabel(x) })) }],
+        confirm: "Fusionar", danger: true,
+        onSubmit: async v => { await api.mergeCompetition(Number(v.target), c.id); done("Competencias fusionadas."); },
+      });
+    }
+  }));
 }
 
 // ── League section — sortable table ───────────────────────────────────────
@@ -559,6 +888,7 @@ async function renderLeague() {
   sec.innerHTML = '<p class="empty"><span class="spinner"></span>Cargando...</p>';
   try {
     const comps = await api.competitions().catch(() => []);
+    if (!comps.some(c => String(c.id) === String(_leagueComp))) _leagueComp = "";
     _leagueTeams = await api.league(_leagueComp);
     if (!_leagueTeams.length) { sec.innerHTML = '<p class="empty">Sin datos. Importa partidos primero.</p>'; return; }
 
@@ -1601,7 +1931,7 @@ async function renderSearch() {
       <div class="search-filters">
         <input type="text" id="sf-name" placeholder="Nombre contiene...">
         <select id="sf-team"><option value="">Equipo (todos)</option>${teams.map(t=>`<option>${t}</option>`).join("")}</select>
-        <select id="sf-comp"><option value="">Competencia (todas)</option>${comps.map(c=>`<option value="${c}">${c}</option>`).join("")}</select>
+        <select id="sf-comp"><option value="">Competencia (todas)</option>${comps.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join("")}</select>
         <select id="sf-pos"><option value="">Posición (todas)</option>${positions.map(p=>`<option>${p}</option>`).join("")}</select>
       </div>
       <div class="search-ranges">
@@ -1863,48 +2193,6 @@ function renderApp() {
     _renderTeamContent(document.getElementById("team-main"), _teamData, _teamLastN);
   });
 
-  // Import section: pagination + select mode + delete
-  document.getElementById("sec-import").addEventListener("click", async e => {
-    // Select mode toggle
-    if (e.target.id === "btn-select-mode") {
-      selectMode = !selectMode;
-      selectedGames.clear();
-      const games = await api.games().catch(() => []);
-      renderImport(games);
-      return;
-    }
-
-    // Delete selected
-    if (e.target.id === "btn-delete-sel") {
-      if (selectedGames.size === 0) return;
-      _showDeleteModal(selectedGames.size, [...selectedGames]);
-      return;
-    }
-
-    // Checkbox toggle
-    if (e.target.classList.contains("row-cb")) {
-      const id = e.target.dataset.id;
-      if (!id) return;
-      if (e.target.checked) {
-        selectedGames.add(id);
-      } else {
-        selectedGames.delete(id);
-      }
-      const row = e.target.closest("tr");
-      if (row) row.classList.toggle("selected-row", e.target.checked);
-      const delBtn = document.getElementById("btn-delete-sel");
-      if (delBtn) delBtn.style.display = selectedGames.size > 0 ? "" : "none";
-      return;
-    }
-
-    // Pagination
-    if (e.target.id === "pg-prev" && importPage > 0) importPage--;
-    else if (e.target.id === "pg-next") importPage++;
-    else return;
-    const games = await api.games().catch(() => []);
-    document.getElementById("games-table").innerHTML = _gamesTable(games, importPage);
-  });
-
   const logoutBtn = document.getElementById("btn-logout");
   if (logoutBtn) {
     logoutBtn.addEventListener("click", async () => {
@@ -1961,10 +2249,11 @@ async function boot() {
 
   let me;
   try { me = await api.me(); }
-  catch { me = { authenticated: false, auth_required: false, seed_enabled: false }; }
+  catch { me = { authenticated: false, auth_required: false, seed_enabled: false, is_admin: false }; }
   _authRequired = me.auth_required === true;
   _authUser     = me.user || null;
   _seedEnabled  = me.seed_enabled === true;
+  _isAdmin      = me.is_admin === true;
 
   if (_authRequired && !me.authenticated) {
     showLogin();

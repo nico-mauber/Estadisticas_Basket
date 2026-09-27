@@ -10,6 +10,38 @@
 
 ## Esquema
 
+### `competitions`
+Una competencia **en una temporada** (F-11): universo de cálculo de percentiles, promedios y rankings.
+
+| Columna | Tipo | Descripción |
+|---------|------|-------------|
+| `id` | INTEGER PK AUTOINCREMENT | |
+| `name` | TEXT NOT NULL | Nombre sin la temporada (ej. `Liga de Ascenso`) |
+| `season` | TEXT | Temporada detectada al final del texto de FIBA (`2026`, `2025/2026`); NULL si no hay |
+| `status` | TEXT NOT NULL DEFAULT `publicada` | `publicada` · `borrador` (sus partidos solo se ven en la sección Datos) |
+| `created_at` | TEXT | |
+
+(`name`, `season`) es único sin distinguir mayúsculas; se valida en `competitions.py` porque SQLite trata dos NULL como distintos en un UNIQUE.
+
+### `competition_aliases`
+Texto de competencia tal como llega de FIBA → competencia. Permite renombrar y fusionar sin tocar `games.competition`.
+
+| Columna | Tipo | Descripción |
+|---------|------|-------------|
+| `source_name` | TEXT PK | Texto crudo (ej. `Liga de Ascenso 2026`) |
+| `competition_id` | INTEGER NOT NULL FK → competitions | |
+
+### `game_sources`
+JSON crudo de FIBA archivado para reprocesar sin volver a descargarlo (F-11, DA-12). ~50 KB por partido.
+
+| Columna | Tipo | Descripción |
+|---------|------|-------------|
+| `game_id` | TEXT PK FK → games | Se borra en cascada con el partido |
+| `source_url` | TEXT | URL importada (NULL si se archivó al reprocesar un partido viejo) |
+| `fetched_at` | TEXT | |
+| `raw_gz` | BLOB | `data.json` comprimido con gzip |
+| `page_info` | TEXT | JSON `{date, competition}` scrapeado de `bs.html` |
+
 ### `games`
 Un registro por partido importado.
 
@@ -17,7 +49,7 @@ Un registro por partido importado.
 |---------|------|-------------|
 | `id` | INTEGER PK AUTOINCREMENT | |
 | `game_id` | TEXT UNIQUE NOT NULL | ID numérico extraído de la URL FIBA |
-| `competition` | TEXT | Nombre de la competencia |
+| `competition` | TEXT | Texto de competencia tal como lo publica FIBA (crudo, no se edita) |
 | `date` | TEXT | Fecha en formato `YYYY-MM-DD` |
 | `home_team` | TEXT | Nombre equipo local |
 | `home_code` | TEXT | Código corto equipo local (ej. `FUBB`) |
@@ -25,8 +57,10 @@ Un registro por partido importado.
 | `away_code` | TEXT | Código corto equipo visitante |
 | `home_score` | INTEGER | Puntos equipo local |
 | `away_score` | INTEGER | Puntos equipo visitante |
-| `minutes` | INTEGER DEFAULT 40 | Duración del partido (usado para pace) |
+| `minutes` | INTEGER DEFAULT 40 | Duración real: 40 + 5 por prórroga (PACE, rebote individual). 40 en partidos no reprocesados |
 | `imported_at` | TEXT DEFAULT now | Timestamp de importación |
+| `competition_id` | INTEGER | Competencia asignada (F-11): por alias al importar, o manual. Backfill idempotente al arrancar |
+| `ingest_version` | INTEGER | Versión de la ingesta con que se guardó (`ingest.INGEST_VERSION`); NULL = previa a F-11 → pendiente de reproceso |
 
 ---
 
@@ -103,7 +137,7 @@ Stats individuales por jugador por partido.
 ---
 
 ### `shots`
-Registro de cada tiro por partido. Tiene coordenadas `x/y` si vienen del array `shot` de FIBA; si viene del play-by-play, `x=0, y=0`.
+Registro de cada tiro por partido, uno por evento `2pt`/`3pt` del play-by-play. Las coordenadas reales van en `court_x/court_y`; `x/y` quedan en 0.
 
 | Columna | Tipo | Descripción |
 |---------|------|-------------|
@@ -118,8 +152,11 @@ Registro de cada tiro por partido. Tiene coordenadas `x/y` si vienen del array `
 | `sub_type` | TEXT | Ej. `"layup"`, `"dunk"`, `"jumpshot"` |
 | `period` | INTEGER | Período del partido |
 | `action_number` | INTEGER | Número de acción en el play-by-play |
+| `court_x` / `court_y` | REAL | Coordenadas reales de FIBA (`tm[n].shot[]`): 0–100 a lo largo / a lo ancho de la cancha **completa**. NULL si el partido no las trae o no se reprocesó |
 
 **Restricción única:** `(game_id, action_number)`
+
+> `x`/`y` siguen en 0: la clasificación de 11 zonas asume otra geometría y se rehace con `court_x/court_y` en C-03.
 
 ---
 
@@ -133,7 +170,7 @@ Play-by-play completo: un registro por evento de FIBA (`raw["pbp"]`). Base de li
 | `team_code` | TEXT | `""` en eventos no-equipo (`game`/`period`, `tno=0`) |
 | `player_name` | TEXT | `""` en eventos no-jugador |
 | `period` | INTEGER | Período |
-| `period_type` | TEXT | `REGULAR` / `OT` |
+| `period_type` | TEXT | `REGULAR` / `OVERTIME` (en prórroga `period` reinicia en 1) |
 | `clock_secs` | INTEGER | Segundos **restantes** en el período (de `gt` `MM:SS`) |
 | `s1` / `s2` | INTEGER | Marcador corrido local / visitante tras el evento |
 | `action_type` | TEXT | `2pt`, `3pt`, `rebound`, `assist`, `steal`, `block`, `turnover`, `freethrow`, `foul`, `foulon`, `substitution`, `timeout`, `jumpball`, `game`, `period` |
@@ -141,7 +178,9 @@ Play-by-play completo: un registro por evento de FIBA (`raw["pbp"]`). Base de li
 | `success` | INTEGER | 1=exitoso (según el tipo de acción) |
 | `action_number` | INTEGER | Número de acción en el play-by-play |
 
-**Restricción única:** `(game_id, action_number)` — reimportar es idempotente (insert-or-ignore).
+**Restricción única:** `(game_id, action_number)`.
+
+> **Reimportar / reprocesar** (F-11): el partido se hace upsert y sus filas de `team_game_stats`, `player_game_stats`, `shots` y `pbp_events` se **reemplazan** completas. Mismo resultado y misma cantidad de filas sin importar cuántas veces se repita.
 
 > Partidos importados antes de la Feature 02 no tienen `pbp_events` hasta reimportarse.
 
