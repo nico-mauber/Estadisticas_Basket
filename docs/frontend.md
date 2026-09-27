@@ -28,7 +28,7 @@ La navegación es por `#hash` o botones de tab. No hay routing del servidor.
 | Vista | ID sección | Descripción |
 |-------|-----------|-------------|
 | **Importar** (Datos) | `#import` | Tres pestañas (F-11): **Importar** (URL de FIBA + seed dev + catálogo con filtro por competencia y estado de datos), **Calidad de datos** (informe de una competencia, reproceso y publicación) y **Competencias** (alta, edición, estado, fusión). Ver "Sección Datos" abajo |
-| **Liga** | `#league` | Tabla ranking de equipos (columnas ordenables) + mapa de dispersión con ejes X/Y seleccionables (`LEAGUE_MAPS`). *(Los Cierres se movieron a la vista Equipo — Feature 05 v2.)* **Filtro por competencia** (Feature 09): `<select>` en el header del ranking que refetchea `api.league(comp)` (solo si hay >1 competencia) |
+| **Liga** | `#league` | Tabla general (C-09) + tabla ranking de equipos (columnas ordenables) + mapa de dispersión con ejes X/Y seleccionables (`LEAGUE_MAPS`). *(Los Cierres se movieron a la vista Equipo — Feature 05 v2.)* **Filtro por competencia** (Feature 09): `<select id="league-comp">` en el header de la tabla general (arriba de todo: filtra las tres cards) que refetchea `api.league(comp)` (solo si hay >1 competencia) |
 | **Equipo** | `#team` | Record, Four Factors, métricas avanzadas, desglose ofensivo, shot chart (si hay datos), game log. Botón **"Ver mapa de tiro"**: shot chart por zonas del jugador seleccionado dentro de Equipo (`#team-shotmap`). Botón **"Ver ON/OFF"**: dos tablas `ON \| OFF \| Δ` del jugador — **Eficiencia** (tasas, Δ del backend) y **Producción del equipo** (conteos crudos: pts a favor/contra, REB, AST, pérdidas, robos, tapones; Δ = ON−OFF) (`#team-onoff`, `renderTeamOnOff`, Feature 04). Apartado **"Combinaciones (Lineups)"**: multi-select de 3-5 jugadores + botón "Analizar combinación" → tarjeta de métricas y líderes (`#team-lineup-picker`/`#team-lineup`, `renderTeamLineup`, Feature 03). Apartado **"Cierres (últimos 5 min, dif ≤ 10)"**: tarjeta agregada del equipo ("mini-partido" de sus cierres apretados, con récord y recuento de partidos) + tabla por partido ordenable con columna PR (prórrogas) (`#team-clutch`, `renderTeamClutch`, Feature 05 v2 / C-06). Respeta la competencia elegida en `#team-comp` (la pide al backend) |
 | **Jugador** | `#player` | Métricas individuales, shot chart (11 zonas o 3 zonas según disponibilidad de coordenadas), game log |
 | **Comparar** | `#compare` | Radar de tres polígonos (equipo A, equipo B, promedio liga) + box score FIBA |
@@ -196,7 +196,7 @@ El mismo mapa se muestra en dos lugares: en la vista **Jugador** (`renderPlayer`
 
 ## Service Worker (`sw.js`)
 
-Cache name: `smart-basket-v12`
+Cache name: `smart-basket-v13`
 
 **Estrategia:**
 - `install`: pre-cachea los archivos estáticos listados en `STATIC[]`
@@ -256,11 +256,15 @@ Ver `sdd/specs/16-tiro-completo-ppt/`.
 
 ### Vista Liga — tabla general y ejes del mapa (C-09 / C-10)
 
-**Tabla general** (`_standingsCardHTML`): tabla de posiciones clásica arriba del ranking — Equipo, PJ,
-PG, PP, Pts, PF, PC. Puntos = 2 por ganado + 1 por perdido. Ordena por puntos y desempata por
-diferencia (PF − PC). Se alimenta del mismo `_leagueTeams` que el ranking: **sin fetch adicional**.
+**Tabla general** (`_standingsCardHTML(teams, compSelHTML, pickComp)`): tabla de posiciones clásica
+arriba del ranking — Equipo, PJ, PG, PP, Pts, PF, PC. Puntos = 2 por ganado + 1 por perdido; ordena por
+puntos y desempata por diferencia (PF − PC). **Puntos, orden y desempate los decide el backend**
+(`table_points`, `standings_pos`; DA-31, configurables desde F-13): el frontend solo ordena por
+`standings_pos`. Se alimenta del mismo `_leagueTeams` que el ranking: **sin fetch adicional**.
 
-> La tabla refleja únicamente los partidos importados, no el fixture completo.
+- Bajo el título: "Solo partidos importados, no el fixture completo." (la tabla no conoce el fixture).
+- Con más de una competencia y "Todas" elegido, la card no muestra la tabla (sumaría torneos distintos)
+  sino "Elegí una competencia para ver la tabla general.". Con una sola competencia se ve siempre.
 
 **Convención de flechas en los ejes del mapa**: la flecha indica la **dirección en pantalla** del
 mejor rendimiento — `→`/`←` en el eje horizontal, `↑`/`↓` en el vertical. No usar `↑` en un eje

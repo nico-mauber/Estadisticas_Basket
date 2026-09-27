@@ -800,14 +800,20 @@ const LEAGUE_COLS = [
   { key: "pts",          label: "Pts",   title: "Puntos por partido" },
 ];
 
-// C-09 — tabla de posiciones clásica: 2 puntos por ganado, 1 por perdido.
-// Se alimenta del mismo `_leagueTeams` que el ranking: sin fetch adicional.
-// Ordena por puntos de tabla; desempata por diferencia de puntos (Feature 17 RF-4).
-function _standingsCardHTML(teams) {
-  if (!teams?.length) return "";
-  const rows = [...teams].sort((a, b) =>
-    (b.table_points ?? 0) - (a.table_points ?? 0) ||
-    ((b.pts_for ?? 0) - (b.pts_against ?? 0)) - ((a.pts_for ?? 0) - (a.pts_against ?? 0)));
+// C-09 — tabla de posiciones clásica. Se alimenta del mismo `_leagueTeams` que el ranking:
+// sin fetch adicional. Puntos, orden y desempate los decide el backend (`table_points`,
+// `standings_pos`; DA-31). Con varias competencias y "Todas" elegido no se muestra: sumaría
+// partidos de torneos distintos. `compSelHTML` = selector de competencia de la vista.
+function _standingsCardHTML(teams, compSelHTML, pickComp) {
+  const header = `
+    <div class="map-header">
+      <div class="card-title" style="margin:0">Tabla general</div>
+      ${compSelHTML}
+    </div>`;
+  if (pickComp) {
+    return `<div class="card">${header}<p class="empty">Elegí una competencia para ver la tabla general.</p></div>`;
+  }
+  const rows = [...teams].sort((a, b) => a.standings_pos - b.standings_pos);
   const th = ["Equipo", "PJ", "PG", "PP", "Pts", "PF", "PC"]
     .map((h, i) => `<th${i ? ' style="text-align:right"' : ""}>${h}</th>`).join("");
   const body = rows.map(t => `
@@ -822,7 +828,8 @@ function _standingsCardHTML(teams) {
     </tr>`).join("");
   return `
     <div class="card">
-      <div class="card-title">Tabla general</div>
+      ${header}
+      <p class="td-muted">Solo partidos importados, no el fixture completo.</p>
       <div class="table-wrap">
         <table id="standings-table" class="search-table">
           <thead><tr>${th}</tr></thead>
@@ -918,11 +925,10 @@ async function renderLeague() {
       ? `<select id="league-comp" class="map-select">${_compOptions(comps, _leagueComp)}</select>`
       : "";
     sec.innerHTML = `
-      ${_standingsCardHTML(_leagueTeams)}
+      ${_standingsCardHTML(_leagueTeams, compSelHTML, comps.length > 1 && !_leagueComp)}
       <div class="card">
         <div class="map-header">
           <div class="card-title" style="margin:0">Ranking de equipos — Liga <span style="color:var(--muted);font-size:10px;font-weight:400;margin-left:8px">Click en columna para ordenar</span></div>
-          ${compSelHTML}
         </div>
         <div class="table-wrap">
           <table id="league-table" class="table-sticky"></table>

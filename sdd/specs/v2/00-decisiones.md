@@ -13,6 +13,7 @@ las necesita.
 | DA-13 | Las competencias creadas al importar nacen `publicada` | 2026-09-26 | F-11 |
 | DA-18 | `ADMIN_USERS` opcional: con la variable, solo esos usuarios modifican datos; sin ella, todo usuario logueado es admin. Importar sigue abierto a cualquier logueado | 2026-09-26 | F-11 |
 | DA-21 | **No** preparar i18n en fase 1: sin `t()` ni `core/i18n.js`; el copy se extrae en F-21 | 2026-09-26 | Se aparta del default de la arquitectura (§3.20). Los planes que citan `t()` escriben el copy en español directo |
+| DA-31 | Tabla general: 2 puntos por ganado, 1 por perdido, desempate por diferencia; configurables en F-13 (C-09 los deja en un único lugar del backend) + aclaración visible "Solo partidos importados, no el fixture completo." | 2026-09-26 | C-09, F-13 |
 | DA-32 | Capturar las coordenadas reales de tiro (`tm[n].shot[]`) en la ingesta; el mapa de 11 zonas las usa en C-03 | 2026-09-26 | F-11 solo las guarda |
 | DA-36 | Formato numérico es-UY (coma decimal) en toda la UI, con un único formateador | 2026-09-26 | |
 
@@ -26,5 +27,6 @@ las necesita.
 | F-11 borrador | Una competencia en `borrador` oculta todo: sus partidos no entran en ningún cálculo ni listado fuera de la sección Datos | 2026-09-26 |
 | C-05 §9 | Se aplican las 3 propuestas: búsqueda de la palabra `pep` sin distinguir mayúsculas en `frontend/`, `backend/` (sin `venv/`) y `docs/`, excluido `sdd/`; `docs/database.md` describe `paint_pts` sin la sigla vieja; toda etiqueta futura de `paint_pts` es `PtsEnPint` | 2026-09-26 |
 | C-10 §9 | Se aplican las 4 propuestas: la flecha indica la dirección en pantalla del mejor rendimiento y se deriva de la dirección de la métrica (sin invertir escalas); rótulos internos "Prom. <métrica>" sin flecha; métricas neutrales sin flecha; recuperos y puntos "mayor es mejor" | 2026-09-26 |
+| C-09 universo | Con más de una competencia y "Todas" elegido en Liga, la tabla general no se muestra: pide elegir una competencia (sumaría torneos distintos). Con una sola competencia se ve siempre | 2026-09-26 |
 | C-06 alcance | Completo: umbral y ventana en un único lugar del backend, título desde la respuesta, recuento que cierra, prórrogas `OVERTIME` en la ventana, filtro de competencia de Equipo y validación estricta (400) de `margin`/`window_secs` | 2026-09-26 |
 

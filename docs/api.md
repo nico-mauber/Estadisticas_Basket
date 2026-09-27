@@ -561,6 +561,9 @@ Ranking de todos los equipos ordenado por OER descendente.
     "team_code": "FUBB",
     "team_name": "Federación Uruguaya",
     "games": 12,
+    "wins": 8, "losses": 4, "table_points": 20,
+    "pts_for": 868, "pts_against": 812,
+    "standings_pos": 2,
     "oer": 1.05,
     "der": 0.98,
     "net_rating": 0.07,
@@ -570,10 +573,13 @@ Ranking de todos los equipos ordenado por OER descendente.
     "dr_pct": 0.71,
     "to_pct": 0.14,
     "pace": 68.5,
-    "pts": 72.3
+    "pts": 72.3,
+    "stl": 7.1
   }
 ]
 ```
+
+**Tabla general (C-09):** `games` (PJ), `wins` (PG), `losses` (PP), `table_points`, `pts_for` (PF) y `pts_against` (PC) salen de los mismos partidos que el ranking. `table_points = 2 × PG + 1 × PP` y `standings_pos` es la posición en la tabla: más puntos primero, desempate por diferencia `pts_for − pts_against`. Puntos y desempate viven en un solo lugar, `stats_engine.WIN_POINTS` / `LOSS_POINTS` / `standings_sort_key` (DA-31; F-13 los hará configurables). Un marcador igualado cuenta como derrota, para que `wins + losses == games` siempre.
 
 > **Competencia en game_log:** `GET /api/team/<code>` y `GET /api/player/<code>/<name>` incluyen en cada entrada de `game_log` `competition` (texto de FIBA), `competition_id` y `competition_label`; el frontend filtra por `competition_id` y recompute los promedios client-side. El mapa `leagues` usa como clave el id de competencia (como string); `""` es el agregado. `GET /api/search/players` devuelve en `competitions[]` las etiquetas. El `game_log` de equipo está en orden cronológico.
 

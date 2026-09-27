@@ -7,7 +7,8 @@ from sqlalchemy import func
 from database import db, init_db, upgrade_db, Game, TeamGameStats, PlayerGameStats, Shot, PbpEvent, DB_PATH
 from stats_engine import (calc_team_stats, calc_player_stats, league_averages,
                           _parse_minutes, played, norm_name, resolve_identity,
-                          season_ast_to, season_def_to_ratio, null_reasons)
+                          season_ast_to, season_def_to_ratio, null_reasons,
+                          standings_row, standings_sort_key)
 from clutch import team_clutch, MARGIN_RANGE, WINDOW_RANGE
 import lineups
 import competitions
@@ -1114,22 +1115,11 @@ def league_overview():
             vals = [a[key] for a in adv_list if a.get(key) is not None]
             return round(sum(vals) / len(vals), 4) if vals else None
 
-        # C-09: tabla de posiciones — 2 puntos por ganado, 1 por perdido.
-        # Un marcador igualado cuenta como derrota (no existe en FIBA; se define
-        # para que PG + PP == PJ se sostenga ante un dato corrupto). Feature 17 RF-2.
-        wins   = sum(1 for r in rows if (r.pts or 0) > (r.opp_pts or 0))
-        losses = len(rows) - wins
-
         result.append({
             "team_code":  code,
             "team_name":  name,
-            "games":      len(adv_list),
-            # C-09 — tabla general (Feature 17 RF-1/RF-2/RF-3)
-            "wins":         wins,
-            "losses":       losses,
-            "table_points": 2 * wins + losses,
-            "pts_for":      sum(r.pts or 0 for r in rows),
-            "pts_against":  sum(r.opp_pts or 0 for r in rows),
+            # C-09 — tabla general: games, wins, losses, table_points, pts_for, pts_against
+            **standings_row([(r.pts, r.opp_pts) for r in rows]),
             "oer":        _avg("oer"),
             "der":        _avg("der"),
             "net_rating": _avg("net_rating"),
@@ -1142,6 +1132,10 @@ def league_overview():
             "pts":        _avg("pts"),
             "stl":        _avg("stl"),
         })
+
+    # Posición en la tabla general (C-09): el orden y el desempate se deciden acá.
+    for pos, row in enumerate(sorted(result, key=standings_sort_key), start=1):
+        row["standings_pos"] = pos
 
     # Orden null-safe: desde la Feature 14 `_avg` puede devolver None, y comparar
     # None con float levanta TypeError. Los nulos van al final (Feature 12 RF-1).
