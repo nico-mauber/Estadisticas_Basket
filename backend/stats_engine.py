@@ -257,6 +257,36 @@ def season_def_to_ratio(total_stl, total_blk, total_drb, total_tov):
     return _safe_div((total_stl or 0) + (total_blk or 0) + (total_drb or 0), total_tov or 0)
 
 
+# ── Tabla general (C-09) ─────────────────────────────────────────────────────
+# Único lugar de los puntos por resultado y del desempate (DA-31): F-13 los pasa a la
+# configuración (`standings.win_points`, `standings.loss_points`, `standings.tiebreak`).
+WIN_POINTS = 2
+LOSS_POINTS = 1
+
+
+def standings_row(results: list[tuple]) -> dict:
+    """Fila de la tabla de posiciones a partir de `[(pts, opp_pts), ...]` de un equipo.
+
+    Un marcador igualado cuenta como derrota (no existe en FIBA; se define para que
+    PG + PP == PJ se sostenga ante un dato corrupto). Feature 17 RF-2.
+    """
+    wins = sum(1 for pts, opp in results if (pts or 0) > (opp or 0))
+    losses = len(results) - wins
+    return {
+        "games":        len(results),
+        "wins":         wins,
+        "losses":       losses,
+        "table_points": WIN_POINTS * wins + LOSS_POINTS * losses,
+        "pts_for":      sum(pts or 0 for pts, _ in results),
+        "pts_against":  sum(opp or 0 for _, opp in results),
+    }
+
+
+def standings_sort_key(row: dict) -> tuple:
+    """Orden de la tabla: más puntos primero; desempate por diferencia (PF − PC)."""
+    return (-row["table_points"], -(row["pts_for"] - row["pts_against"]))
+
+
 # ── Razón de un nulo (C-11 RF-3) ─────────────────────────────────────────────
 # Campos del box de FIBA que no todas las competencias publican: si FIBA no manda la
 # clave, la ingesta guarda NULL (fiba_fetcher.py) y el nulo significa "no registrado".
