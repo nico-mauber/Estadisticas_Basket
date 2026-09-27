@@ -130,7 +130,7 @@ Reasigna un partido a otra competencia. La asignación se conserva al reimportar
 
 **Request:** `{ "competition_id": 3 }` · **Response 200:** la fila del partido con `competition_id`/`competition_label`.
 
-**Errores:** `400` sin `competition_id` entero o competencia inexistente · `404` partido no encontrado.
+**Errores:** `400` sin `competition_id` entero o competencia inexistente · `404` partido no encontrado. (Toda competencia inexistente pasada como parámetro — `competition=`, `competition_id` — da `400`; `404` es para rutas `/api/competitions/<id>`.)
 
 ---
 
@@ -527,10 +527,11 @@ Un partido es **incompleto** si falla un chequeo con `counts_as_incomplete: true
 
 Re-ejecuta la ingesta vigente sobre partidos ya importados: desde el JSON archivado, o desde FIBA (por id) si el partido se importó antes de que existiera el archivo. Idempotente; conserva la competencia asignada.
 
-- `{ "game_ids": [...] }` — hasta 10 partidos.
-- `{ "competition_id": 1, "offset": 0 }` — un lote de 10 de la competencia; el cliente repite con `next_offset` hasta que sea `null`.
+- `{ "game_ids": [...], "offset": 0 }` o `{ "competition_id": 1, "offset": 0 }`: procesa un lote de 5 partidos (`ingest.REPROCESS_BATCH`) a partir de `offset`; el cliente repite con `next_offset` hasta que sea `null`. Con 5 por lote, el peor caso (5 descargas de FIBA × 20 s) queda debajo del timeout de 180 s de gunicorn.
 
-**Response:** `{ "processed": ["2849328", …], "failed": [{ "game_id": "…", "error": "motivo" }], "total": 13, "next_offset": 10 }`. Un partido fallido no corta el lote.
+**Response:** `{ "processed": ["2849328", …], "failed": [{ "game_id": "…", "error": "motivo" }], "total": 13, "next_offset": 5 }`. Un partido fallido no corta el lote.
+
+Si un partido trae filas repetidas por clave única (dos jugadores del mismo equipo con igual nombre abreviado, eventos sin número), se guarda una sola (jugador: la última ficha; tiro/evento: el primero), igual que la ingesta anterior.
 
 ---
 

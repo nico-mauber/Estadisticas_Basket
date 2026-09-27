@@ -248,7 +248,7 @@ def _game_row(g: Game, labels: dict, with_pbp: set, with_coords: set) -> dict:
         "competition_status": labels.get(g.competition_id, {}).get("status"),
         "has_pbp":         g.game_id in with_pbp,
         "has_coords":      g.game_id in with_coords,
-        "needs_reprocess": (g.ingest_version or 1) < ingest.INGEST_VERSION,
+        "needs_reprocess": ingest.needs_reprocess(g),
     }
 
 
@@ -271,17 +271,17 @@ def assign_game(game_id: str):
 @app.route("/api/teams")
 @login_required
 def list_teams():
-    rows = (
-        _visible(db.session.query(
-            TeamGameStats.team_code,
-            TeamGameStats.team_name,
-            func.count().label("games"),
-        ), TeamGameStats)
-        .group_by(TeamGameStats.team_code)
-        .order_by(TeamGameStats.team_name)
-        .all()
-    )
-    return jsonify([{"code": r.team_code, "name": r.team_name, "games": r.games} for r in rows])
+    # Nombre del equipo = el de su partido más reciente (el orden de las filas cambia al
+    # reprocesar, F-11), no el de una fila cualquiera del GROUP BY.
+    rows = (_visible(db.session.query(TeamGameStats.team_code, TeamGameStats.team_name, Game.date)
+                     .join(Game, Game.game_id == TeamGameStats.game_id), TeamGameStats)
+            .order_by(Game.date, Game.game_id).all())
+    teams: dict[str, dict] = {}
+    for code, name, _date in rows:
+        t = teams.setdefault(code, {"code": code, "games": 0})
+        t["name"] = name
+        t["games"] += 1
+    return jsonify(sorted(teams.values(), key=lambda t: t["name"]))
 
 
 @app.route("/api/team/<team_code>")
@@ -897,7 +897,8 @@ def onoff_route(team_code: str, player_name: str):
     if not games:
         return jsonify({"error": "Equipo no encontrado o sin play-by-play"}), 404
 
-    if not PlayerGameStats.query.filter_by(team_code=team_code, player_name=player_name).first():
+    if not _visible(PlayerGameStats.query.filter_by(team_code=team_code, player_name=player_name),
+                    PlayerGameStats).first():
         return jsonify({"error": "Sin datos ON/OFF para este jugador"}), 404
 
     result = lineups.onoff_stats(games, team_code, player_name)
@@ -927,7 +928,7 @@ def clutch_team(team_code: str):
     Ver sdd/specs/05-clutch/spec.md §10.
     """
     team_code = team_code.upper()
-    row = TeamGameStats.query.filter_by(team_code=team_code).first()
+    row = _visible(TeamGameStats.query.filter_by(team_code=team_code), TeamGameStats).first()
     if not row:
         return jsonify({"error": "Equipo no encontrado"}), 404
 
@@ -960,7 +961,7 @@ def create_competition():
         comp = competitions.create(body.get("name"), body.get("season"))
     except CompetitionError as e:
         return jsonify({"error": str(e)}), e.status
-    return jsonify(competitions.to_dict(comp)), 201
+    return jsonify(competitions.describe(comp)), 201
 
 
 @app.route("/api/competitions/<int:comp_id>", methods=["PATCH"])
@@ -970,7 +971,7 @@ def update_competition(comp_id: int):
         comp = competitions.update(comp_id, request.get_json(force=True) or {})
     except CompetitionError as e:
         return jsonify({"error": str(e)}), e.status
-    return jsonify(competitions.to_dict(comp))
+    return jsonify(competitions.describe(comp))
 
 
 @app.route("/api/competitions/<int:comp_id>/merge", methods=["POST"])
@@ -998,32 +999,34 @@ def data_quality_report():
     if not comp_id:
         return jsonify({"error": "Elegí una competencia."}), 400
     comp = competitions.get(comp_id)
-    return jsonify({"competition": competitions.to_dict(comp), **data_quality.report(comp_id)})
+    return jsonify({"competition": competitions.describe(comp), **data_quality.report(comp_id)})
 
 
 @app.route("/api/reprocess", methods=["POST"])
 @admin_required
 def reprocess():
-    """Re-ejecuta la ingesta sobre `{game_ids: [...]}` (máx. un lote) o sobre una competencia
-    por lotes: `{competition_id, offset}` → el cliente encadena mientras `next_offset` no sea null."""
+    """Re-ejecuta la ingesta por lotes sobre `{game_ids: [...]}` o `{competition_id}`, con
+    `offset` (default 0). El cliente repite con `next_offset` mientras no sea null; el tamaño
+    del lote lo decide el backend (`ingest.REPROCESS_BATCH`)."""
     body = request.get_json(force=True) or {}
-    batch = ingest.REPROCESS_BATCH
+    batch, offset = ingest.REPROCESS_BATCH, body.get("offset", 0)
+    if not isinstance(offset, int) or offset < 0:
+        return jsonify({"error": "offset debe ser un entero ≥ 0."}), 400
     if body.get("game_ids") is not None:
         ids = body["game_ids"]
-        if not isinstance(ids, list) or not ids or len(ids) > batch:
-            return jsonify({"error": f"Se requieren entre 1 y {batch} game_ids."}), 400
-        result = ingest.reprocess_games([str(i) for i in ids])
-        return jsonify({**result, "total": len(ids), "next_offset": None})
-
-    comp_id, offset = body.get("competition_id"), body.get("offset", 0)
-    if not isinstance(comp_id, int) or not isinstance(offset, int) or offset < 0:
-        return jsonify({"error": "Se requiere competition_id entero (y offset ≥ 0)."}), 400
-    try:
-        competitions.get(comp_id)
-    except CompetitionError as e:
-        return jsonify({"error": str(e)}), e.status
-    all_ids = [gid for (gid,) in db.session.query(Game.game_id)
-               .filter_by(competition_id=comp_id).order_by(Game.game_id)]
+        if not isinstance(ids, list) or not ids:
+            return jsonify({"error": "Se requiere al menos un game_id."}), 400
+        all_ids = [str(i) for i in ids]
+    else:
+        comp_id = body.get("competition_id")
+        if not isinstance(comp_id, int):
+            return jsonify({"error": "Se requiere competition_id entero o game_ids."}), 400
+        try:
+            competitions.get(comp_id)
+        except CompetitionError as e:
+            return jsonify({"error": str(e)}), e.status
+        all_ids = [gid for (gid,) in db.session.query(Game.game_id)
+                   .filter_by(competition_id=comp_id).order_by(Game.game_id)]
     chunk = all_ids[offset:offset + batch]
     result = ingest.reprocess_games(chunk)
     nxt = offset + batch
@@ -1034,8 +1037,11 @@ def reprocess():
 @login_required
 def league_overview():
     codes    = db.session.query(TeamGameStats.team_code).distinct().all()
-    all_rows = _visible(TeamGameStats.query, TeamGameStats).all()
-    minutes  = {g.game_id: g.minutes or 40 for g in Game.query.all()}
+    games_by_id = {g.game_id: g for g in Game.query.all()}
+    minutes  = {gid: g.minutes or 40 for gid, g in games_by_id.items()}
+    # orden cronológico: rows[-1] es el partido más reciente de cada equipo
+    all_rows = sorted(_visible(TeamGameStats.query, TeamGameStats).all(),
+                      key=lambda r: ((games_by_id[r.game_id].date or "") if r.game_id in games_by_id else "", r.game_id))
 
     # Filtro opcional por competencia (id; acepta el texto de FIBA por compatibilidad):
     # mantiene solo los partidos de esa competencia (evita mezclar competencias).

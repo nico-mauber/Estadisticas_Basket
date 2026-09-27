@@ -90,6 +90,31 @@ publicar" y las 9 tarjetas. Móvil 390 px: pestañas y tarjetas sin scroll horiz
 - Primera pasada: 3 errores JS al cambiar de pestaña mientras otra cargaba (el render tardío buscaba elementos ya
   reemplazados) → corregido con `if (!el.isConnected) return` tras cada `await`.
 
+## Revisión de código (`/code-review` sobre `89f630c`)
+
+| # | Hallazgo | Resolución |
+|---|---|---|
+| 1 | Filas repetidas por clave única (dos jugadores con igual nombre abreviado, eventos sin número) abortaban la importación | ✅ `persist_game` deduplica como la ingesta anterior (jugador: última ficha; tiro/evento: el primero) |
+| 2 | `clutch._is_clutch` sigue comparando con `"OT"` | ↪ Previo a F-11; es alcance de C-06 (siguiente requisito) |
+| 3 | Respuesta vieja de Calidad podía pisar la nueva (y publicar otra competencia) | ✅ se descarta si cambió la competencia elegida |
+| 4 | Liga quedaba trabada si su competencia se fusionaba o pasaba a borrador | ✅ competencia no elegible → "todas" |
+| 5 | Selector de Buscar sin escapar (XSS con nombres de competencia) | ✅ `esc()` |
+| 6 | Cambiar el filtro del catálogo conservaba la selección oculta | ✅ se limpia la selección |
+| 7 | Filtro del catálogo apuntando a una competencia fusionada | ✅ → "todas" |
+| 8 | Lote de 10 podía superar los 180 s de gunicorn con FIBA colgado | ✅ lote de 5 (peor caso 100 s) |
+| 9 | Existencia en ON/OFF y cierres sin filtrar borradores | ✅ `_visible` |
+| 10 | Competencia inexistente como parámetro daba 404 (docs: 400) | ✅ 400 |
+| 11 | Nombre de equipo en Liga/selector según orden de filas (cambia al reprocesar) | ✅ nombre del partido más reciente |
+| 12 | Alta/edición de competencia devolvían 0 partidos/equipos | ✅ `competitions.describe` |
+| 13 | Se borró la rama `raw["shot"]` | ✗ no aplica: esa clave no existe en los JSON de FIBA (13/13 verificados) y su geometría era incorrecta |
+| 14 | "Mover" fallando a mitad no refrescaba el catálogo | ✅ refresca con lo movido |
+| 15 | Tamaño de lote y `needs_reprocess` duplicados en frontend/backend | ✅ el backend decide el lote (`game_ids` + `offset`); `ingest.needs_reprocess()` único |
+
+Verificación de las correcciones (copia de la base): 12/12 PASS (#1, #8, #9, #10, #11, #12). Navegador: #4, #5 (el
+nombre `Prueba"><img onerror=…>` se ve como texto y no se ejecuta), #6, #7 PASS, 0 errores JS. Suites anteriores
+re-ejecutadas: reproceso offline 7/7, competencias 19/19, `test_auth.py` OK, recorrido completo 0 errores y
+regresión de la API **sin diferencias** respecto de antes de las correcciones.
+
 ## Pendiente de verificación humana
 - Probar en dev con usuarios reales: `ADMIN_USERS` con un usuario no admin (acciones ocultas, 403).
 - Tras el deploy: entrar a Datos → Calidad y **reprocesar cada competencia** (todos los partidos existentes quedan

@@ -374,25 +374,18 @@ function _formModal({ title, text = "", fields = [], confirm = "Guardar", danger
   form.querySelector("input, select")?.focus();
 }
 
-// Reproceso por lotes (F-11): el backend procesa hasta 10 partidos por petición y el
-// cliente encadena. `onProgress(hechos, total)` actualiza la UI.
+// Reproceso por lotes (F-11): el backend procesa un lote por petición y el cliente encadena
+// con `next_offset`. `onProgress(hechos, total)` actualiza la UI.
 async function _runReprocess(target, onProgress) {
+  const body = target.competitionId != null ? { competition_id: target.competitionId } : { game_ids: target.gameIds };
   let processed = 0, failed = [], total = target.gameIds ? target.gameIds.length : 0;
   try {
-    if (target.competitionId != null) {
-      let offset = 0;
-      while (offset != null) {
-        const r = await api.reprocess({ competition_id: target.competitionId, offset });
-        processed += r.processed.length; failed = failed.concat(r.failed); total = r.total;
-        offset = r.next_offset;
-        onProgress?.(processed + failed.length, total);
-      }
-    } else {
-      for (let i = 0; i < target.gameIds.length; i += 10) {
-        const r = await api.reprocess({ game_ids: target.gameIds.slice(i, i + 10) });
-        processed += r.processed.length; failed = failed.concat(r.failed);
-        onProgress?.(processed + failed.length, total);
-      }
+    let offset = 0;
+    while (offset != null) {
+      const r = await api.reprocess({ ...body, offset });
+      processed += r.processed.length; failed = failed.concat(r.failed); total = r.total;
+      offset = r.next_offset;
+      onProgress?.(processed + failed.length, total);
     }
     toast(`Reprocesados ${processed} partidos (${failed.length} con error).`, failed.length ? "err" : "ok");
     failed.slice(0, 3).forEach(f => toast(`No se pudo reprocesar ${f.game_id}: ${f.error}`, "err"));
@@ -426,10 +419,9 @@ function renderImport() {
 const _compLabel = c => c.status === "borrador" ? `${c.label} (borrador)` : c.label;
 
 async function _renderImportTab(el) {
-  const [games, comps] = await Promise.all([
-    api.games(_catalogComp).catch(() => null),
-    api.competitions(true).catch(() => []),
-  ]);
+  const comps = await api.competitions(true).catch(() => []);
+  if (!comps.some(c => String(c.id) === String(_catalogComp))) _catalogComp = "";
+  const games = await api.games(_catalogComp).catch(() => null);
   if (!el.isConnected) return;   // se cambió de pestaña mientras cargaba
   const hasSel = selectMode && selectedGames.size > 0;
 
@@ -510,6 +502,7 @@ async function _renderImportTab(el) {
   document.getElementById("catalog-comp")?.addEventListener("change", e => {
     _catalogComp = e.target.value;
     importPage = 0;
+    selectedGames.clear();   // no actuar sobre partidos que el filtro dejó fuera de vista
     refresh();
   });
 
@@ -543,12 +536,18 @@ async function _renderImportTab(el) {
                  options: comps.map(c => ({ value: c.id, label: _compLabel(c) })) }],
       confirm: "Mover",
       onSubmit: async v => {
-        for (const id of ids) await api.assignGame(id, Number(v.comp));
-        toast(`${ids.length} partido${ids.length > 1 ? "s" : ""} movido${ids.length > 1 ? "s" : ""}.`);
-        selectMode = false;
-        selectedGames.clear();
-        refresh();
-        _afterDataChange();
+        let moved = 0;
+        try {
+          for (const id of ids) { await api.assignGame(id, Number(v.comp)); moved++; }
+        } finally {
+          if (moved) {
+            selectMode = false;
+            selectedGames.clear();
+            refresh();
+            _afterDataChange();
+          }
+        }
+        toast(`${moved} partido${moved > 1 ? "s" : ""} movido${moved > 1 ? "s" : ""}.`);
       },
     });
   });
@@ -617,10 +616,11 @@ async function _renderQualityTab(el) {
   }
   if (!comps.some(c => String(c.id) === String(_qualityComp))) _qualityComp = String(comps[0].id);
 
+  const requested = _qualityComp;
   let rep;
-  try { rep = await api.dataQuality(_qualityComp); }
-  catch { el.innerHTML = '<p class="empty below-avg">No se pudo generar el informe de calidad.</p>'; return; }
-  if (!el.isConnected) return;
+  try { rep = await api.dataQuality(requested); }
+  catch { if (requested === _qualityComp) el.innerHTML = '<p class="empty below-avg">No se pudo generar el informe de calidad.</p>'; return; }
+  if (!el.isConnected || requested !== _qualityComp) return;   // llegó tarde: otra competencia elegida
   const comp = rep.competition, s = rep.summary;
   const isDraft = comp.status === "borrador";
 
@@ -888,6 +888,7 @@ async function renderLeague() {
   sec.innerHTML = '<p class="empty"><span class="spinner"></span>Cargando...</p>';
   try {
     const comps = await api.competitions().catch(() => []);
+    if (!comps.some(c => String(c.id) === String(_leagueComp))) _leagueComp = "";
     _leagueTeams = await api.league(_leagueComp);
     if (!_leagueTeams.length) { sec.innerHTML = '<p class="empty">Sin datos. Importa partidos primero.</p>'; return; }
 
@@ -1930,7 +1931,7 @@ async function renderSearch() {
       <div class="search-filters">
         <input type="text" id="sf-name" placeholder="Nombre contiene...">
         <select id="sf-team"><option value="">Equipo (todos)</option>${teams.map(t=>`<option>${t}</option>`).join("")}</select>
-        <select id="sf-comp"><option value="">Competencia (todas)</option>${comps.map(c=>`<option value="${c}">${c}</option>`).join("")}</select>
+        <select id="sf-comp"><option value="">Competencia (todas)</option>${comps.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join("")}</select>
         <select id="sf-pos"><option value="">Posición (todas)</option>${positions.map(p=>`<option>${p}</option>`).join("")}</select>
       </div>
       <div class="search-ranges">

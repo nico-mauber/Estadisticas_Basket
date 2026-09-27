@@ -54,7 +54,7 @@ Pestañas internas (`.import-tabs`, pills con scroll horizontal en móvil). X-01
 - **Calidad de datos:** selector de competencia, resumen ("Lista para publicar" / "Revisar antes de publicar", partidos, incompletos) y una card por chequeo (`QUALITY_CHECKS`, `_qualityCheckCard`; listas largas colapsadas con `<details>`). Admin: **Reprocesar competencia** y **Publicar** / **Pasar a borrador** (con incompletos pide confirmación: "Hay M partidos incompletos. ¿Publicar igual?").
 - **Competencias:** tabla con etiqueta, estado, partidos, equipos y fechas. Admin: **Nueva competencia**, **Editar** (nombre, temporada, estado) y **Fusionar en…**.
 
-Helpers: `_formModal({title, text, fields, confirm, danger, onSubmit})` (modal con formulario; si `onSubmit` lanza, muestra el error y queda abierto; también lo usa el borrado), `_runReprocess({competitionId} | {gameIds}, onProgress)` (encadena lotes de 10 y muestra "Reprocesando X de N…"), `_afterDataChange()` (refresca selectores y descarta el buscador cacheado tras cualquier cambio de datos), `esc()` (escapa texto editable por el usuario). Las acciones de escritura solo se muestran si `/api/me` devuelve `is_admin: true`.
+Helpers: `_formModal({title, text, fields, confirm, danger, onSubmit})` (modal con formulario; si `onSubmit` lanza, muestra el error y queda abierto; también lo usa el borrado), `_runReprocess({competitionId} | {gameIds}, onProgress)` (encadena lotes con `next_offset` — el tamaño lo decide el backend — y muestra "Reprocesando X de N…"), `_afterDataChange()` (refresca selectores y descarta el buscador cacheado tras cualquier cambio de datos), `esc()` (escapa texto editable por el usuario). Las acciones de escritura solo se muestran si `/api/me` devuelve `is_admin: true`.
 
 ## `api.js`
 

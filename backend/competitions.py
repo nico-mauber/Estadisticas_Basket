@@ -97,7 +97,10 @@ def resolve(value) -> int | None:
     if not value:
         return None
     if value.isdigit():
-        return get(int(value)).id
+        comp = db.session.get(Competition, int(value))
+        if not comp:
+            raise CompetitionError("La competencia no existe.", 400)
+        return comp.id
     alias = db.session.get(CompetitionAlias, value)
     if not alias:
         raise CompetitionError("La competencia no existe.", 400)
@@ -111,6 +114,11 @@ def to_dict(c: Competition, stats: dict | None = None) -> dict:
         "games": st.get("games", 0), "teams": st.get("teams", 0),
         "first_date": st.get("first_date"), "last_date": st.get("last_date"),
     }
+
+
+def describe(c: Competition) -> dict:
+    """Objeto de una competencia con sus conteos (respuestas de alta y edición)."""
+    return to_dict(c, _stats())
 
 
 def _stats() -> dict:
@@ -177,7 +185,7 @@ def merge(target_id: int, source_id: int) -> dict:
         {"competition_id": target.id})
     db.session.delete(source)
     db.session.commit()
-    return {"target": to_dict(target, _stats()), "moved_games": moved_games, "moved_aliases": moved_aliases}
+    return {"target": describe(target), "moved_games": moved_games, "moved_aliases": moved_aliases}
 
 
 def assign_game(game_id: str, comp_id: int) -> Game:
@@ -185,7 +193,9 @@ def assign_game(game_id: str, comp_id: int) -> Game:
     game = Game.query.filter_by(game_id=game_id).first()
     if not game:
         raise CompetitionError("Partido no encontrado.", 404)
-    game.competition_id = get(comp_id).id
+    if not db.session.get(Competition, comp_id):
+        raise CompetitionError("La competencia no existe.", 400)
+    game.competition_id = comp_id
     db.session.commit()
     return game
 

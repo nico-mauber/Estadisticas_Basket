@@ -26,7 +26,14 @@ from database import db, Game, GameSource, TeamGameStats, PlayerGameStats, Shot,
 # calidad los marca "pendientes de reproceso".
 INGEST_VERSION = 2
 
-REPROCESS_BATCH = 10   # partidos por petición: acota la duración bajo el timeout de gunicorn
+# Partidos por petición de reproceso. Peor caso sin archivo: 5 descargas × 20 s de timeout de
+# urllib = 100 s, por debajo de los 180 s de gunicorn (render.yaml).
+REPROCESS_BATCH = 5
+
+
+def needs_reprocess(game: Game) -> bool:
+    """Guardado con una ingesta anterior a la vigente (NULL = previa a F-11)."""
+    return (game.ingest_version or 1) < INGEST_VERSION
 
 
 def import_url(url: str) -> dict:
@@ -109,11 +116,19 @@ def persist_game(game: dict) -> None:
     pbp_cols = ("team_code", "player_name", "period", "period_type", "clock_secs", "s1", "s2",
                 "action_type", "sub_type", "success", "action_number")
 
+    # Filas repetidas por clave única dentro de un mismo partido (dos jugadores con el mismo
+    # nombre abreviado, eventos sin actionNumber): se conserva una, como hacía la ingesta
+    # anterior con su upsert, en lugar de abortar la importación. Jugadores: gana la última
+    # ficha; tiros y eventos: el primero.
+    players = list({(r.get("team_code"), r.get("player_name")): r for r in game.get("players", [])}.values())
+    shots = list({r.get("action_number"): r for r in reversed(game.get("shots", []))}.values())[::-1]
+    pbp = list({r.get("action_number"): r for r in reversed(game.get("pbp", []))}.values())[::-1]
+
     # executemany: un statement por tabla (~500 eventos por partido)
     for model, rows, cols in ((TeamGameStats, game.get("teams", []), team_cols),
-                              (PlayerGameStats, game.get("players", []), player_cols),
-                              (Shot, game.get("shots", []), shot_cols),
-                              (PbpEvent, game.get("pbp", []), pbp_cols)):
+                              (PlayerGameStats, players, player_cols),
+                              (Shot, shots, shot_cols),
+                              (PbpEvent, pbp, pbp_cols)):
         if rows:
             db.session.execute(sqlite_insert(model),
                                [{"game_id": game_id, **{c: r.get(c) for c in cols}} for r in rows])

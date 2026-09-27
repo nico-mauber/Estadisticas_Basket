@@ -13,7 +13,7 @@ from collections import defaultdict
 
 import lineups
 from database import db, Game, TeamGameStats, PlayerGameStats, Shot, PbpEvent
-from ingest import INGEST_VERSION
+from ingest import INGEST_VERSION, needs_reprocess
 from stats_engine import norm_name
 
 # Campos cuyo nulo se informa (tabla, columna, etiqueta). Un 0 informado por FIBA no es nulo.
@@ -68,8 +68,7 @@ def report(competition_id: int) -> dict:
                                         (not by_id[gid].date, "fecha")) if cond]
         if faltan:
             missing.append(item(gid, detail="Falta: " + ", ".join(faltan)))
-    reprocess = [item(gid) for gid in gids
-                 if (by_id[gid].ingest_version or 1) < INGEST_VERSION]
+    reprocess = [item(gid) for gid in gids if needs_reprocess(by_id[gid])]
     no_coords = [item(gid) for gid in gids if events[gid] and gid not in with_coords]
 
     mismatch, lineup_issues = [], []
