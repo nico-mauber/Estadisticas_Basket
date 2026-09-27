@@ -336,20 +336,16 @@ export function drawPlayerEvolution(canvasId, gameLog) {
   });
 }
 
-// ── Scatter OER vs DER (league map) ────────────────────────────────────────
-// Default axis config (Eficiencia) — keeps old call sites working.
-const _DEFAULT_AXIS = {
-  xKey: "oer", xName: "OER", xTitle: "OER  (↑ mejor ataque)", xPct: false,
-  yKey: "der", yName: "DER", yTitle: "DER  (↓ mejor defensa)", yPct: false,
-};
-
-export function drawLeagueScatter(canvasId, teams, axis = _DEFAULT_AXIS) {
+// ── Scatter de liga (ejes configurables) ───────────────────────────────────
+// `axis` lo arma app.js (`_mapAxis`): títulos con la flecha del mejor rendimiento y rótulos de las
+// líneas de promedio. Este archivo no escribe flechas (C-10).
+export function drawLeagueScatter(canvasId, teams, axis) {
   _applyDefaults();
   _destroy(canvasId);
   const canvas = document.getElementById(canvasId);
   if (!canvas || !teams?.length) return;
 
-  const { xKey, yKey, xName, yName, xTitle, yTitle, xPct, yPct } = axis;
+  const { xKey, yKey, xName, yName, xTitle, yTitle, xPct, yPct, xAvgLabel, yAvgLabel } = axis;
   const fx = v => xPct ? PCT(v) : DEC2(v);
   const fy = v => yPct ? PCT(v) : DEC2(v);
 
@@ -380,6 +376,8 @@ export function drawLeagueScatter(canvasId, teams, axis = _DEFAULT_AXIS) {
     },
     options: {
       responsive: true,
+      // Móvil: lienzo cuadrado; con el 2:1 por defecto el título del eje Y no entra (C-10 CA-7)
+      aspectRatio: window.innerWidth <= 768 ? 1 : 2,
       plugins: {
         legend: { display: false },
         tooltip: {
@@ -433,11 +431,11 @@ export function drawLeagueScatter(canvasId, teams, axis = _DEFAULT_AXIS) {
         ctx.beginPath(); ctx.moveTo(xAvg, chart.chartArea.top); ctx.lineTo(xAvg, chart.chartArea.bottom); ctx.stroke();
         ctx.beginPath(); ctx.moveTo(chart.chartArea.left, yAvg); ctx.lineTo(chart.chartArea.right, yAvg); ctx.stroke();
 
-        // Quadrant labels (generic: axis names near the avg lines)
+        // Rótulos de las líneas de promedio de liga (sin flecha: la dirección la da el título del eje)
         ctx.font = "10px Inter, system-ui";
         ctx.fillStyle = "rgba(139,148,158,0.5)";
-        ctx.fillText(`↑ ${xName}`, xAvg + 4, chart.chartArea.top + 14);
-        ctx.fillText(`${yName}`, chart.chartArea.left + 4, yAvg - 6);
+        ctx.fillText(xAvgLabel ?? xName, xAvg + 4, chart.chartArea.top + 14);
+        ctx.fillText(yAvgLabel ?? yName, chart.chartArea.left + 4, yAvg - 6);
 
         // Team name labels
         ctx.font = "11px Inter, system-ui";

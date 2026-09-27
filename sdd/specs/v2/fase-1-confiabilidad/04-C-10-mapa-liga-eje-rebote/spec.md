@@ -2,7 +2,7 @@
 
 > **ID:** C-10 · **Prioridad:** P2 · **Fase y orden:** 1·04
 > **Depende de:** C-11 Grupo 0 (integración de `dev`, P-00) — [`../01-C-11-tratamiento-de-nulos/spec.md`](../01-C-11-tratamiento-de-nulos/spec.md) · **Habilita:** —
-> **Estado:** Borrador (agente) — pendiente de revisión humana (gate Paso 1)
+> **Estado:** Implementado (2026-09-26) — ver [progress.md](progress.md)
 > **Fuente:** Especificación v2 §2 · C-10 y §1.3 S2 ([`../../00-especificacion-cliente-v2.md`](../../00-especificacion-cliente-v2.md)) · Arquitectura §1.0, §1.5 D-18, §3.12, §3.20 ([`../../00-arquitectura-transversal.md`](../../00-arquitectura-transversal.md))
 
 ## 0. Contexto y situación actual

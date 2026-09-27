@@ -29,12 +29,12 @@ La navegación es por `#hash` o botones de tab. No hay routing del servidor.
 |-------|-----------|-------------|
 | **Importar** (Datos) | `#import` | Tres pestañas (F-11): **Importar** (URL de FIBA + seed dev + catálogo con filtro por competencia y estado de datos), **Calidad de datos** (informe de una competencia, reproceso y publicación) y **Competencias** (alta, edición, estado, fusión). Ver "Sección Datos" abajo |
 | **Liga** | `#league` | Tabla ranking de equipos (columnas ordenables) + mapa de dispersión con ejes X/Y seleccionables (`LEAGUE_MAPS`). *(Los Cierres se movieron a la vista Equipo — Feature 05 v2.)* **Filtro por competencia** (Feature 09): `<select>` en el header del ranking que refetchea `api.league(comp)` (solo si hay >1 competencia) |
-| **Equipo** | `#team` | Record, Four Factors, métricas avanzadas, desglose ofensivo, shot chart (si hay datos), game log. Botón **"Ver mapa de tiro"**: shot chart por zonas del jugador seleccionado dentro de Equipo (`#team-shotmap`). Botón **"Ver ON/OFF"**: dos tablas `ON \| OFF \| Δ` del jugador — **Eficiencia** (tasas, Δ del backend) y **Producción del equipo** (conteos crudos: pts a favor/contra, REB, AST, pérdidas, robos, tapones; Δ = ON−OFF) (`#team-onoff`, `renderTeamOnOff`, Feature 04). Apartado **"Combinaciones (Lineups)"**: multi-select de 3-5 jugadores + botón "Analizar combinación" → tarjeta de métricas y líderes (`#team-lineup-picker`/`#team-lineup`, `renderTeamLineup`, Feature 03). Apartado **"Cierres (últimos 5 min, dif ≤ 10)"**: tarjeta agregada del equipo ("mini-partido" de sus cierres apretados, con récord) + tabla por partido ordenable (`#team-clutch`, `renderTeamClutch`, Feature 05 v2) |
+| **Equipo** | `#team` | Record, Four Factors, métricas avanzadas, desglose ofensivo, shot chart (si hay datos), game log. Botón **"Ver mapa de tiro"**: shot chart por zonas del jugador seleccionado dentro de Equipo (`#team-shotmap`). Botón **"Ver ON/OFF"**: dos tablas `ON \| OFF \| Δ` del jugador — **Eficiencia** (tasas, Δ del backend) y **Producción del equipo** (conteos crudos: pts a favor/contra, REB, AST, pérdidas, robos, tapones; Δ = ON−OFF) (`#team-onoff`, `renderTeamOnOff`, Feature 04). Apartado **"Combinaciones (Lineups)"**: multi-select de 3-5 jugadores + botón "Analizar combinación" → tarjeta de métricas y líderes (`#team-lineup-picker`/`#team-lineup`, `renderTeamLineup`, Feature 03). Apartado **"Cierres (últimos 5 min, dif ≤ 10)"**: tarjeta agregada del equipo ("mini-partido" de sus cierres apretados, con récord y recuento de partidos) + tabla por partido ordenable con columna PR (prórrogas) (`#team-clutch`, `renderTeamClutch`, Feature 05 v2 / C-06). Respeta la competencia elegida en `#team-comp` (la pide al backend) |
 | **Jugador** | `#player` | Métricas individuales, shot chart (11 zonas o 3 zonas según disponibilidad de coordenadas), game log |
 | **Comparar** | `#compare` | Radar de tres polígonos (equipo A, equipo B, promedio liga) + box score FIBA |
 | **Buscar** | `#search` | Buscador avanzado de jugadores: filtros combinables (nombre, equipo, competencia, posición, rangos mín/máx de métricas) sobre todos los jugadores de la base; tabla ordenable; fila → vista Jugador |
 
-**Vista Equipo — card "Desglose ofensivo":** siempre visible: PtsEnPint / Seg. Op. / Ptos/PER / Banca / PCA (columnas `paint_pts`, `second_chance_pts`, `pts_from_tov`, `bench_pts`, `fast_break_pts`). Si la competencia no publica un campo se ve "—" con la razón "La competencia no registra este dato" (C-11). *(Seg. Op. y PCA se poblaban en 0 por claves FIBA mal escritas — corregido en `fiba_fetcher.py`: `PointsSecondChance`/`PointsFastBreak`.)*
+**Vista Equipo — card "Desglose ofensivo":** siempre visible: PtsEnPint / Seg. Op. / Ptos/PER / Banca / PCA (columnas `paint_pts`, `second_chance_pts`, `pts_from_tov`, `bench_pts`, `fast_break_pts`). Toda etiqueta nueva de `paint_pts` (catálogo de métricas, cabeceras de exportación, traducciones) es `PtsEnPint` (C-05). Si la competencia no publica un campo se ve "—" con la razón "La competencia no registra este dato" (C-11). *(Seg. Op. y PCA se poblaban en 0 por claves FIBA mal escritas — corregido en `fiba_fetcher.py`: `PointsSecondChance`/`PointsFastBreak`.)*
 
 **Filtro por competencia (Feature 09, por id desde F-11):** helpers compartidos `_logComps`/`_filterByComp`/`_compOptions`, que trabajan con `competition_id` y la etiqueta `competition_label` (el texto de FIBA puede renombrarse o fusionarse). Las competencias en borrador no aparecen. Selectores en **Liga** (refetch `api.league(comp)`), **Equipo** (`#team-comp`, filtra el `game_log` y recomputa con `_computeAvg`; compone con las pills Últ. N), **Comparar** (`#compare-comp`) y **Jugador** (`#player-comp`, `renderPlayer`→`_renderPlayerContent`). Cada `<select>` se oculta si hay ≤1 competencia. `_computeAvg` incluye las keys de jugador `uso_pct`/`ast_to`.
 
@@ -68,7 +68,7 @@ api.importGame(url)         // POST   /api/import
 api.team(code)              // GET    /api/team/<code>
 api.players(code) / api.player(code, name) / api.playerShots(code, name) / api.teamShots(code)  // teamShots = mapa agregado del equipo
 api.searchPlayers()         // GET /api/search/players (buscador avanzado)
-api.clutchTeam(team)        // GET /api/clutch/<team> (cierres del equipo: agregado + por partido)
+api.clutchTeam(team, comp?) // GET /api/clutch/<team>[?competition=] (cierres del equipo: agregado + por partido)
 api.lineup(team, players[]) // GET /api/lineup/<team>?players=A|B|C (combinaciones 3-5)
 api.onoff(team, player)     // GET /api/onoff/<team>/<player>
 api.league(comp?) / api.teams() / api.games(comp?)  // comp = id de competencia
@@ -90,7 +90,7 @@ Wrappers sobre Chart.js v4.
 
 | Función | Tipo | Descripción |
 |---------|------|-------------|
-| `drawLeagueScatter(canvasId, teams, axis)` | Scatter | Mapa de liga con ejes X/Y configurables (`axis` = `{xKey,yKey,xName,yName,xTitle,yTitle,xPct,yPct}`); zoom+pan. Presets en `LEAGUE_MAPS` (Eficiencia, Rebotes, Recuperos/Puntos) |
+| `drawLeagueScatter(canvasId, teams, axis)` | Scatter | Mapa de liga con ejes X/Y configurables (`axis` = `{xKey,yKey,xName,yName,xTitle,yTitle,xPct,yPct,xAvgLabel,yAvgLabel}`, armado por `_mapAxis` en `app.js`); zoom+pan. Presets en `LEAGUE_MAPS` (Eficiencia, Rebotes, Recuperos/Puntos). Los equipos con un eje nulo no se dibujan. Lienzo 2:1 en desktop y cuadrado en móvil (≤ 768 px), para que el título del eje Y entre completo |
 | `drawRadar(canvasId, averages, league, label)` | Radar | Equipo vs promedio de liga (vista equipo) |
 | `drawCompareRadar(canvasId, avgA, avgB, league, labelA, labelB)` | Radar | **Tres polígonos**: equipo A (naranja), equipo B (azul), promedio liga (gris punteado) |
 | `drawEvolution(canvasId, gameLog, leagueOerAvg)` | Línea | Evolución de OER del equipo partido a partido vs media liga |
@@ -196,7 +196,7 @@ El mismo mapa se muestra en dos lugares: en la vista **Jugador** (`renderPlayer`
 
 ## Service Worker (`sw.js`)
 
-Cache name: `smart-basket-v11`
+Cache name: `smart-basket-v12`
 
 **Estrategia:**
 - `install`: pre-cachea los archivos estáticos listados en `STATIC[]`
@@ -229,11 +229,20 @@ cache-first no guarda respuestas nuevas, así que un módulo fuera de la lista r
 
 ## Cierres (umbral de partido cerrado)
 
-El umbral de "partido cerrado" es **dif ≤ 10** al minuto 5:00 (C-06; antes 15). Vive en un solo
-lugar: el default de `team_clutch()` en `backend/clutch.py`, expuesto en la respuesta de
-`GET /api/clutch/<code>` como `margin`. **El título de la card lo lee de ahí** — no escribirlo como
-literal en el frontend: esa duplicación fue la causa de que la leyenda quedara desincronizada.
-Ver `sdd/specs/18-etiquetas-y-umbrales/`.
+El umbral de "partido cerrado" es **dif ≤ 10** al entrar a los últimos 5 minutos (C-06; antes 15).
+Umbral y ventana viven en un solo lugar: `DEFAULT_MARGIN` y `DEFAULT_WINDOW_SECS` en
+`backend/clutch.py`, expuestos en la respuesta de `GET /api/clutch/<code>` como `margin` y
+`window_secs`. **La card arma todo su copy con esos dos valores** (`_clutchTitle`, `_clutchCount`,
+cabecera `Δ@m:ss`) — no escribir `10`, `15`, `5 min` ni `5:00` como literales en el frontend: esa
+duplicación fue la causa de que la leyenda quedara desincronizada. Mientras carga o si falla, el título
+dice solo "Cierres".
+
+Copy de la card: título "Cierres (últimos {min} min, dif ≤ {margen})" (mayúsculas por CSS; ventana no
+entera en minutos con coma decimal, "1,5 min"); recuento "{q} calificado(s) · {e} excluido(s) por
+diferencia mayor a {margen}" más " · {s} sin eventos de cierre" y " · {n} sin play-by-play" si no son 0,
+precedido por la competencia si se eligió una; sin calificados: "Sin cierres apretados: {recuento}.".
+Las respuestas que llegan tarde (se cambió de equipo o de competencia) se descartan (`_clutchReq`).
+Ver `sdd/specs/v2/fase-1-confiabilidad/05-C-06-umbral-cierres/`.
 
 ### Mapa de tiro y card "Tiro" (C-03 / C-07)
 
@@ -257,4 +266,11 @@ diferencia (PF − PC). Se alimenta del mismo `_leagueTeams` que el ranking: **s
 mejor rendimiento — `→`/`←` en el eje horizontal, `↑`/`↓` en el vertical. No usar `↑` en un eje
 horizontal para decir "más es mejor": esa ambigüedad fue el defecto que reportó C-10.
 El gráfico no invierte la escala (`reverse: false` en `charts.js`), así que el valor más alto siempre
-se dibuja arriba. Ver `sdd/specs/17-vista-liga/`.
+se dibuja arriba.
+
+La flecha **no se escribe a mano**: cada eje de `LEAGUE_MAPS` declara la dirección de su métrica
+(`xDir`/`yDir`: `higher` | `lower` | `neutral`) y un calificador (`xQual`/`yQual`), y `_mapAxis` arma
+el título con `_axisTitle` — "OER (→ mejor ataque)", "DER (↓ mejor defensa)", "OR% (→ mejor)",
+"DR% (↑ mejor)". Una métrica `neutral` lleva el título sin flecha. Las líneas de promedio de liga se
+rotulan "Prom. <métrica>", sin flecha. Si algún día se invierte un eje, `AXIS_ARROWS` debe invertir
+su flecha. Ver `sdd/specs/v2/fase-1-confiabilidad/04-C-10-mapa-liga-eje-rebote/`.
