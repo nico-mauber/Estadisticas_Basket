@@ -27,7 +27,7 @@ La navegación es por `#hash` o botones de tab. No hay routing del servidor.
 
 | Vista | ID sección | Descripción |
 |-------|-----------|-------------|
-| **Importar** | `#import` | Input URL FIBA LiveStats + botón importar; botón "Agregar partidos" (seed) solo si `seed_enabled` (dev) |
+| **Importar** (Datos) | `#import` | Tres pestañas (F-11): **Importar** (URL de FIBA + seed dev + catálogo con filtro por competencia y estado de datos), **Calidad de datos** (informe de una competencia, reproceso y publicación) y **Competencias** (alta, edición, estado, fusión). Ver "Sección Datos" abajo |
 | **Liga** | `#league` | Tabla ranking de equipos (columnas ordenables) + mapa de dispersión con ejes X/Y seleccionables (`LEAGUE_MAPS`). *(Los Cierres se movieron a la vista Equipo — Feature 05 v2.)* **Filtro por competencia** (Feature 09): `<select>` en el header del ranking que refetchea `api.league(comp)` (solo si hay >1 competencia) |
 | **Equipo** | `#team` | Record, Four Factors, métricas avanzadas, desglose ofensivo, shot chart (si hay datos), game log. Botón **"Ver mapa de tiro"**: shot chart por zonas del jugador seleccionado dentro de Equipo (`#team-shotmap`). Botón **"Ver ON/OFF"**: dos tablas `ON \| OFF \| Δ` del jugador — **Eficiencia** (tasas, Δ del backend) y **Producción del equipo** (conteos crudos: pts a favor/contra, REB, AST, pérdidas, robos, tapones; Δ = ON−OFF) (`#team-onoff`, `renderTeamOnOff`, Feature 04). Apartado **"Combinaciones (Lineups)"**: multi-select de 3-5 jugadores + botón "Analizar combinación" → tarjeta de métricas y líderes (`#team-lineup-picker`/`#team-lineup`, `renderTeamLineup`, Feature 03). Apartado **"Cierres (últimos 5 min, dif ≤ 10)"**: tarjeta agregada del equipo ("mini-partido" de sus cierres apretados, con récord) + tabla por partido ordenable (`#team-clutch`, `renderTeamClutch`, Feature 05 v2) |
 | **Jugador** | `#player` | Métricas individuales, shot chart (11 zonas o 3 zonas según disponibilidad de coordenadas), game log |
@@ -36,7 +36,7 @@ La navegación es por `#hash` o botones de tab. No hay routing del servidor.
 
 **Vista Equipo — card "Desglose ofensivo":** siempre visible: PtsEnPint / Seg. Op. / Ptos/PER / Banca / PCA (columnas `paint_pts`, `second_chance_pts`, `pts_from_tov`, `bench_pts`, `fast_break_pts`). Si la competencia no publica un campo se ve "—" con la razón "La competencia no registra este dato" (C-11). *(Seg. Op. y PCA se poblaban en 0 por claves FIBA mal escritas — corregido en `fiba_fetcher.py`: `PointsSecondChance`/`PointsFastBreak`.)*
 
-**Filtro por competencia (Feature 09):** helpers compartidos `_logComps`/`_filterByComp`/`_compOptions`. Selectores en **Liga** (refetch `api.league(comp)`), **Equipo** (`#team-comp`, filtra el `game_log` y recomputa con `_computeAvg`; compone con las pills Últ. N), **Comparar** (`#compare-comp`) y **Jugador** (`#player-comp`, `renderPlayer`→`_renderPlayerContent`). Cada `<select>` se oculta si hay ≤1 competencia. `_computeAvg` incluye las keys de jugador `uso_pct`/`ast_to`.
+**Filtro por competencia (Feature 09, por id desde F-11):** helpers compartidos `_logComps`/`_filterByComp`/`_compOptions`, que trabajan con `competition_id` y la etiqueta `competition_label` (el texto de FIBA puede renombrarse o fusionarse). Las competencias en borrador no aparecen. Selectores en **Liga** (refetch `api.league(comp)`), **Equipo** (`#team-comp`, filtra el `game_log` y recomputa con `_computeAvg`; compone con las pills Últ. N), **Comparar** (`#compare-comp`) y **Jugador** (`#player-comp`, `renderPlayer`→`_renderPlayerContent`). Cada `<select>` se oculta si hay ≤1 competencia. `_computeAvg` incluye las keys de jugador `uso_pct`/`ast_to`.
 
 **ON/OFF — minutos:** el panel muestra `N' en cancha` (tiempo de juego del equipo con el jugador en cancha/banca). La suma de segundos por partido es exacta (arreglado el doble-conteo por reloj no-monótono en `build_segments`).
 
@@ -45,6 +45,16 @@ La navegación es por `#hash` o botones de tab. No hay routing del servidor.
 **Más stats en Combinación y Comparar (Feature 11):** la card de Combinación (lineup) incluye una tabla ancha (`.search-table`) con la línea completa (Off/Def/Net/eFG%/TS%/Pos/Pts/REB/AST/…); Comparar incluye una card "Métricas avanzadas" (tabla de 2 filas, una por equipo).
 
 **Vista Comparar — box score FIBA:** tabla de 3 columnas (`valor A | etiqueta | valor B`) con el ganador de cada fila resaltado en verde. Filas: LC, 2Pts, 3Pts, 1Pt (con %), REB, As, ST, Blq, PER, FP (formato `faltas (recibidas)`), PtsEnPint, PtsSegCh, PtPer, Pts Banca, PCA. Clase CSS `.fiba-box`.
+
+### Sección Datos (vista Importar, F-11)
+
+Pestañas internas (`.import-tabs`, pills con scroll horizontal en móvil). X-01 las reubica en S1 sin cambiar su contenido.
+
+- **Importar:** importación por URL, seed (dev) y catálogo paginado con filtro `#catalog-comp` (competencias incluidas las en borrador) y columna **Estado** (`_dataBadges`: Borrador · Sin PBP · Sin coordenadas · Reprocesar · OK). Modo selección (solo admin): **Mover a competencia…**, **Reprocesar**, **Eliminar**.
+- **Calidad de datos:** selector de competencia, resumen ("Lista para publicar" / "Revisar antes de publicar", partidos, incompletos) y una card por chequeo (`QUALITY_CHECKS`, `_qualityCheckCard`; listas largas colapsadas con `<details>`). Admin: **Reprocesar competencia** y **Publicar** / **Pasar a borrador** (con incompletos pide confirmación: "Hay M partidos incompletos. ¿Publicar igual?").
+- **Competencias:** tabla con etiqueta, estado, partidos, equipos y fechas. Admin: **Nueva competencia**, **Editar** (nombre, temporada, estado) y **Fusionar en…**.
+
+Helpers: `_formModal({title, text, fields, confirm, danger, onSubmit})` (modal con formulario; si `onSubmit` lanza, muestra el error y queda abierto; también lo usa el borrado), `_runReprocess({competitionId} | {gameIds}, onProgress)` (encadena lotes de 10 y muestra "Reprocesando X de N…"), `_afterDataChange()` (refresca selectores y descarta el buscador cacheado tras cualquier cambio de datos), `esc()` (escapa texto editable por el usuario). Las acciones de escritura solo se muestran si `/api/me` devuelve `is_admin: true`.
 
 ## `api.js`
 
@@ -61,8 +71,16 @@ api.searchPlayers()         // GET /api/search/players (buscador avanzado)
 api.clutchTeam(team)        // GET /api/clutch/<team> (cierres del equipo: agregado + por partido)
 api.lineup(team, players[]) // GET /api/lineup/<team>?players=A|B|C (combinaciones 3-5)
 api.onoff(team, player)     // GET /api/onoff/<team>/<player>
-api.league(comp?) / api.competitions() / api.teams() / api.games()  // league acepta competencia opcional
-api.deleteGames(ids)        // DELETE /api/games
+api.league(comp?) / api.teams() / api.games(comp?)  // comp = id de competencia
+api.deleteGames(ids)        // DELETE /api/games (admin)
+// Datos (F-11)
+api.competitions(includeHidden?)       // GET /api/competitions[?include_hidden=1]
+api.createCompetition({name, season})  // POST  (admin)
+api.updateCompetition(id, {name?, season?, status?})   // PATCH (admin)
+api.mergeCompetition(id, sourceId)     // POST /api/competitions/<id>/merge (admin)
+api.assignGame(gameId, compId)         // PATCH /api/games/<id> (admin)
+api.dataQuality(compId)                // GET /api/data-quality
+api.reprocess({game_ids} | {competition_id, offset})   // POST /api/reprocess (admin)
 api.seed()                  // POST   /api/seed  (dev)
 ```
 
@@ -163,7 +181,7 @@ neutra si falta cualquiera de los dos lados. Ver `sdd/specs/12-nulos-orden-color
 SVG de cancha clara estilo "El Metro" (`frontend/js/app.js`), generado por `_shotChartSVG(zones, totalShots, summary, hasCoordinates)`:
 
 - `hasCoordinates=true` → `_shotChart11SVG`: 11 casilleros (restricted_area, mid_left/right_close, mid_left/right_far, mid_top, left/right_corner_3, left/right_wing_3, top_key_3).
-- `hasCoordinates=false` → `_shotChart3SVG`: 3 casilleros (Triple/top_key_3, Media/mid_top, Pintura/restricted_area) — caso real de la competencia FUBB, cuyo feed de FIBA LiveStats no expone coordenadas de tiro (ver [api.md → GET /api/shots](api.md#get-apishotsteam_codeplayer_name)).
+- `hasCoordinates=false` → `_shotChart3SVG`: 3 casilleros (Triple/top_key_3, Media/mid_top, Pintura/restricted_area). Hoy es el caso de todos los partidos: FIBA sí publica coordenadas (`tm[n].shot[]`) y desde F-11 se guardan en `shots.court_x/court_y`, pero el mapa de 11 zonas las usa recién en C-03 (ver [api.md → GET /api/shots](api.md#get-apishotsteam_codeplayer_name)).
 
 Ambos modos comparten geometría de cancha, paleta y heatmap por P/F (`_courtLinesSVG`, `_scLbl`, `_scBadge`, constantes `SC_*`) — sin duplicación de estilo entre modos.
 
@@ -178,7 +196,7 @@ El mismo mapa se muestra en dos lugares: en la vista **Jugador** (`renderPlayer`
 
 ## Service Worker (`sw.js`)
 
-Cache name: `smart-basket-v10`
+Cache name: `smart-basket-v11`
 
 **Estrategia:**
 - `install`: pre-cachea los archivos estáticos listados en `STATIC[]`

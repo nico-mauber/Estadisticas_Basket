@@ -191,6 +191,8 @@ PACE = 40 × ((POS + POS_rival) / 2) / MINUTOS
 ```
 
 Posesiones proyectadas a 40 minutos (partido estándar). Normaliza equipos con distintos ritmos.
+`MINUTOS` = duración real del partido (`games.minutes`: 40 + 5 por prórroga). Los partidos importados
+antes de F-11 tienen 40 hasta reprocesarlos. La misma duración entra en OR%/DR%/TRB% individuales.
 
 ---
 

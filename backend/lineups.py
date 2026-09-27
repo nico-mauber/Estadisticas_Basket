@@ -9,7 +9,9 @@ sdd/specs/04-on-off/spec.md RF-1. Semántica null de tasas: Feature 08.
 """
 from stats_engine import _safe_div
 
-PERIOD_LEN = {"REGULAR": 600, "OT": 300}  # segundos (10' por cuarto, 5' por prórroga FIBA)
+# Segundos por período: 10' por cuarto, 5' por prórroga. FIBA manda la prórroga como
+# periodType "OVERTIME" (con `period` reiniciado en 1), no "OT" (F-11 RF-15).
+PERIOD_LEN = {"REGULAR": 600, "OVERTIME": 300}
 
 
 def _agg(evs, team_code):
@@ -92,7 +94,7 @@ def build_segments(events, team_code, starters):
     suman ni se re-cuentan. Al cerrar cada período se vuelca su cola
     (`period_floor`, del mínimo alcanzado hasta 0:00) al tramo abierto → la suma
     de segundos de todos los tramos es EXACTA: PERIOD_LEN por período (600 regular
-    / 300 OT), y por lo tanto ON+OFF de un jugador = tiempo total de juego.
+    / 300 prórroga), y por lo tanto ON+OFF de un jugador = tiempo total de juego.
     """
     segments = []
     on_court = set(starters)

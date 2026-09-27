@@ -3,7 +3,7 @@
 > **ID:** F-11 · **Prioridad:** P1 · **Fase y orden:** 1·02
 > **Depende de:** C-11 ([../01-C-11-tratamiento-de-nulos/spec.md](../01-C-11-tratamiento-de-nulos/spec.md)) — incluye la precondición P-00 (integración del Bloque C de `dev`)
 > **Habilita:** C-09, C-08, C-02, T-05, C-03, T-01, F-13 (usa `admin_required`), F-16, A-12, A-01, T-03, F-14
-> **Estado:** Borrador (agente) — pendiente de revisión humana (gate Paso 1)
+> **Estado:** Implementado — versión acotada decidida por el humano (ver `progress.md` §Alcance y `../../00-decisiones.md`)
 > **Fuente:** [Especificación v2](../../00-especificacion-cliente-v2.md) §4 · F-11 (y §1.3 S1 · Datos) · Arquitectura [§1.1, §1.2, §1.5, §1.6, §3.1, §3.14, §3.21, §4, §5, §6, §9.2 I-01/I-14/I-15/I-18](../../00-arquitectura-transversal.md)
 
 ## 0. Contexto y situación actual

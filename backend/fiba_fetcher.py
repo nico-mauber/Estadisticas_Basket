@@ -10,7 +10,6 @@ Strategy:
 import re
 import json
 import urllib.request
-import urllib.error
 try:
     from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
     _PLAYWRIGHT_AVAILABLE = True
@@ -42,7 +41,7 @@ _HEADERS = {
 }
 
 
-def _extract_game_id(url: str) -> str:
+def extract_game_id(url: str) -> str:
     """Extract numeric game ID from a FIBA LiveStats URL."""
     m = re.search(r"/(\d{5,})/", url)
     if m:
@@ -52,7 +51,7 @@ def _extract_game_id(url: str) -> str:
 
 def _data_url(url: str) -> str:
     """Convert a bs.html URL to its data.json URL."""
-    game_id = _extract_game_id(url)
+    game_id = extract_game_id(url)
     m = re.match(r"https?://([^/]+)", url)
     if not m or m.group(1) != _ALLOWED_HOST:
         raise ValueError(
@@ -207,51 +206,65 @@ def _validate_game(game: dict) -> None:
         raise FibaSchemaError("Datos incompletos: no se importó ningún jugador.")
 
 
-def fetch_game_data(url: str) -> dict:
-    """
-    Main entry point. Accepts any FIBA LiveStats bs.html URL.
-    Returns a normalised game dict ready for DB insertion.
-    """
-    data_url = _data_url(url)
-
-    # Try direct HTTP first (faster, no browser overhead)
-    raw = None
+def _download(data_url: str, referer: str) -> dict:
+    """data.json por urllib; Playwright solo como respaldo (no existe en Render)."""
     try:
-        raw = _fetch_direct(data_url, referer=url)
-    except (urllib.error.HTTPError, urllib.error.URLError, Exception):
+        return _fetch_direct(data_url, referer=referer)
+    except Exception:
         pass
+    if not _PLAYWRIGHT_AVAILABLE:
+        raise RuntimeError("No se pudo obtener datos de FIBA LiveStats (urllib falló y Playwright no está disponible).")
+    return _fetch_playwright(data_url)
 
-    if raw is None:
-        if not _PLAYWRIGHT_AVAILABLE:
-            raise RuntimeError("No se pudo obtener datos de FIBA LiveStats (urllib falló y Playwright no está disponible).")
-        raw = _fetch_playwright(data_url)
 
+def fetch_raw(url: str) -> tuple[dict, dict]:
+    """Descarga el JSON crudo de un partido y la info de su página (fecha + competencia,
+    que no vienen en data.json). Devuelve (raw, page_info). Lo archiva ingest.py (F-11)."""
+    raw = _download(_data_url(url), referer=url)
     _validate_raw(raw)                     # structural guard (clear early error)
-    game = _parse_fiba_json(raw, url)
+    return raw, _fetch_page_info(url)
+
+
+def fetch_raw_by_id(game_id: str) -> dict:
+    """JSON crudo por id de partido, para reprocesar partidos importados sin URL archivada."""
+    if not re.fullmatch(r"\d{5,}", str(game_id)):
+        raise ValueError(f"Id de partido inválido: {game_id}")
+    raw = _download(f"{_ALLOWED_BASE}/data/{game_id}/data.json",
+                    referer=f"{_ALLOWED_BASE}/u/FUBB/{game_id}/bs.html")
+    _validate_raw(raw)
+    return raw
+
+
+def parse_game(raw: dict, game_id: str, page_info: dict | None = None) -> dict:
+    """JSON crudo → dict normalizado listo para persistir. Puro: no accede a la red, así se
+    puede re-ejecutar sobre el JSON archivado (reproceso, F-11)."""
+    game = _parse_fiba_json(raw, game_id)
     _validate_game(game)                   # value guard (catches silent key drift)
-
-    # Date + competition aren't in data.json — scrape them from the HTML page
-    if not game.get("date") or not game.get("competition"):
-        info = _fetch_page_info(url)
-        if not game.get("date"):
-            game["date"] = info["date"]
-        if not game.get("competition"):
-            game["competition"] = info["competition"]
-
+    info = page_info or {}
+    if not game.get("date"):
+        game["date"] = info.get("date", "")
+    if not game.get("competition"):
+        game["competition"] = info.get("competition", "")
     return game
+
+
+def fetch_game_data(url: str) -> dict:
+    """Descarga y parsea un partido desde su URL de FIBA LiveStats (bs.html)."""
+    raw, page_info = fetch_raw(url)
+    return parse_game(raw, extract_game_id(url), page_info)
 
 
 # ── Parser ────────────────────────────────────────────────────────────────
 
-def _parse_fiba_json(raw: dict, source_url: str = "") -> dict:
+def _parse_fiba_json(raw: dict, game_id: str) -> dict:
     """
     Normalise FIBA LiveStats data.json into a flat game dict.
     Verified key structure from live FUBB data:
       - Team totals are flat on the team dict with prefix tot_s*
       - Player stats are flat on the player dict with prefix s*
       - Players stored under tm[n]['pl'][player_id]
+      - Shot coordinates under tm[n]['shot'][k] (x, y, actionNumber)
     """
-    game_id = _extract_game_id(source_url) if source_url else raw.get("gid", "unknown")
 
     game = {
         "game_id":     game_id,
@@ -380,56 +393,43 @@ def _parse_fiba_json(raw: dict, source_url: str = "") -> dict:
                 if jersey:
                     shirt_to_name[(tno, jersey)] = full_name
 
-    # Prefer top-level shot array (has x/y coordinates); fall back to pbp (no coordinates)
-    shot_array = raw.get("shot") or []
-    if shot_array:
-        for shot in shot_array:
-            if not isinstance(shot, dict):
-                continue
-            action = shot.get("actionType") or ""
-            if action not in ("2pt", "3pt"):
-                continue
-            s_tno  = int(shot.get("tno") or 0)
-            shirt  = str(shot.get("shirtNumber") or "")
-            player = shirt_to_name.get((s_tno, shirt)) or shot.get("player") or ""
-            tc     = tno_to_code.get(s_tno, "")
-            if not tc:
-                continue
-            game["shots"].append({
-                "team_code":     tc,
-                "player_name":   player,
-                "x":             float(shot.get("x") or 0),
-                "y":             float(shot.get("y") or 0),
-                "made":          int(shot.get("r") or 0),      # 'r' in shot array (not 'success')
-                "action_type":   action,
-                "sub_type":      shot.get("subType") or "",
-                "period":        int(shot.get("per") or 0),    # 'per' in shot array (not 'period')
-                "action_number": int(shot.get("actionNumber") or 0),
-            })
-    else:
-        for shot in raw.get("pbp", []):
-            if not isinstance(shot, dict):
-                continue
-            action = shot.get("actionType") or ""
-            if action not in ("2pt", "3pt"):
-                continue
-            s_tno  = int(shot.get("tno") or 0)
-            shirt  = str(shot.get("shirtNumber") or "")
-            player = shirt_to_name.get((s_tno, shirt)) or shot.get("player") or ""
-            tc     = tno_to_code.get(s_tno, "")
-            if not tc:
-                continue
-            game["shots"].append({
-                "team_code":     tc,
-                "player_name":   player,
-                "x":             0.0,
-                "y":             0.0,
-                "made":          int(shot.get("success") or 0),
-                "action_type":   action,
-                "sub_type":      shot.get("subType") or "",
-                "period":        int(shot.get("period") or 0),
-                "action_number": int(shot.get("actionNumber") or 0),
-            })
+    # Coordenadas reales: arreglo `shot` de cada equipo, unido al pbp por actionNumber.
+    # Cancha completa 0–100 (x a lo largo, y a lo ancho). Se guardan en court_x/court_y;
+    # x/y (legado) quedan en 0 hasta que C-03 clasifique zonas con esta geometría.
+    coords = {}
+    for t in teams_raw.values():
+        for sh in (t.get("shot") or []):
+            if isinstance(sh, dict) and sh.get("actionNumber") is not None and sh.get("x") is not None:
+                coords[_i(sh, ["actionNumber"])] = (float(sh["x"]), float(sh.get("y") or 0))
+
+    # Tiros: uno por evento 2pt/3pt del play-by-play
+    for shot in raw.get("pbp", []):
+        if not isinstance(shot, dict):
+            continue
+        action = shot.get("actionType") or ""
+        if action not in ("2pt", "3pt"):
+            continue
+        s_tno  = int(shot.get("tno") or 0)
+        shirt  = str(shot.get("shirtNumber") or "")
+        player = shirt_to_name.get((s_tno, shirt)) or shot.get("player") or ""
+        tc     = tno_to_code.get(s_tno, "")
+        if not tc:
+            continue
+        num = int(shot.get("actionNumber") or 0)
+        cx, cy = coords.get(num, (None, None))
+        game["shots"].append({
+            "team_code":     tc,
+            "player_name":   player,
+            "x":             0.0,
+            "y":             0.0,
+            "court_x":       cx,
+            "court_y":       cy,
+            "made":          int(shot.get("success") or 0),
+            "action_type":   action,
+            "sub_type":      shot.get("subType") or "",
+            "period":        int(shot.get("period") or 0),
+            "action_number": num,
+        })
 
     # Full play-by-play (ALL events) — base for lineups/on-off/clutch (Feature 02).
     # Independent of the shots extraction above (which only pulls 2pt/3pt).
@@ -452,6 +452,10 @@ def _parse_fiba_json(raw: dict, source_url: str = "") -> dict:
             "success":       _i(ev, ["success"]),
             "action_number": _i(ev, ["actionNumber"]),
         })
+
+    # Duración real: 40' + 5' por prórroga (FIBA: periodType "OVERTIME", period reinicia en 1)
+    overtimes = {ev["period"] for ev in game["pbp"] if ev["period_type"] == "OVERTIME"}
+    game["minutes"] = 40 + 5 * len(overtimes)
 
     # Cross-fill opponent stats
     if len(game["teams"]) == 2:

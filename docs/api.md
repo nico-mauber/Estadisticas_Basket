@@ -33,6 +33,10 @@ Todas las rutas bajo `/api/`. Respuestas en JSON. Errores retornan `{"error": "m
 >
 > **`ast_to` cambió de semántica**: era el promedio de los ratios por partido; ahora es el **acumulado de temporada** (`AST_total / TOV_total`), en equipo y en jugador. Un mismo jugador puede mostrar un valor distinto al de antes — el anterior era incorrecto. `null` si no hubo pérdidas (antes `99.0`). Ver `sdd/specs/15-metricas-jugador/`.
 
+> **Competencias en borrador (F-11).** Los partidos de una competencia con `status: "borrador"` no entran en **ninguna** respuesta de lectura (equipos, liga, jugadores, buscador, mapas de tiro, quintetos, ON/OFF, cierres) hasta publicarla. Solo se ven en `GET /api/games`, `GET /api/competitions?include_hidden=1` y `GET /api/data-quality` (sección Datos).
+
+> **Permisos de escritura (F-11).** Las rutas que modifican datos (`DELETE /api/games`, `PATCH /api/games/<id>`, `POST`/`PATCH /api/competitions…`, `POST /api/reprocess`) exigen además ser administrador: con `ADMIN_USERS` definida, solo esos usuarios; sin ella, todo usuario logueado. No admin → `403 {"error": "Tu usuario no tiene permiso para esta acción."}`. Importar no requiere admin.
+
 > **Nulos con razón (C-11).** `GET /api/team/<code>`, `GET /api/player/<team>/<name>` y `GET /api/search/players` agregan un mapa `null_reasons` `{clave: código}` que dice **por qué** vale `null` cada métrica nula. Solo lista claves cuyo valor es `null`; el valor sigue siendo `null`.
 > - Dónde: en `/api/team` y `/api/player`, `null_reasons` en la raíz explica `averages`, y cada entrada de `game_log[]` trae su propio `null_reasons`. En `/api/search/players`, cada fila trae el suyo.
 > - Códigos que se emiten hoy:
@@ -67,7 +71,9 @@ Importa un partido desde FIBA LiveStats.
   "teams": [
     { "code": "FUBB", "name": "Federación Uruguaya de Basketball" },
     { "code": "OPO", "name": "Oponente" }
-  ]
+  ],
+  "competition_id": 1,
+  "competition_label": "Liga Uruguaya de Basquetbol 2025/2026"
 }
 ```
 
@@ -75,13 +81,15 @@ Importa un partido desde FIBA LiveStats.
 - `400` — campo `url` ausente o vacío
 - `502` — FIBA LiveStats no respondió o datos inválidos
 
-**Comportamiento:** upsert (`ON CONFLICT DO UPDATE`) — importar el mismo partido dos veces es idempotente.
+**Comportamiento:** importar el mismo partido dos veces es idempotente: upsert del partido y reemplazo completo de sus equipos, jugadores, tiros y play-by-play. La competencia se resuelve por el texto de FIBA (se crea si no existe, estado `publicada`); una competencia asignada a mano se conserva. El JSON crudo queda archivado para reprocesar (F-11).
 
 ---
 
 ## GET `/api/games`
 
-Lista todos los partidos importados, ordenados por fecha descendente.
+Catálogo de partidos importados (incluye los de competencias en borrador), ordenados por fecha descendente.
+
+**Query params:** `?competition=<id>` (opcional) filtra por competencia; también acepta el texto de FIBA.
 
 **Response:**
 ```json
@@ -98,10 +106,31 @@ Lista todos los partidos importados, ordenados por fecha descendente.
     "home_score": 85,
     "away_score": 72,
     "minutes": 40,
-    "imported_at": "2024-03-16 10:30:00"
+    "imported_at": "2024-03-16 10:30:00",
+    "competition_id": 1,
+    "competition_label": "Liga FUBB 2024",
+    "competition_status": "publicada",
+    "ingest_version": 2,
+    "has_pbp": true,
+    "has_coords": true,
+    "needs_reprocess": false
   }
 ]
 ```
+
+- `competition` es el texto crudo de FIBA; `competition_id`/`competition_label` la competencia asignada.
+- `minutes`: 40 + 5 por prórroga (40 en partidos no reprocesados).
+- `needs_reprocess`: guardado con una versión de ingesta anterior a la vigente.
+
+---
+
+## PATCH `/api/games/<game_id>` — admin
+
+Reasigna un partido a otra competencia. La asignación se conserva al reimportar y reprocesar.
+
+**Request:** `{ "competition_id": 3 }` · **Response 200:** la fila del partido con `competition_id`/`competition_label`.
+
+**Errores:** `400` sin `competition_id` entero o competencia inexistente · `404` partido no encontrado.
 
 ---
 
@@ -278,7 +307,7 @@ Shot chart de **11 zonas** del jugador (ver clasificación en [database.md](data
 
 Por zona: `made`, `attempts`, `pct` (% acierto) y `pf` (puntos por intento = made × valor zona / attempts; `null` si 0 intentos).
 
-`has_coordinates` — `true` si al menos un tiro del jugador tiene coordenadas reales (`x!=0` o `y!=0`); `false` si todos son `x=0,y=0` (partido importado sin array `shot` de FIBA, caso típico de la competencia FUBB). El frontend usa este flag para elegir entre el chart de 11 zonas y el chart simplificado de 3 zonas (ver [frontend.md](frontend.md#shot-chart)).
+`has_coordinates` — `true` si al menos un tiro del jugador tiene `x!=0` o `y!=0`; hoy siempre `false`: las coordenadas reales se guardan aparte en `shots.court_x/court_y` (F-11) y el mapa las usará en C-03. El frontend usa este flag para elegir entre el chart de 11 zonas y el chart simplificado de 3 zonas (ver [frontend.md](frontend.md#shot-chart)).
 
 ### GET `/api/shots/<team_code>` (agregado del equipo)
 
@@ -441,9 +470,67 @@ Rendimiento del equipo con el jugador en cancha (**ON**) vs. en el banco (**OFF*
 
 ## GET `/api/competitions`
 
-Lista de competencias distintas (para los selectores de filtro por competencia — Feature 09).
+Competencias y temporadas (F-11). Una competencia **en una temporada** es el universo de cálculo. Sin parámetros devuelve solo las `publicada` (selectores); con `?include_hidden=1` también las `borrador` (sección Datos). Orden: último partido más reciente primero.
 
-**Response:** `["Liga Uruguaya de Basquetbol 2025/2026", ...]`
+**Response:**
+```json
+[{ "id": 1, "name": "Liga Uruguaya de Basquetbol", "season": "2025/2026",
+   "label": "Liga Uruguaya de Basquetbol 2025/2026", "status": "publicada",
+   "games": 13, "teams": 12, "first_date": "2025-10-03", "last_date": "2025-11-14" }]
+```
+
+> **Cambio de forma:** antes devolvía una lista de strings.
+
+### POST `/api/competitions` — admin
+`{ "name": "Liga de Ascenso", "season": "2026" }` → `201` con el objeto. `400` sin nombre · `409` ya existe (nombre + temporada, sin distinguir mayúsculas).
+
+### PATCH `/api/competitions/<id>` — admin
+Parcial: `{ "name"?, "season"?, "status"? }` con `status` ∈ `publicada` · `borrador`. `400` estado inválido · `404` · `409` duplicado.
+
+### POST `/api/competitions/<id>/merge` — admin
+`{ "source_id": 2 }`: los partidos y alias de la competencia 2 pasan a `<id>` y la 2 se borra. Una importación futura con el texto de la 2 queda en `<id>`. **Response:** `{ "ok": true, "target": {…}, "moved_games": 4, "moved_aliases": 1 }`. `409` fusionar consigo misma.
+
+---
+
+## GET `/api/data-quality`
+
+Informe de calidad de una competencia (F-11). **Query:** `?competition=<id>` (obligatorio).
+
+**Response:**
+```json
+{
+  "competition": { "id": 1, "label": "Liga de Ascenso 2026", "status": "borrador", "...": "..." },
+  "summary": { "games": 13, "incomplete_games": 1, "incomplete_ids": ["2849340"],
+               "ready_to_publish": false, "ingest_version": 2 },
+  "checks": {
+    "games_without_pbp":       { "status": "alerta", "count": 1, "counts_as_incomplete": true,
+                                 "items": [{ "game_id": "2849340", "date": "2026-06-10", "label": "A 81 – 77 B" }] },
+    "games_missing_data":      { "...": "sin los dos equipos, sin jugadores o sin fecha" },
+    "games_needing_reprocess": { "...": "ingest_version anterior a la vigente" },
+    "pbp_box_mismatch":        { "...": "PTS / TCi / TLi del pbp ≠ box; items con team_code y detail" },
+    "lineup_inconsistencies":  { "...": "sin 5 titulares, tramos que no suman 60 × minutos o sin 5 en cancha" },
+    "games_without_coords":    { "counts_as_incomplete": false },
+    "null_fields":             { "items": [{ "table": "player_game_stats", "field": "position",
+                                             "label": "Posición del jugador", "nulls": 18, "total": 312, "pct": 0.0577 }] },
+    "possible_duplicates":     { "items": [{ "team_code": "OMU", "norm_key": "a. caldas",
+                                             "variants": [{ "player_name": "A. Caldas", "games": 5 }] }] },
+    "possession_gaps":         { "status": "no_disponible", "count": null, "reason": "requiere_posesiones" }
+  }
+}
+```
+
+Un partido es **incompleto** si falla un chequeo con `counts_as_incomplete: true`; la competencia está lista para publicar si no tiene incompletos. `status` de cada chequeo: `ok` · `alerta` · `no_disponible`.
+
+---
+
+## POST `/api/reprocess` — admin
+
+Re-ejecuta la ingesta vigente sobre partidos ya importados: desde el JSON archivado, o desde FIBA (por id) si el partido se importó antes de que existiera el archivo. Idempotente; conserva la competencia asignada.
+
+- `{ "game_ids": [...] }` — hasta 10 partidos.
+- `{ "competition_id": 1, "offset": 0 }` — un lote de 10 de la competencia; el cliente repite con `next_offset` hasta que sea `null`.
+
+**Response:** `{ "processed": ["2849328", …], "failed": [{ "game_id": "…", "error": "motivo" }], "total": 13, "next_offset": 10 }`. Un partido fallido no corta el lote.
 
 ---
 
@@ -451,7 +538,7 @@ Lista de competencias distintas (para los selectores de filtro por competencia �
 
 Ranking de todos los equipos ordenado por OER descendente.
 
-**Query params:** `?competition=<c>` (opcional) — filtra el ranking y sus promedios a los partidos de esa competencia (Feature 09). Sin el parámetro, agrega todas las competencias. Equipos sin partidos en la competencia se omiten; competencia inexistente → `[]`.
+**Query params:** `?competition=<id>` (opcional; también acepta el texto de FIBA) — filtra el ranking y sus promedios a los partidos de esa competencia. Sin el parámetro, agrega todas las competencias publicadas. Equipos sin partidos en la competencia se omiten; competencia inexistente → `400`.
 
 **Response:**
 ```json
@@ -474,13 +561,13 @@ Ranking de todos los equipos ordenado por OER descendente.
 ]
 ```
 
-> **`competition` en game_log:** `GET /api/team/<code>` y `GET /api/player/<code>/<name>` incluyen `competition` en cada entrada de `game_log`, para que el frontend filtre por competencia y recompute los promedios client-side (Feature 09).
+> **Competencia en game_log:** `GET /api/team/<code>` y `GET /api/player/<code>/<name>` incluyen en cada entrada de `game_log` `competition` (texto de FIBA), `competition_id` y `competition_label`; el frontend filtra por `competition_id` y recompute los promedios client-side. El mapa `leagues` usa como clave el id de competencia (como string); `""` es el agregado. `GET /api/search/players` devuelve en `competitions[]` las etiquetas. El `game_log` de equipo está en orden cronológico.
 
 ---
 
 ## DELETE `/api/games`
 
-Borra uno o más partidos por `game_id`. El borrado es en cascada: elimina también sus `team_game_stats`, `player_game_stats` y `shots`.
+**Admin.** Borra uno o más partidos por `game_id`. El borrado es en cascada: elimina también sus `team_game_stats`, `player_game_stats`, `shots`, `pbp_events` y el JSON archivado.
 
 **Request body:**
 ```json
@@ -495,6 +582,7 @@ Borra uno o más partidos por `game_id`. El borrado es en cascada: elimina tambi
 **Errores:**
 - `400` — `game_ids[]` ausente o no es lista
 - `401` — sin sesión iniciada (ver [Autenticación](#autenticación))
+- `403` — el usuario no es administrador
 
 ---
 
@@ -522,10 +610,10 @@ Estado de auth + feature flags. Llamada por el SPA al arrancar. Siempre abierta.
 
 **Response:**
 ```json
-{ "authenticated": false, "user": null, "auth_required": true, "seed_enabled": false }
+{ "authenticated": false, "user": null, "auth_required": true, "seed_enabled": false, "is_admin": false }
 ```
 
-`seed_enabled` refleja `SEED_ENABLED` (reemplaza al antiguo `/api/config`).
+`seed_enabled` refleja `SEED_ENABLED` (reemplaza al antiguo `/api/config`). `is_admin`: puede modificar datos (ver permisos de escritura arriba); la UI oculta las acciones que no puede ejecutar.
 
 ---
 
