@@ -34,6 +34,8 @@ export const NULL_REASON_LABELS = {
   dnp:           "No jugó (DNP)",
   estimacion_invalida: "Estimación no válida: la muestra de minutos es demasiado chica",
   no_registrado: "La competencia no registra este dato. Si cambió, reimportá sus partidos",
+  sin_universo:  "Elegí una competencia para ver el promedio de liga",
+  sin_datos:     "Sin datos en la selección",
 };
 
 // "—" neutro con la razón en el title (se ve al pasar el cursor o con tap largo).

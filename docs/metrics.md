@@ -198,7 +198,7 @@ PTS/pos y sigue el mismo criterio. Se reproducen sumando el box score de la sele
 > el filtro del cliente lo recalcula con los mismos totales). En el jugador solo cuentan los partidos
 > **jugados** (un DNP no suma). La respuesta trae los totales que lo respaldan (`totals.ast`, `totals.tov`) y la
 > card los muestra: `1,48 (43/29)`. Vale `null` con razón `sin_perdidas` si `ΣPER = 0` y `0,00` si `ΣAS = 0` con
-> pérdidas. Sin `Ø` ni color de rendimiento hasta que exista un promedio de liga del mismo criterio (C-02).
+> pérdidas. El `Ø` y color de rendimiento vienen del promedio de liga de la competencia (C-02).
 > Ver `sdd/specs/15-metricas-jugador/` y `sdd/specs/v2/fase-1-confiabilidad/08-C-04-as-per/`.
 
 ---
@@ -241,6 +241,23 @@ Calculadas sobre las stats crudas del rival en ese partido:
 > partido y en el acumulado. Antes valían `99.0`, un número inventado que entraba en los promedios y
 > producía comparaciones imposibles ("↑ 9900.0%"). "Jugó sin perder la pelota" se lee en PER = 0.
 > Ver `sdd/specs/v2/fase-1-confiabilidad/01-C-11-tratamiento-de-nulos/`.
+
+---
+
+## Promedio de liga (C-02)
+
+El `Ø` de cada métrica es la **media de las entidades** de la competencia seleccionada (DA-08): cada
+equipo o jugador contribuye con UN valor (el de todos sus partidos), no ponderado por cantidad de
+partidos. Para equipos, la población son los equipos con ≥ 1 partido en la competencia; para jugadores,
+los que jugaron ≥ 1 partido (DNP no cuenta). `best` es el mejor valor de la población.
+
+```
+Ø(métrica) = Σ valor_entidad / N_entidades_con_dato
+```
+
+No se recalcula con el filtro de últimos N: depende solo de la competencia. Sin competencia seleccionada
+(`all`), el `Ø` es `null` con razón `sin_universo`. Implementado en `population.league_averages` →
+`stats_engine.league_averages`. Ver `sdd/specs/v2/fase-1-confiabilidad/02-C-02-promedios-de-liga/`.
 
 ---
 

@@ -76,12 +76,23 @@ Informe de calidad de una competencia (F-11): partidos sin pbp, con datos básic
 ### `identity.py`
 Identidad de jugador (C-08): una ficha por jugador y equipo (`players`), clave `(equipo, nombre normalizado)`. `resolve_player_id` crea o encuentra la ficha; `assign_game(game_id)` la asocia a cada fila de un partido (la llama `ingest.persist_game`) y `backfill_player_ids()` completa el histórico al arrancar (idempotente). `aliases`/`name_index`/`canonicalize_pbp_games` permiten consultar por nombre en cualquier grafía sobre `shots` y `pbp_events`, que guardan el nombre crudo. `duplicate_candidates` alimenta el panel de calidad y `merge_players` es la fusión manual de un administrador. `norm_name`/`resolve_identity` (puras) siguen en `stats_engine.py`.
 
+### `context.py`
+Contexto de una petición de perfil (C-02): `Context` dataclass (`competition_id`, `competition_all`, `last`). `parse_context(args)` interpreta los query params `?competition=<id>|all&last=<n>`; `filter_games` aplica el filtro de competencia y últimos N sobre las filas de una entidad; `context_echo` arma el eco de la selección (§7.5). `without_last(ctx)` devuelve el mismo contexto sin el filtro last (el promedio de liga no depende del subconjunto en pantalla).
+
+### `repository.py`
+Acceso de lectura a los partidos (C-02): carga en bloque (una consulta por tabla por petición, sin N+1) las filas de equipo y de jugador de los partidos visibles. `resolve_competition(param, entity, config)` resuelve la competencia de la petición (parámetro → entidad → configuración F-13 → última de la liga → ninguna). `team_game_rows(comp_id)` / `player_game_rows(comp_id)` devuelven dicts planos listos para `stats_engine`. Memoización por petición vía `flask.g`.
+
+### `population.py`
+Población de liga y perfiles de equipo y de jugador (C-02). La población de una competencia son sus entidades con un valor por métrica (todos sus partidos, misma agregación que el perfil). `league_averages` calcula el `Ø` como media de esos valores (DA-08: cada entidad una vez, no ponderada por partidos). `team_profile` / `player_profile` arman la respuesta de `GET /api/team` y `GET /api/player` para la selección activa: `app.py` solo parsea el contexto y delega. Sin competencia (`all`), cada métrica es `Ø —` con razón `sin_universo`.
+
 ### `stats_engine.py`
 Calcula métricas avanzadas on-the-fly en cada request (no se persisten en DB).
 
 - `calc_team_stats(t, opp)` — recibe stats crudas del equipo y del rival, retorna ~35 métricas.
 - `calc_player_stats(p, team_pos)` — versión jugador.
-- `league_averages(all_stats)` — media y mejor valor de la liga para cada métrica.
+- `aggregate_games(per_game, keys, entity_type)` — agrega partidos: promedios (pooled para tasas, DA-02), totales y razones de nulos.
+- `league_averages(member_values, keys)` — media y mejor valor de la liga para cada métrica (DA-08: media de entidades, no de partidos).
+- `metric_keys(entity_type)` — claves de métricas de equipo o jugador.
 
 Ver [metrics.md](metrics.md) para fórmulas completas.
 
@@ -116,10 +127,12 @@ Ver [database.md](database.md) para esquema completo.
         │
         ▼
 5. GET /api/team/<code> (u otro endpoint)
-   ├─ Lee raw stats de SQLite
-   ├─ stats_engine.calc_team_stats() por cada partido
-   ├─ stats_engine.league_averages() con todos los partidos
-   └─ Retorna JSON con averages + game_log + league context
+   ├─ context.parse_context() → competencia + últimos N
+   ├─ population.team_profile() → perfil completo
+   │   ├─ repository.team_game_rows() → filas en bloque
+   │   ├─ stats_engine.aggregate_games() → promedios pooled
+   │   └─ population.league_summary() → Ø de la competencia (DA-08)
+   └─ Retorna JSON con averages + game_log + league + context
         │
         ▼
 6. frontend/js/app.js renderiza tablas con color-coding

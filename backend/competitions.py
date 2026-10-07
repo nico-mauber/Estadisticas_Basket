@@ -134,14 +134,17 @@ def _stats() -> dict:
     return out
 
 
-def list_competitions(include_hidden: bool = False) -> list[dict]:
+def list_competitions(include_hidden: bool = False, default_id: int | None = None) -> list[dict]:
     """Competencias ordenadas por último partido (más reciente primero). Sin `include_hidden`,
-    solo las publicadas (selectores de Liga/Equipo/Comparar/Jugador)."""
+    solo las publicadas (selectores de Liga/Equipo/Comparar/Jugador). `default_id` marca con
+    `is_default` la competencia por defecto (la decide `repository.resolve_competition`)."""
     q = Competition.query
     if not include_hidden:
         q = q.filter(Competition.status == "publicada")
     stats = _stats()
     items = [to_dict(c, stats) for c in q.all()]
+    for it in items:
+        it["is_default"] = default_id is not None and it["id"] == default_id   # C-02
     items.sort(key=lambda c: (c["last_date"] or "", c["label"]), reverse=True)
     return items
 

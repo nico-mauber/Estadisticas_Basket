@@ -38,7 +38,7 @@ La navegación es por `#hash` o botones de tab. No hay routing del servidor.
 
 **AS/PER (C-04):** la caja "AS/PER" (`_astPerBox`, con `title` "Asistencias sobre pérdidas, acumulado de la selección (PER = pérdidas)") está en la card "Rebotes & Misc" de Equipo y en "Rebotes & distribución" de Jugador y muestra `ΣAS/ΣPER` con los totales debajo (`1,48 (43/29)`); sin pérdidas es "—" con `title` "Sin pérdidas: el cociente no está definido". No muestra `Ø` ni color mientras no exista un promedio de liga del mismo criterio (C-02). Los game logs de Equipo y Jugador tienen la columna "AS/PER" (`title` "AS/PER del partido"), Comparar equipos la fila "AS/PER" y el Buscador la columna "AS/PER" (ordenable, nulos al final).
 
-**Filtro por competencia (Feature 09, por id desde F-11):** helpers compartidos `_logComps`/`_filterByComp`/`_compOptions`, que trabajan con `competition_id` y la etiqueta `competition_label` (el texto de FIBA puede renombrarse o fusionarse). Las competencias en borrador no aparecen. Selectores en **Liga** (refetch `api.league(comp)`), **Equipo** (`#team-comp`, filtra el `game_log` y recomputa con `_computeAvg`; compone con las pills Últ. N), **Comparar** (`#compare-comp`) y **Jugador** (`#player-comp`, `renderPlayer`→`_renderPlayerContent`). Cada `<select>` se oculta si hay ≤1 competencia. `_computeAvg` incluye las keys de jugador `uso_pct`/`ast_to`.
+**Selección por competencia (C-02, reemplaza Feature 09 client-side):** la selección se resuelve en el backend via query params `?competition=<id>&last=<n>`. El frontend envía la selección y recibe el perfil filtrado con promedios, league y context. Selectores: **Liga** (refetch `api.league(comp)`), **Equipo** (`_teamComp` + `_teamLastN`, refetch con `_reloadTeam()`), **Comparar** (`#compare-comp`, ambos equipos con misma competencia) y **Jugador** (`_playerComp`, refetch con `_reloadPlayer()`). `_compOptions(comps, selected, allLabel, allValue)` arma las `<option>` del selector desde `data.competitions`. Helpers eliminados: `_computeAvg`, `_filterByComp`, `_filteredLog`, `_logComps`.
 
 **ON/OFF — minutos:** el panel muestra `N' en cancha` (tiempo de juego del equipo con el jugador en cancha/banca). La suma de segundos por partido es exacta (arreglado el doble-conteo por reloj no-monótono en `build_segments`).
 
@@ -68,8 +68,8 @@ api.login(user, password)   // POST   /api/login
 api.logout()                // POST   /api/logout
 api.me()                    // GET    /api/me  (auth + feature flags)
 api.importGame(url)         // POST   /api/import
-api.team(code)              // GET    /api/team/<code>
-api.players(code) / api.player(code, name) / api.playerShots(code, name) / api.teamShots(code)  // teamShots = mapa agregado del equipo
+api.team(code, params?)     // GET    /api/team/<code>[?competition=&last=] (C-02)
+api.players(code, params?) / api.player(code, name, params?) / api.playerById(id, params?) / api.playerShots(code, name) / api.teamShots(code)  // params: {competition, last}
 api.searchPlayers()         // GET /api/search/players (buscador avanzado)
 api.clutchTeam(team, comp?) // GET /api/clutch/<team>[?competition=] (cierres del equipo: agregado + por partido)
 api.lineup(team, players[]) // GET /api/lineup/<team>?players=A|B|C (combinaciones 3-5)
@@ -97,7 +97,7 @@ Wrappers sobre Chart.js v4.
 | `drawRadar(canvasId, averages, league, label)` | Radar | Equipo vs promedio de liga (vista equipo) |
 | `drawCompareRadar(canvasId, avgA, avgB, league, labelA, labelB)` | Radar | **Tres polígonos**: equipo A (naranja), equipo B (azul), promedio liga (gris punteado) |
 | `drawEvolution(canvasId, gameLog, leagueOerAvg)` | Línea | Evolución de OER del equipo partido a partido vs media liga |
-| `drawPlayerEvolution(canvasId, gameLog)` | Línea | Evolución de métricas del jugador partido a partido |
+| `drawPlayerEvolution(canvasId, gameLog, leagueOerAvg)` | Línea | Evolución de métricas del jugador partido a partido + línea Ø OER de liga (C-02) |
 | `resetZoom(canvasId)` | Util | Reset zoom del scatter |
 
 **Plugins cargados desde CDN en `index.html`:**
@@ -116,7 +116,7 @@ Lógica principal. Funciones clave:
 | `_renderLeague()` | Renderiza tabla de liga con sort clickeable |
 | `_renderTeamContent(data)` | Record card + Four Factors + métricas + shot chart + game log |
 | `_renderPlayerContent(data)` | Métricas jugador + shot chart por zonas + game log |
-| `_computeAvg(gameLog)` | Promedia un array de partidos (filtro de competencia / últimos N). Excluye las entradas con `played === false` (DNP). `def_to_ratio` y `ast_to` (AS/PER) son acumulados (pooled): `ΣAS/ΣPER` de la selección, con `null` y razón `sin_perdidas` sin pérdidas; devuelve además `totals {ast, tov}` del subconjunto. Devuelve además `null_reasons` para las claves nulas (la razón común de los partidos, o `sin_intentos`) |
+| `_reloadTeam()` / `_reloadPlayer()` | Refetch del perfil con la selección activa (`competition`, `last`) via query params (C-02). El backend resuelve la competencia y devuelve promedios, league y context; el frontend no recalcula |
 | `_cmpNullsLast(av, bv, dir)` | **Comparador único de tablas ordenables.** Ver "Orden de nulos" abajo |
 | `_fourFactorsCard(av, name)` | Tabla Four Factors equipo vs rival con color-coding |
 | `_recordCard(record, name)` | Display W/L con porcentaje, local, visitante |
@@ -146,8 +146,9 @@ la evolución queda como hueco.
 ### Contexto de las cards de stat
 
 La card muestra el valor de la entidad y, debajo, `Ø {promedio de liga}` — el de la **competencia
-seleccionada**, tomado de `data.leagues[compActiva]`. El filtro de últimos N cambia el valor de la
-entidad pero **no** el `Ø`.
+seleccionada**, tomado de `data.league` (C-02: un solo objeto, ya filtrado por el backend). El filtro
+de últimos N cambia el valor de la entidad pero **no** el `Ø`. Sin competencia (`all`), `Ø` muestra
+"—" con razón `sin_universo`. Sin datos en la población, razón `sin_datos`.
 
 El indicador `↑ {mejor de la liga}` fue **eliminado**: era el máximo de la población sin mínimo de
 muestra, y producía valores imposibles (`↑ 9900.0%`). Su reemplazo es el percentil de T-01. No
@@ -204,7 +205,7 @@ El mismo mapa se muestra en dos lugares: en la vista **Jugador** (`renderPlayer`
 
 ## Service Worker (`sw.js`)
 
-Cache name: `smart-basket-v13`
+Cache name: `smart-basket-v17`
 
 **Estrategia:**
 - `install`: pre-cachea los archivos estáticos listados en `STATIC[]`

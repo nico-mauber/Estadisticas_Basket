@@ -20,13 +20,17 @@ Todas las rutas bajo `/api/`. Respuestas en JSON. Errores retornan `{"error": "m
 > - `position` es la más frecuente entre las no vacías; a igual frecuencia, la más reciente. `position_group` la agrupa: `G` = G/PG/SG, `F` = F/SF/PF, `C` = C; `null` sin posición.
 > - La normalización es tipográfica, no semántica: `J. Feldeine` y `Jerome Feldeine` **no** se unen solos; el panel de calidad los lista como candidatos y un administrador los fusiona (`POST /api/identity/merge`). La competencia no entra en la clave.
 
-> **Promedios de liga por competencia.** `GET /api/team/<code>` y `GET /api/player/<team>/<name>` devuelven `leagues`: un mapa `{"<competencia>": {…}}` con el promedio de liga de cada competencia en que la entidad tiene partidos, más la clave `""` con el agregado de todas. El campo `league` se conserva y equivale a `leagues[""]`.
-> - El promedio es la media **sobre todos los partidos** de esa competencia (ponderada: un equipo con 2 partidos aporta el doble que uno con 1), no la media de los promedios por equipo.
+> **Selección de competencia y promedios de liga (C-02).** `GET /api/team/<code>` y `GET /api/player/…` aceptan `?competition=<id>|all&last=<n>`. La competencia se resuelve en el backend (parámetro → entidad → configurada F-13 → última de la liga). La respuesta trae UN `league` con el promedio de la competencia seleccionada, no un mapa por competencia.
+> - El `Ø` es la media **de las entidades** de la competencia (DA-08: cada equipo/jugador una vez, con todos sus partidos), no ponderada por cantidad de partidos.
 > - `avg` y `best` valen `null` —no `0`— cuando ninguna observación de la población tiene dato.
-> - El promedio de liga **no** se recalcula con el subconjunto filtrado en pantalla (últimos N partidos): solo depende de la competencia seleccionada.
+> - `league_meta` describe la población (size, criterion, competition_id/label).
+> - Sin competencia (`competition=all`), `league` tiene todas las métricas con `avg: null` y razón `sin_universo`.
+> - `context` (eco de la selección): `competition {id, label}`, `applied {last}`, `games_used`, `games_total`, `label`.
+> - `competitions`: competencias de la entidad, `[{id, label, games}]`, para el selector.
+> - El `Ø` **no** se recalcula con el subconjunto filtrado en pantalla (últimos N): solo depende de la competencia seleccionada.
 > - `best` ya no se consume en la UI (el indicador `↑` se retiró); se conserva en la respuesta hasta que T-01 rehaga el bloque de contexto.
 >
-> Ver `sdd/specs/14-promedios-de-liga/`.
+> Ver `sdd/specs/v2/fase-1-confiabilidad/02-C-02-promedios-de-liga/`.
 
 > **Métricas de jugador por posesión y por minuto.** `game_log[]` y `averages` de los endpoints de jugador incluyen `as_pos`, `tov_pos` (`PER/pos`), `pts_pos`, `orb_min` y `drb_min`; y `or_pct`/`dr_pct`/`trb_pct`, que antes estaban **ausentes** y ahora traen el valor de la fórmula individual (ver `docs/metrics.md`). Todos pueden ser `null` con denominador 0 o sin datos del rival. **Agregación (C-01):** en `averages` (perfil y Buscador) las ocho tasas y `oer` son el **cociente de los totales de los partidos jugados** (ver `docs/metrics.md`), no la media de las tasas por partido; en `game_log[]` valen lo de ese partido. Una tasa por posesión nunca es negativa (`POS ≤ 0` → `null`, `sin_intentos`) y un `or_pct`/`dr_pct`/`trb_pct` > 100 % tampoco se devuelve (`null`, `estimacion_invalida`).
 >
@@ -149,9 +153,13 @@ Lista todos los equipos con conteo de partidos.
 
 ## GET `/api/team/<team_code>`
 
-Stats completas del equipo: promedios, record, contexto de liga y game log.
+Stats completas del equipo para la selección activa (C-02): promedios, record, promedio de liga de la competencia, contexto y game log.
 
 **Parámetros:** `team_code` — case-insensitive (se normaliza a mayúsculas).
+
+**Query params (C-02):**
+- `competition` — id de competencia, texto de FIBA (legado) o `all`. Ausente = la del partido más reciente de la entidad (DA-14).
+- `last` — entero > 0. Los N partidos más recientes de la entidad en la competencia.
 
 **Response:**
 ```json
@@ -159,71 +167,48 @@ Stats completas del equipo: promedios, record, contexto de liga y game log.
   "team_code": "FUBB",
   "team_name": "Federación Uruguaya",
   "games": 12,
+  "context": {
+    "competition": { "id": 1, "label": "Liga de Ascenso 2026" },
+    "applied": { "last": 5 },
+    "games_used": 5, "games_total": 12,
+    "games_excluded": {}, "ignored": [],
+    "label": "Liga de Ascenso 2026 · Últimos 5"
+  },
+  "competitions": [
+    { "id": 1, "label": "Liga de Ascenso 2026", "games": 12 }
+  ],
   "record": {
-    "wins": 8,
-    "losses": 4,
-    "win_pct": 0.667,
-    "home": "5-1",
-    "away": "3-3"
+    "wins": 8, "losses": 4, "win_pct": 0.667,
+    "home": "5-1", "away": "3-3"
   },
-  "averages": {
-    "oer": 1.05,
-    "der": 0.98,
-    "net_rating": 0.07,
-    "efg_pct": 0.512,
-    "ts_pct": 0.548,
-    "fg2_pct": 0.48,
-    "fg3_pct": 0.34,
-    "ft_pct": 0.72,
-    "ft_rate": 0.31,
-    "ft_rate_report": 0.22,
-    "pps": 1.12,
-    "fg2_uso": 0.62,
-    "fg3_uso": 0.38,
-    "or_pct": 0.29,
-    "dr_pct": 0.71,
-    "trb_pct": 0.50,
-    "to_pct": 0.14,
-    "to_ratio": 0.13,
-    "as_pct": 0.55,
-    "ast_ratio": 0.18,
-    "pace": 68.5,
-    "pts": 72.3,
-    "possessions": 68.2,
-    "plays": 75.1,
-    "peso_1p": 0.18,
-    "peso_2p": 0.52,
-    "peso_3p": 0.30,
-    "opp_efg_pct": 0.48,
-    "opp_ts_pct": 0.52,
-    "opp_to_pct": 0.16,
-    "opp_ft_rate": 0.28,
-    "stocks": 9.2,
-    "def_playmaking": 4.1,
-    "def_to_ratio": 3.2,
-    "fgm": 25, "fga": 55, "...": "..."
-  },
+  "averages": { "oer": 1.05, "...": "..." },
+  "null_reasons": { "...": "..." },
+  "totals": { "ast": 43, "tov": 29, "...": "..." },
   "league": {
-    "oer": { "avg": 1.0, "best": 1.15 },
+    "oer": { "avg": 1.0, "best": 1.15, "reason": null, "n": 14 },
     "...": "..."
+  },
+  "league_meta": {
+    "entity_type": "team", "competition_id": 1,
+    "competition_label": "Liga de Ascenso 2026",
+    "size": 14, "criterion": "media de los equipos de la competencia (cada uno con todos sus partidos)"
   },
   "game_log": [
     {
-      "game_id": "12345",
-      "date": "2024-03-15",
-      "opponent": "Equipo B",
-      "opponent_code": "EQB",
+      "game_id": "12345", "date": "2024-03-15",
+      "competition": "Liga de Ascenso", "competition_id": 1,
+      "competition_label": "Liga de Ascenso 2026",
+      "opponent": "Equipo B", "opponent_code": "EQB",
       "home_away": "L",
-      "oer": 1.08,
-      "pts": 85,
-      "opp_pts": 72,
+      "oer": 1.08, "pts": 85, "opp_pts": 72,
+      "null_reasons": {},
       "...": "todas las métricas del partido"
     }
   ]
 }
 ```
 
-**Errores:** `404` — equipo no encontrado.
+**Errores:** `400` — competencia inexistente o `last` inválido · `404` — equipo no encontrado.
 
 ---
 
@@ -247,7 +232,11 @@ Plantel del equipo: una entrada por **ficha** de jugador, ordenado por USO% desc
 
 ## GET `/api/player/<team_code>/<player_name>`
 
-Stats completas del jugador. Acepta cualquier grafía del nombre (ver nota de identidad) y devuelve la ficha vigente, con `player_id`.
+Stats completas del jugador para la selección activa (C-02). Acepta cualquier grafía del nombre (ver nota de identidad) y devuelve la ficha vigente, con `player_id`.
+
+**Query params (C-02):**
+- `competition` — id de competencia, texto de FIBA (legado) o `all`. Ausente = la del partido más reciente de la entidad.
+- `last` — entero > 0. Los N partidos más recientes jugados de la entidad en la competencia.
 
 **Response:**
 ```json
@@ -259,41 +248,41 @@ Stats completas del jugador. Acepta cualquier grafía del nombre (ver nota de id
   "team_code": "FUBB",
   "team_name": "Federación Uruguaya",
   "games": 10,
-  "averages": {
-    "oer": 1.02,
-    "efg_pct": 0.49,
-    "ts_pct": 0.52,
-    "ft_rate": 0.35,
-    "ft_rate_report": 0.24,
-    "pps": 1.05,
-    "ppp": 0.88,
-    "fg2_uso": 0.60,
-    "fg3_uso": 0.40,
-    "uso_pct": 0.22,
-    "ast_to": 2.1,
-    "stocks": 2.3,
-    "def_playmaking": 0.8,
-    "physical_impact": 7.4,
-    "reb_share": 0.18,
-    "oreb_share": 0.12,
-    "dreb_share": 0.22,
-    "pts": 14.2,
+  "context": {
+    "competition": { "id": 1, "label": "Liga de Ascenso 2026" },
+    "applied": {},
+    "games_used": 10, "games_total": 10,
+    "games_excluded": { "dnp": 2 }, "ignored": [],
+    "label": "Liga de Ascenso 2026"
+  },
+  "competitions": [
+    { "id": 1, "label": "Liga de Ascenso 2026", "games": 10 }
+  ],
+  "averages": { "oer": 1.02, "...": "..." },
+  "null_reasons": { "...": "..." },
+  "totals": { "ast": 43, "tov": 29, "...": "..." },
+  "league": {
+    "oer": { "avg": 0.97, "best": 3.0, "reason": null, "n": 138 },
     "...": "..."
   },
-  "league": { "...": "promedios de liga" },
-  "game_log": [{ "...": "un entry por partido" }]
+  "league_meta": {
+    "entity_type": "player", "competition_id": 1,
+    "competition_label": "Liga de Ascenso 2026",
+    "size": 138, "criterion": "media de los jugadores de la competencia (cada uno con todos sus partidos jugados)"
+  },
+  "game_log": [{ "...": "un entry por partido, con played y null_reasons" }]
 }
 ```
 
-**Errores:** `404` — `{"error": "Jugador no encontrado"}`.
+**Errores:** `400` — competencia inexistente o `last` inválido · `404` — `{"error": "Jugador no encontrado"}`.
 
 ---
 
 ## GET `/api/player/<player_id>`
 
-Mismo contenido que `GET /api/player/<team_code>/<player_name>` (incluido `player_id`, `position`, `position_group`), pero por identificador de ficha. Si la ficha fue absorbida por otra (fusión), responde la vigente: el `player_id` de la respuesta es el canónico. Es la ruta que usan el buscador y el plantel para abrir el perfil.
+Mismo contenido que `GET /api/player/<team_code>/<player_name>` (incluido `player_id`, `position`, `position_group`, `context`, `competitions`, `league`, `league_meta`), pero por identificador de ficha. Acepta los mismos query params `competition` y `last` (C-02). Si la ficha fue absorbida por otra (fusión), responde la vigente: el `player_id` de la respuesta es el canónico. Es la ruta que usan el buscador y el plantel para abrir el perfil.
 
-**Errores:** `404` — `{"error": "Jugador no encontrado"}`.
+**Errores:** `400` — competencia inexistente o `last` inválido · `404` — `{"error": "Jugador no encontrado"}`.
 
 ---
 
@@ -513,8 +502,11 @@ Competencias y temporadas (F-11). Una competencia **en una temporada** es el uni
 ```json
 [{ "id": 1, "name": "Liga Uruguaya de Basquetbol", "season": "2025/2026",
    "label": "Liga Uruguaya de Basquetbol 2025/2026", "status": "publicada",
-   "games": 13, "teams": 12, "first_date": "2025-10-03", "last_date": "2025-11-14" }]
+   "games": 13, "teams": 12, "first_date": "2025-10-03", "last_date": "2025-11-14",
+   "is_default": true }]
 ```
+
+`is_default` (C-02): marca la competencia por defecto (la del partido más reciente de la liga, resolución de `repository.resolve_competition`). El frontend abre la vista Liga en esa competencia.
 
 > **Cambio de forma:** antes devolvía una lista de strings.
 
@@ -628,7 +620,7 @@ Ranking de todos los equipos ordenado por OER descendente.
 
 **Tabla general (C-09):** `games` (PJ), `wins` (PG), `losses` (PP), `table_points`, `pts_for` (PF) y `pts_against` (PC) salen de los mismos partidos que el ranking. `table_points = 2 × PG + 1 × PP` y `standings_pos` es la posición en la tabla: más puntos primero, desempate por diferencia `pts_for − pts_against`. Puntos y desempate viven en un solo lugar, `stats_engine.WIN_POINTS` / `LOSS_POINTS` / `standings_sort_key` (DA-31; F-13 los hará configurables). Un marcador igualado cuenta como derrota, para que `wins + losses == games` siempre.
 
-> **Competencia en game_log:** `GET /api/team/<code>` y `GET /api/player/<code>/<name>` incluyen en cada entrada de `game_log` `competition` (texto de FIBA), `competition_id` y `competition_label`; el frontend filtra por `competition_id` y recompute los promedios client-side. El mapa `leagues` usa como clave el id de competencia (como string); `""` es el agregado. `GET /api/search/players` devuelve en `competitions[]` las etiquetas. El `game_log` de equipo está en orden cronológico.
+> **Competencia en game_log:** `GET /api/team/<code>` y `GET /api/player/…` incluyen en cada entrada de `game_log` `competition` (texto de FIBA), `competition_id` y `competition_label`. Desde C-02 la selección (competencia + últimos N) se resuelve en el backend: el frontend pide la competencia como query param y recibe solo los partidos filtrados, sin recalcular promedios client-side. `GET /api/search/players` devuelve en `competitions[]` las etiquetas. El `game_log` de equipo está en orden cronológico.
 
 ---
 

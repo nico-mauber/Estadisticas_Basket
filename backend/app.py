@@ -5,18 +5,22 @@ from flask import Flask, jsonify, request, session
 from flask_cors import CORS
 from sqlalchemy import func
 from database import db, init_db, upgrade_db, Game, TeamGameStats, PlayerGameStats, Player, Shot, PbpEvent, DB_PATH
-from stats_engine import (calc_team_stats, calc_player_stats, league_averages,
+from stats_engine import (calc_team_stats, calc_player_stats,
                           _parse_minutes, played, resolve_identity,
-                          season_ast_to, season_def_to_ratio, null_reasons,
-                          sum_pool, season_player_rates, strip_private,
+                          season_ast_to, null_reasons,
+                          sum_pool, season_player_rates,
                           standings_row, standings_sort_key)
 from clutch import team_clutch, MARGIN_RANGE, WINDOW_RANGE
 import lineups
 import competitions
+import context
 import data_quality
 import identity
 import ingest
+import population
+import repository
 from competitions import CompetitionError
+from context import ContextError
 from auth import (
     login_required, admin_required, is_admin, auth_enabled, verify,
     check_rate_limit, register_fail, clear_fails, client_ip,
@@ -291,124 +295,17 @@ def list_teams():
 @app.route("/api/team/<team_code>")
 @login_required
 def team_stats(team_code: str):
+    """Perfil del equipo para la selección activa: `?competition=<id>|all|<texto>` (ausente = la de su
+    partido más reciente) y `?last=<n>`. El promedio de liga es el de la competencia (C-02)."""
     team_code = team_code.upper()
-    rows = _visible(TeamGameStats.query.filter_by(team_code=team_code), TeamGameStats).all()
-    if not rows:
+    try:
+        ctx = context.parse_context(request.args, team_code=team_code)
+    except ContextError as e:
+        return jsonify({"error": str(e)}), e.status
+    profile = population.team_profile(team_code, ctx)
+    if profile is None:
         return jsonify({"error": "Equipo no encontrado"}), 404
-
-    games_by_id = {g.game_id: g for g in Game.query.all()}
-    # Orden cronológico explícito: el orden de las filas cambia al reprocesar (F-11)
-    rows.sort(key=lambda r: ((games_by_id[r.game_id].date or "") if r.game_id in games_by_id else "", r.game_id))
-    team_name = rows[-1].team_name
-    labels = competitions.labels()
-
-    game_stats = []
-    for row in rows:
-        game_info = games_by_id.get(row.game_id)
-        t   = _to_dict(row)
-        t["minutes"] = game_info.minutes if game_info else 40   # PACE con prórrogas (F-11)
-        opp = _opp_for(row.game_id, team_code)
-        if not opp:
-            continue
-        adv = calc_team_stats(t, _opp_dict(opp))
-        # Desglose FIBA: NULL = la competencia no lo publica; se devuelve null, no 0 (C-11 RF-11)
-        adv.update({k: t.get(k) for k in
-                    ("paint_pts", "second_chance_pts", "pts_from_tov", "bench_pts", "fast_break_pts")})
-        adv["opp_pf"] = t.get("opp_pf", 0)
-        game_stats.append({
-            "game_id":       row.game_id,
-            "date":          game_info.date if game_info else "",
-            "competition":   game_info.competition if game_info else "",
-            **_comp_fields(game_info, labels),
-            "opponent":      opp.team_name,
-            "opponent_code": opp.team_code,
-            "home_away":     "L" if row.is_home else "V",
-            **adv,
-            "null_reasons":  null_reasons(adv),   # C-11 RF-3
-        })
-
-    # Población de liga POR COMPETENCIA (Feature 14 RF-1): comparar contra un promedio
-    # que mezcla torneos distintos no da contexto real. Clave = id de competencia (F-11);
-    # "" es el agregado.
-    game_comp = {gid: str(g.competition_id or "") for gid, g in games_by_id.items()}
-    own_comps = {game_comp.get(r.game_id, "") for r in rows}
-
-    all_adv = []
-    by_comp: dict[str, list] = {}
-    for ar in _visible(TeamGameStats.query, TeamGameStats).all():
-        ao = _opp_for(ar.game_id, ar.team_code)
-        if not ao:
-            continue
-        ad = _to_dict(ar)
-        ad["minutes"] = games_by_id[ar.game_id].minutes if ar.game_id in games_by_id else 40
-        adv = calc_team_stats(ad, _opp_dict(ao))
-        all_adv.append(adv)
-        by_comp.setdefault(game_comp.get(ar.game_id, ""), []).append(adv)
-
-    leagues = {"": league_averages(all_adv)}
-    for comp in own_comps:
-        if comp:   # solo las competencias donde este equipo jugó: son las seleccionables
-            leagues[comp] = league_averages(by_comp.get(comp, []))
-    league = leagues[""]
-
-    def _avg(key):
-        # Excluye None (tasas sin dato): un partido sin intentos no cuenta como 0.
-        vals = [g[key] for g in game_stats if key in g and g[key] is not None]
-        return round(sum(vals) / len(vals), 4) if vals else None
-
-    keys = [
-        "oer", "der", "net_rating", "efg_pct", "ts_pct",
-        "fg2_pct", "fg3_pct", "ft_pct", "ft_rate", "ft_rate_report",
-        "pps", "fg2_uso", "fg3_uso",
-        "or_pct", "dr_pct", "trb_pct", "to_pct", "to_ratio",
-        "as_pct", "ast_ratio", "pace", "pts", "possessions", "plays",
-        "peso_1p", "peso_2p", "peso_3p",
-        "opp_efg_pct", "opp_ts_pct", "opp_to_pct", "opp_ft_rate",
-        "stocks", "def_playmaking", "def_to_ratio",
-        "ppt_2", "ppt_3", "ppt_ft",
-        "fgm", "fga", "fgm2", "fga2", "fgm3", "fga3",
-        "ftm", "fta", "orb", "drb", "trb", "ast", "tov", "stl", "blk", "pf",
-        "opp_pf", "paint_pts", "second_chance_pts", "pts_from_tov", "bench_pts", "fast_break_pts",
-    ]
-    averages = {k: _avg(k) for k in keys}
-    # AS/PER de temporada — mismo criterio acumulado que en jugador (C-04 / Feature 15 RF-7)
-    def _sum(key):
-        return sum(g.get(key, 0) or 0 for g in game_stats)
-
-    averages["ast_to"] = season_ast_to(_sum("ast"), _sum("tov"))
-    # DEF/TO acumulado (pooled, DA-02): sin centinela, un partido sin pérdidas no se pierde (C-11)
-    averages["def_to_ratio"] = season_def_to_ratio(_sum("stl"), _sum("blk"), _sum("drb"), _sum("tov"))
-    # C-07: totales de temporada, además del promedio por partido (Feature 16 RF-5)
-    # C-04: `ast`/`tov` respaldan AS/PER (ΣAS/ΣPER) para poder reproducirlo con el box score
-    totals = {k: _sum(k) for k in ("fga2", "fgm2", "fga3", "fgm3", "fta", "ftm", "ast", "tov")}
-
-    wins      = sum(1 for g in game_stats if g.get("pts", 0) > g.get("opp_pts", 0))
-    losses    = len(game_stats) - wins
-    home_gs   = [g for g in game_stats if g["home_away"] == "L"]
-    away_gs   = [g for g in game_stats if g["home_away"] == "V"]
-    home_wins = sum(1 for g in home_gs if g.get("pts", 0) > g.get("opp_pts", 0))
-    away_wins = sum(1 for g in away_gs if g.get("pts", 0) > g.get("opp_pts", 0))
-
-    record = {
-        "wins":    wins,
-        "losses":  losses,
-        "win_pct": round(wins / len(game_stats), 3) if game_stats else None,  # tasa: sin partidos → None (RF-5)
-        "home":    f"{home_wins}-{len(home_gs) - home_wins}",
-        "away":    f"{away_wins}-{len(away_gs) - away_wins}",
-    }
-
-    return jsonify({
-        "team_code": team_code,
-        "team_name": team_name,
-        "games":     len(game_stats),
-        "record":    record,
-        "averages":  averages,
-        "null_reasons": null_reasons(averages),   # razón de cada null de `averages` (C-11 RF-3)
-        "league":    league,     # = leagues[""] — se conserva por compatibilidad
-        "leagues":   leagues,    # promedio de liga por competencia (Feature 14 RF-1)
-        "totals":    totals,     # totales de temporada (Feature 16 RF-5)
-        "game_log":  game_stats,
-    })
+    return jsonify(profile)
 
 
 # ── Players ────────────────────────────────────────────────────────────────
@@ -473,167 +370,30 @@ def _resolve_legacy_player(team_code: str, name: str) -> int | None:
         return None
 
 
-def _player_payload(pid: int) -> dict | None:
-    """Perfil completo de una ficha: TODOS sus partidos aunque el nombre haya variado (C-08)."""
-    rows = _visible(PlayerGameStats.query.filter_by(player_id=pid), PlayerGameStats).all()
-    if not rows:
-        return None
-    game_dates = {g.game_id: (g.date or "") for g in Game.query.all()}
-    rows.sort(key=lambda r: (game_dates.get(r.game_id, ""), r.game_id))
-    ficha       = db.session.get(Player, pid)
-    player_name = ficha.display_name   # grafía real de la ficha (nunca el nombre normalizado)
-    position    = resolve_identity(rows)[1]
-    team_code   = rows[-1].team_code
-    labels = competitions.labels()
-
-    game_log, per_game_adv = [], []
-    for row in rows:
-        p = _to_dict(row)
-        p.setdefault("trb", p["orb"] + p["drb"])
-
-        game_info = Game.query.filter_by(game_id=row.game_id).first()
-        opp       = _opp_for(row.game_id, team_code)
-        team_row  = TeamGameStats.query.filter_by(
-            game_id=row.game_id, team_code=team_code
-        ).first()
-
-        t_dict   = _to_dict(team_row) if team_row else None
-        game_min = game_info.minutes if game_info else 40
-        # `opp` habilita OR%/DR%/TRB% individuales (Feature 15 RF-6)
-        adv = calc_player_stats(p, team_pos=0, team=t_dict, game_minutes=game_min,
-                                opp=_to_dict(opp) if opp else None)
-
-        if team_row:
-            t_orb = team_row.orb or 0
-            t_drb = team_row.drb or 0
-            t_trb = team_row.trb or (t_orb + t_drb)
-            # Tasas: denominador 0 → None, no 0 (Feature 12 RF-5; mismo patrón que search_players)
-            adv["reb_share"]  = round(adv["trb"] / t_trb, 4) if t_trb else None
-            adv["oreb_share"] = round(adv["orb"] / t_orb, 4) if t_orb else None
-            adv["dreb_share"] = round(adv["drb"] / t_drb, 4) if t_drb else None
-        else:
-            adv["reb_share"] = adv["oreb_share"] = adv["dreb_share"] = None
-
-        is_played = played(row.minutes)
-        per_game_adv.append((adv, is_played))
-        game_log.append({
-            "game_id":       row.game_id,
-            "date":          game_info.date if game_info else "",
-            "competition":   game_info.competition if game_info else "",
-            **_comp_fields(game_info, labels),
-            "opponent":      opp.team_name  if opp else "",
-            "opponent_code": opp.team_code  if opp else "",
-            "played":        is_played,   # false = DNP (Feature 12 RF-6)
-            **strip_private(adv),
-            "null_reasons":  null_reasons(adv, played=is_played),   # C-11 RF-3
-        })
-
-    # Población de liga POR COMPETENCIA (Feature 14 RF-1); clave = id de competencia, "" = agregado.
-    game_comp = {g.game_id: str(g.competition_id or "") for g in Game.query.all()}
-    own_comps = {game_comp.get(r.game_id, "") for r in rows}
-
-    # La población de liga necesita equipo y rival de cada ficha: sin ellos, OR%/DR%/
-    # TRB% individuales y USO% saldrían None y esas métricas quedarían sin Ø (Feature 15 RF-9).
-    all_team_rows = {(tr.game_id, tr.team_code): tr for tr in TeamGameStats.query.all()}
-    game_len      = {g.game_id: (g.minutes or 40) for g in Game.query.all()}
-
-    all_adv = []
-    by_comp: dict[str, list] = {}
-    for ap in _visible(PlayerGameStats.query, PlayerGameStats).all():
-        pp = _to_dict(ap)
-        pp.setdefault("trb", pp["orb"] + pp["drb"])
-        tr_own = all_team_rows.get((ap.game_id, ap.team_code))
-        tr_opp = next((tr for (gid, tc), tr in all_team_rows.items()
-                       if gid == ap.game_id and tc != ap.team_code), None)
-        adv = calc_player_stats(pp, team_pos=0,
-                                team=_to_dict(tr_own) if tr_own else None,
-                                game_minutes=game_len.get(ap.game_id, 40),
-                                opp=_to_dict(tr_opp) if tr_opp else None)
-        all_adv.append(adv)
-        by_comp.setdefault(game_comp.get(ap.game_id, ""), []).append(adv)
-
-    leagues = {"": league_averages(all_adv)}
-    for comp in own_comps:
-        if comp:
-            leagues[comp] = league_averages(by_comp.get(comp, []))
-    league = leagues[""]
-
-    # Población de promedio: solo partidos jugados. Un DNP no cuenta como partido
-    # jugado (Feature 12 RF-6); el game_log sigue devolviéndolos todos (CA-8).
-    played_log = [g for g in game_log if g["played"]]
-
-    def _avg(key):
-        # Excluye None (tasas sin dato): un partido sin intentos no cuenta como 0.
-        vals = [g[key] for g in played_log if key in g and g[key] is not None]
-        return round(sum(vals) / len(vals), 4) if vals else None
-
-    keys = [
-        "oer", "efg_pct", "ts_pct", "fg2_pct", "fg3_pct",
-        "ft_pct", "ft_rate", "ft_rate_report", "pps", "ppp",
-        "fg2_uso", "fg3_uso", "peso_1p", "peso_2p", "peso_3p",
-        "or_pct", "dr_pct", "trb_pct", "to_pct", "to_ratio", "as_pct", "ast_ratio", "ast_to",
-        # C-01 — por posesión y por minuto (Feature 15)
-        "as_pos", "tov_pos", "pts_pos", "orb_min", "drb_min",
-        # C-07 — PPT por tipo de tiro (Feature 16)
-        "ppt_2", "ppt_3", "ppt_ft",
-        "stocks", "def_playmaking", "def_to_ratio", "physical_impact",
-        "reb_share", "oreb_share", "dreb_share",
-        "uso_pct",
-        "pts", "fgm", "fga", "fgm2", "fga2", "fgm3", "fga3",
-        "ftm", "fta", "orb", "drb", "ast", "tov", "stl", "blk",
-    ]
-    averages = {k: _avg(k) for k in keys}
-    # AS/PER de temporada: cociente de los TOTALES, no promedio de los ratios por
-    # partido (Feature 15 RF-7 / C-04). Solo sobre partidos jugados.
-    def _sum(key):
-        return sum(g.get(key, 0) or 0 for g in played_log)
-
-    averages["ast_to"] = season_ast_to(_sum("ast"), _sum("tov"))
-    # DEF/TO acumulado (pooled, DA-02), mismo criterio que AS/PER (C-11)
-    averages["def_to_ratio"] = season_def_to_ratio(_sum("stl"), _sum("blk"), _sum("drb"), _sum("tov"))
-    # C-01: AS/pos, PER/pos, PTS/pos (= OER), RO/min, RD/min, OR%, DR%, TRB% como cociente de
-    # totales de los partidos JUGADOS (DA-02), no como media de las tasas de cada partido
-    rate_vals, rate_reasons = season_player_rates(sum_pool([a for a, pl in per_game_adv if pl]))
-    averages.update(rate_vals)
-    # C-07: totales de temporada sobre los partidos JUGADOS (Feature 16 RF-5 + Feature 12 RF-6)
-    totals = {k: _sum(k) for k in ("fga2", "fgm2", "fga3", "fgm3", "fta", "ftm", "ast", "tov")}
-
-    return {
-        "player":    player_name,
-        "player_id": pid,
-        "position":  position,
-        "position_group": identity.position_group(position),
-        "team_code": team_code,
-        "team_name": rows[-1].team_name,
-        "games":     len(played_log),   # partidos JUGADOS (excluye DNP) — Feature 12 RF-7
-        "averages":  averages,
-        # Sin partidos jugados, todo `averages` es null por DNP (C-11 RF-3)
-        "null_reasons": null_reasons(averages, played=bool(played_log), overrides=rate_reasons),
-        "league":    league,     # = leagues[""] — se conserva por compatibilidad
-        "leagues":   leagues,    # promedio de liga por competencia (Feature 14 RF-1)
-        "totals":    totals,     # totales de temporada (Feature 16 RF-5)
-        "game_log":  game_log,
-    }
+def _player_response(pid: int | None):
+    """Perfil de una ficha para la selección activa (`competition`, `last`); 404 si no existe (C-08, C-02)."""
+    if pid is None:
+        return jsonify({"error": "Jugador no encontrado"}), 404
+    try:
+        ctx = context.parse_context(request.args, player_id=pid)
+    except ContextError as e:
+        return jsonify({"error": str(e)}), e.status
+    payload = population.player_profile(pid, ctx)
+    if payload is None:
+        return jsonify({"error": "Jugador no encontrado"}), 404
+    return jsonify(payload)
 
 
 @app.route("/api/player/<int:player_id>")
 @login_required
 def player_by_id(player_id: int):
-    pid = identity.canonical_id(player_id)   # una ficha absorbida responde la que la absorbió
-    payload = _player_payload(pid) if pid is not None else None
-    if payload is None:
-        return jsonify({"error": "Jugador no encontrado"}), 404
-    return jsonify(payload)
+    return _player_response(identity.canonical_id(player_id))   # una ficha absorbida responde la que la absorbió
 
 
 @app.route("/api/player/<team_code>/<player_name>")
 @login_required
 def player_stats(team_code: str, player_name: str):
-    pid = _resolve_legacy_player(team_code, player_name)
-    payload = _player_payload(pid) if pid is not None else None
-    if payload is None:
-        return jsonify({"error": "Jugador no encontrado"}), 404
-    return jsonify(payload)
+    return _player_response(_resolve_legacy_player(team_code, player_name))
 
 
 # ── Shots (jugador y equipo) ─────────────────────────────────────────────────
@@ -1066,9 +826,11 @@ def _int_arg(name: str, lo: int, hi: int) -> int | None:
 @login_required
 def list_competitions():
     """Competencias (F-11). Sin parámetros, solo las publicadas (selectores); con
-    `include_hidden=1` también las en borrador (sección Datos)."""
+    `include_hidden=1` también las en borrador (sección Datos). `is_default` marca la competencia por
+    defecto (C-02)."""
     include_hidden = request.args.get("include_hidden") in ("1", "true")
-    return jsonify(competitions.list_competitions(include_hidden))
+    default_id = repository.resolve_competition(None)["id"]   # la que se usa sin parámetro ni entidad
+    return jsonify(competitions.list_competitions(include_hidden, default_id))
 
 
 @app.route("/api/competitions", methods=["POST"])
@@ -1180,10 +942,10 @@ def league_overview():
     all_rows = sorted(_visible(TeamGameStats.query, TeamGameStats).all(),
                       key=lambda r: ((games_by_id[r.game_id].date or "") if r.game_id in games_by_id else "", r.game_id))
 
-    # Filtro opcional por competencia (id; acepta el texto de FIBA por compatibilidad):
-    # mantiene solo los partidos de esa competencia (evita mezclar competencias).
+    # Competencia (id; acepta el texto de FIBA por compatibilidad): ausente = la competencia por
+    # defecto (la del partido más reciente, RF-12); `all` = todas. Evita mezclar competencias.
     try:
-        comp_id = competitions.resolve(request.args.get("competition"))
+        comp_id = repository.resolve_competition(request.args.get("competition"))["id"]
     except CompetitionError as e:
         return jsonify({"error": str(e)}), e.status
     if comp_id:

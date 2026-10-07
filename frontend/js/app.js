@@ -53,7 +53,7 @@ function statBox(label, value, display, leagueKey, league, higherIsBetter = true
   // percentil de T-01 (Feature 14 RF-5, decisión del cliente en ROADMAP §5).
   const context = lg ? `
       <div class="stat-context">
-        <span class="avg">Ø ${fmt(avg)}</span>
+        <span class="avg">Ø ${isNull(avg) ? nullDisplay(lg.reason) : fmt(avg)}</span>
       </div>` : "";
   return `
     <div class="stat-box">
@@ -72,80 +72,41 @@ const _ratioSub = (a, b) => a == null || b == null ? ""
   : `<span style="font-size:9px;color:var(--muted)"> (${a}/${b})</span>`;
 
 // Caja de AS/PER (asistencias sobre pérdidas acumuladas de la selección). PER = pérdidas.
-// Sin `Ø` ni color mientras no exista un promedio de liga del mismo criterio (C-02).
+// Su `Ø` es el promedio de liga de AS/PER de la competencia (`league.ast_to`, C-02).
 function _astPerBox(av, totals, lg) {
   const label = '<span title="Asistencias sobre pérdidas, acumulado de la selección (PER = pérdidas)">AS/PER</span>';
   return statBox(label, av.ast_to, DEC2(av.ast_to) + _ratioSub(totals?.ast, totals?.tov),
                  "ast_to", lg, true, av.null_reasons?.ast_to);
 }
 
-// ── Compute averages from a game_log array (for last-N filter) ─────────────
-function _computeAvg(gameLog) {
-  // Un DNP no cuenta como partido jugado (Feature 12 RF-6). El backend usa la misma
-  // población; si acá no se filtrara, el filtro de últimos N divergiría de `averages`.
-  // `played` solo viene en el game log de jugador — en el de equipo es undefined y no filtra.
-  gameLog = (gameLog || []).filter(g => g.played !== false);
-  const n = gameLog.length;
-  if (!n) return {};
-  const keys = [
-    "oer","der","efg_pct","ts_pct","fg2_pct","fg3_pct",
-    "ft_pct","ft_rate","ft_rate_report","pps","ppp",
-    "fg2_uso","fg3_uso","peso_1p","peso_2p","peso_3p",
-    "or_pct","dr_pct","trb_pct","to_pct","to_ratio","as_pct","ast_ratio",
-    "opp_efg_pct","opp_ts_pct","opp_to_pct","opp_ft_rate",
-    "pace","pts","possessions","plays",
-    "stocks","def_playmaking","def_to_ratio","physical_impact",
-    "reb_share","oreb_share","dreb_share",
-    "uso_pct","ast_to",   // keys de jugador (ausentes en logs de equipo → null)
-    "fgm","fga","fgm2","fga2","fgm3","fga3","ftm","fta",
-    "orb","drb","trb","ast","tov","stl","blk","pf",
-    "opp_pf","paint_pts","second_chance_pts","pts_from_tov","bench_pts","fast_break_pts",
-  ];
-  const result = {};
-  for (const k of keys) {
-    const vals = gameLog.map(g => g[k]).filter(v => v != null && !isNaN(v));
-    // null (no 0) cuando ningún partido tiene dato válido para esa tasa
-    result[k] = vals.length ? Math.round((vals.reduce((s, v) => s + v, 0) / vals.length) * 10000) / 10000 : null;
-  }
-  result.net_rating = (result.oer != null && result.der != null)
-    ? Math.round((result.oer - result.der) * 10000) / 10000
-    : null;
-  // DEF/TO acumulado (pooled, DA-02), mismo criterio que el backend (C-11)
-  const sum = k => gameLog.reduce((s, g) => s + (g[k] || 0), 0);
-  const tov = sum("tov");
-  result.def_to_ratio = tov ? Math.round(((sum("stl") + sum("blk") + sum("drb")) / tov) * 10000) / 10000 : null;
-  // AS/PER acumulado de la selección (C-04): ΣAS/ΣPER, nunca la media de los ratios por partido
-  result.ast_to = tov ? Math.round((sum("ast") / tov) * 10000) / 10000 : null;
-  result.totals = { ast: sum("ast"), tov };   // respaldan el AS/PER mostrado
-  // Razón de cada nulo: la que comparten los partidos del filtro; si difieren, genérica.
-  // Los cocientes por pérdidas son nulos solo por no tener pérdidas en la selección.
-  result.null_reasons = {};
-  for (const [k, v] of Object.entries(result)) {
-    if (v != null) continue;
-    if (k === "ast_to" || k === "def_to_ratio") { result.null_reasons[k] = "sin_perdidas"; continue; }
-    const rs = new Set(gameLog.map(g => g.null_reasons?.[k]).filter(Boolean));
-    result.null_reasons[k] = rs.size === 1 ? [...rs][0] : "sin_intentos";
-  }
-  return result;
-}
-
 // ── Filtro por competencia (compartido: Liga/Equipo/Comparar/Jugador) ────────
-// Por id de competencia (F-11): el texto de FIBA puede renombrarse o fusionarse.
-// `comps` = [{id, label}] (de /api/competitions o del game log).
-function _logComps(gameLog) {
-  const byId = new Map();
-  (gameLog || []).forEach(g => {
-    if (g.competition_id != null) byId.set(String(g.competition_id), g.competition_label || "—");
-  });
-  return [...byId].map(([id, label]) => ({ id, label })).sort((a, b) => a.label.localeCompare(b.label));
-}
-function _filterByComp(gameLog, comp) {
-  return comp ? (gameLog || []).filter(g => String(g.competition_id) === String(comp)) : gameLog;
-}
-function _compOptions(comps, selected = "", allLabel = "Todas las competencias") {
-  return `<option value="">${allLabel}</option>` +
+// Por id de competencia (F-11): el texto de FIBA puede renombrarse o fusionarse. `comps` = [{id, label}]
+// (de /api/competitions o del campo `competitions` del perfil). El navegador NO recalcula promedios al
+// filtrar: pide el perfil al servidor con `competition`/`last` (C-02 RF-5, Constitución regla 4).
+// `allValue`: valor de la opción "Todas las competencias": "all" en las vistas con promedio de liga (el
+// servidor no calcula `Ø` sin una competencia, RF-7); "" en el catálogo de Datos y en Buscar.
+function _compOptions(comps, selected = "", allLabel = "Todas las competencias", allValue = "") {
+  return `<option value="${allValue}"${String(selected) === allValue ? " selected" : ""}>${allLabel}</option>` +
     comps.map(c => `<option value="${c.id}"${String(c.id) === String(selected) ? " selected" : ""}>${esc(c.label)}</option>`).join("");
 }
+
+// Aviso bajo los selectores: de qué población sale el `Ø` y, si la selección no tiene partidos, un
+// estado vacío (C-02 RF-13). `kind`: [singular, plural] de la entidad de la población.
+function _refLegend(data, kind) {
+  const c = data.context, m = data.league_meta;
+  return c.competition.id == null
+    ? "Ø no disponible: elegí una competencia para ver el promedio de liga."
+    : `Ø = promedio de ${m.size} ${m.size === 1 ? kind[0] : kind[1]} de ${esc(c.competition.label)}.`;
+}
+function _selectionNote(data, kind) {
+  const empty = data.games === 0 ? '<p class="empty">Sin partidos en esta competencia</p>' : "";
+  return `<p class="td-muted" style="margin:0 0 8px">${_refLegend(data, kind)}</p>${empty}`;
+}
+
+// Radar sin promedio de liga (`Ø` nulo): no hay contra qué escalar.
+const _radarMsg = data => data.context.competition.id == null
+  ? "El radar compara contra el promedio de una competencia: elegí una."
+  : "Sin datos de la competencia para armar el radar.";
 
 // Escapa texto para insertarlo en HTML (nombres editables por el usuario, p. ej. competencias).
 function esc(v) {
@@ -244,7 +205,10 @@ async function refreshCompareSelectors() {
   if (compSel) {
     const comps = await api.competitions().catch(() => []);
     compSel.style.display = comps.length > 1 ? "" : "none";
-    compSel.innerHTML = _compOptions(comps, compSel.value || "");
+    // por defecto, la competencia por defecto (C-02 RF-6); "Todas" solo si el usuario la eligió
+    const defaultId = comps.find(c => c.is_default)?.id ?? "";
+    const keep = comps.length > 1 ? compSel.value : "";
+    compSel.innerHTML = _compOptions(comps, keep || defaultId, "Todas las competencias", "all");
   }
 }
 
@@ -765,7 +729,7 @@ let _leagueTeams    = [];
 let _leagueSortKey  = "oer";
 let _leagueSortDir  = -1; // -1 desc, 1 asc
 let _leagueMap      = "ef";
-let _leagueComp     = ""; // "" = todas las competencias
+let _leagueComp     = null; // null = la competencia por defecto (se resuelve al cargar); "all" = todas
 
 // Scatter map presets — each defines the X/Y axes for el mapa de liga.
 // Cada eje declara la dirección de su métrica (`higher` | `lower` | `neutral`) y el título se arma
@@ -944,15 +908,19 @@ async function renderLeague() {
   sec.innerHTML = '<p class="empty"><span class="spinner"></span>Cargando...</p>';
   try {
     const comps = await api.competitions().catch(() => []);
-    if (!comps.some(c => String(c.id) === String(_leagueComp))) _leagueComp = "";
+    // Abre en la competencia por defecto (RF-12); "Todas" solo si el usuario la eligió y sigue vigente
+    if (_leagueComp !== "all" && !comps.some(c => String(c.id) === String(_leagueComp))) {
+      const def = comps.find(c => c.is_default);
+      _leagueComp = def ? String(def.id) : null;
+    }
     _leagueTeams = await api.league(_leagueComp);
     if (!_leagueTeams.length) { sec.innerHTML = '<p class="empty">Sin datos. Importa partidos primero.</p>'; return; }
 
     const compSelHTML = comps.length > 1
-      ? `<select id="league-comp" class="map-select">${_compOptions(comps, _leagueComp)}</select>`
+      ? `<select id="league-comp" class="map-select">${_compOptions(comps, _leagueComp, "Todas las competencias", "all")}</select>`
       : "";
     sec.innerHTML = `
-      ${_standingsCardHTML(_leagueTeams, compSelHTML, comps.length > 1 && !_leagueComp)}
+      ${_standingsCardHTML(_leagueTeams, compSelHTML, comps.length > 1 && _leagueComp === "all")}
       <div class="card">
         <div class="map-header">
           <div class="card-title" style="margin:0">Ranking de equipos — Liga <span style="color:var(--muted);font-size:10px;font-weight:400;margin-left:8px">Click en columna para ordenar</span></div>
@@ -1112,16 +1080,15 @@ function _drawClutchTable() {
   }));
 }
 
-// ── Team section — with last-N filter ─────────────────────────────────────
+// ── Team section — competencia y últimos N resueltos en el servidor (C-02) ─────
 let _teamData  = null;
-let _teamLastN = 0; // 0 = all
-let _teamComp  = ""; // "" = todas las competencias
+let _teamLastN = 0;      // 0 = todos los partidos de la competencia
+let _teamComp  = null;   // id de competencia (string) o "all"; null = todavía sin resolver (la elige el servidor)
+let _teamReq   = 0;      // descarta respuestas viejas al cambiar de equipo, de competencia o de filtro
 
-function _filteredLog(gameLog, n) {
-  if (!n) return gameLog;
-  const sorted = [...gameLog].sort((a, b) => (b.date || "").localeCompare(a.date || ""));
-  return sorted.slice(0, n);
-}
+// Parámetros de la selección activa; `api.js` omite los nulos (sin `competition` el servidor usa la
+// competencia del partido más reciente del equipo).
+const _teamParams = () => ({ competition: _teamComp, last: _teamLastN || null });
 
 // Jugador elegido en el select de Equipo: la ficha (value) y su nombre visible (C-08)
 function _selectedPlayer() {
@@ -1174,20 +1141,30 @@ function _renderUsageRanking(players) {
   });
 }
 
-function _renderTeamContent(main, data, n) {
-  const byComp   = _filterByComp(data.game_log, _teamComp);
-  const filtered = _filteredLog(byComp, n);
-  // sin filtro alguno → usar los promedios/record ya calculados por el backend
-  const unfiltered = !n && !_teamComp;
-  const av  = unfiltered ? { ...data.averages, null_reasons: data.null_reasons } : _computeAvg(filtered);
-  const rs  = av.null_reasons || {};   // razón de cada nulo (C-11 RF-4)
-  // Promedio de liga de la COMPETENCIA activa, no del subconjunto en pantalla:
-  // el filtro de últimos N no participa de esta selección (Feature 14 RF-1/RF-2).
-  const lg  = data.leagues?.[_teamComp || ""] ?? data.league;
-  const rec = unfiltered ? data.record : null;
+function _renderTeamContent(main, data) {
+  const av  = { ...data.averages, null_reasons: data.null_reasons };
+  const rs  = av.null_reasons;   // razón de cada nulo (C-11 RF-4)
+  // Promedio de liga de la COMPETENCIA elegida, no del subconjunto en pantalla: lo calcula el servidor y
+  // el filtro de últimos N no lo altera (C-02 RF-1). "Todas": `Ø —` con razón `sin_universo`.
+  const lg  = data.league;
+  const radarOk = lg?.oer?.avg != null;
+  const charts = !data.game_log.length ? "" : `
+      <div class="chart-grid">
+        <div class="card">
+          <div class="card-title">Perfil de equipo</div>
+          ${radarOk ? '<div class="radar-wrap"><canvas id="chart-radar"></canvas></div>'
+                    : `<p class="empty">${_radarMsg(data)}</p>`}
+        </div>
+        <div class="card">
+          <div class="card-title">Evolución por partido</div>
+          <canvas id="chart-evo" height="200"></canvas>
+        </div>
+      </div>`;
 
   main.innerHTML = `
-    ${_recordCard(rec, data.team_name)}
+    ${_selectionNote(data, ["equipo", "equipos"])}
+    ${charts}
+    ${_recordCard(data.record, data.team_name)}
     <div class="card">
       <div class="card-title">Eficiencia</div>
       <div class="stat-grid">
@@ -1218,9 +1195,9 @@ function _renderTeamContent(main, data, n) {
         ${statBox("OR%", av.or_pct, PCT(av.or_pct), "or_pct", lg, true, rs.or_pct)}
         ${statBox("DR%", av.dr_pct, PCT(av.dr_pct), "dr_pct", lg, true, rs.dr_pct)}
         ${statBox("Reb%", av.trb_pct, PCT(av.trb_pct), "trb_pct", lg, true, rs.trb_pct)}
-        ${statBox("TO", av.tov, DEC2(av.tov), "to_ratio", lg, false, rs.tov)}
-        ${statBox("AS", av.ast, DEC2(av.ast), "ast_ratio", lg, true, rs.ast)}
-        ${_astPerBox(av, av.totals ?? data.totals, lg)}
+        ${statBox("TO", av.tov, DEC2(av.tov), "tov", lg, false, rs.tov)}
+        ${statBox("AS", av.ast, DEC2(av.ast), "ast", lg, true, rs.ast)}
+        ${_astPerBox(av, data.totals, lg)}
       </div>
     </div>
     <div class="card">
@@ -1253,7 +1230,7 @@ function _renderTeamContent(main, data, n) {
             <th>OR%</th><th>DR%</th><th>TO%</th><th title="AS/PER del partido">AS/PER</th>
           </tr></thead>
           <tbody>
-            ${filtered.map(g => {
+            ${data.game_log.map(g => {
               const c = (k, f) => fmtOrNull(g[k], f, g.null_reasons?.[k]);
               return `
               <tr>
@@ -1275,52 +1252,76 @@ function _renderTeamContent(main, data, n) {
       </div>
     </div>`;
 
-  if (filtered.length >= 1) {
-    main.insertAdjacentHTML("afterbegin", `
-      <div class="chart-grid">
-        <div class="card">
-          <div class="card-title">Perfil de equipo</div>
-          <div class="radar-wrap">
-            <canvas id="chart-radar"></canvas>
-          </div>
-        </div>
-        <div class="card">
-          <div class="card-title">Evolución por partido</div>
-          <canvas id="chart-evo" height="200"></canvas>
-        </div>
-      </div>`);
-    drawRadar("chart-radar", av, lg, data.team_name);
-    drawEvolution("chart-evo", filtered, lg?.oer?.avg);
+  if (data.game_log.length) {
+    if (radarOk) drawRadar("chart-radar", av, lg, data.team_name);
+    drawEvolution("chart-evo", data.game_log, lg?.oer?.avg);
   }
+}
+
+// Aplica una respuesta de perfil de equipo: guarda la selección que el servidor resolvió (el eco de
+// `context`), sincroniza pills y selector de competencia y dibuja.
+function _applyTeamData(main, data) {
+  _teamData  = data;
+  _teamComp  = String(data.context.competition.id ?? "all");
+  _teamLastN = data.context.applied.last || 0;
+  const pills = document.getElementById("team-filter-pills");
+  if (pills) {
+    pills.style.display = data.context.games_total > 3 ? "" : "none";
+    pills.querySelectorAll(".filter-pill").forEach(p => p.classList.toggle("active", Number(p.dataset.n) === _teamLastN));
+  }
+  const compWrap = document.getElementById("team-comp-wrap");
+  const compSel  = document.getElementById("team-comp");
+  if (compWrap && compSel) {
+    compWrap.style.display = data.competitions.length > 1 ? "" : "none";
+    compSel.innerHTML = _compOptions(data.competitions, _teamComp, "Todas las competencias", "all");
+  }
+  _renderTeamContent(main, data);
+}
+
+// Cambió la competencia o el filtro de últimos N: se pide el perfil de nuevo al servidor (no se recalcula
+// en el navegador, C-02 RF-5). `clutch`: los cierres dependen solo de la competencia.
+async function _reloadTeam({ clutch = false } = {}) {
+  if (!_teamData) return;
+  const main = document.getElementById("team-main");
+  const code = document.getElementById("team-select").value || _teamData.team_code;
+  const req = ++_teamReq;
+  main.innerHTML = '<p class="empty"><span class="spinner"></span>Cargando...</p>';
+  let data;
+  try {
+    data = await api.team(code, _teamParams());
+  } catch (e) {
+    if (req !== _teamReq) return;
+    toast(e.message, "err");
+    try {
+      // La competencia elegida dejó de existir o de estar publicada: volver a la por defecto (RF-14);
+      // cualquier otro error (p. ej. sin conexión): se conserva la selección anterior.
+      data = /competencia/i.test(e.message) ? await api.team(code) : _teamData;
+    } catch (e2) {
+      if (req === _teamReq) main.innerHTML = `<p class="empty below-avg">${e2.message}</p>`;
+      return;
+    }
+    if (req !== _teamReq) return;
+    clutch = true;
+  }
+  if (req !== _teamReq) return;
+  _applyTeamData(main, data);
+  if (clutch) renderTeamClutch(code);
 }
 
 async function renderTeam(teamCode) {
   const main = document.getElementById("team-main");
   main.innerHTML = '<p class="empty"><span class="spinner"></span>Cargando...</p>';
   _teamLastN = 0;
-  _teamComp  = "";
+  _teamComp  = null;   // sin competencia: el servidor usa la del partido más reciente del equipo (RF-6)
+  const req = ++_teamReq;
 
   try {
-    _teamData = await api.team(teamCode);
-
-    // Filter pills
-    const filterWrap = document.getElementById("team-filter-pills");
-    if (filterWrap) {
-      filterWrap.style.display = _teamData.games > 3 ? "" : "none";
-    }
-
-    // Selector de competencia (solo si el equipo tiene >1 competencia)
-    const comps    = _logComps(_teamData.game_log);
-    const compWrap = document.getElementById("team-comp-wrap");
-    const compSel  = document.getElementById("team-comp");
-    if (compWrap && compSel) {
-      compWrap.style.display = comps.length > 1 ? "" : "none";
-      compSel.innerHTML = _compOptions(comps);
-    }
-
-    _renderTeamContent(main, _teamData, 0);
+    const data = await api.team(teamCode);
+    if (req !== _teamReq) return;
+    _applyTeamData(main, data);
 
     const players = await api.players(teamCode);
+    if (req !== _teamReq) return;
     const pSel = document.getElementById("player-select");
     pSel.innerHTML = '<option value="">— Seleccionar jugador —</option>' +
       players.map(p => `<option value="${p.player_id ?? ""}" data-name="${esc(p.name)}">${esc(p.name)}</option>`).join("");
@@ -1337,9 +1338,9 @@ async function renderTeam(teamCode) {
     }
 
     renderTeamShotmapTeam(teamCode);   // mapa de tiro del equipo (Feature 10)
-    renderTeamClutch(teamCode);        // cierres del equipo (Feature 05 v2)
+    renderTeamClutch(teamCode);        // cierres del equipo, de la competencia elegida (Feature 05 v2)
   } catch (e) {
-    main.innerHTML = `<p class="empty below-avg">${e.message}</p>`;
+    if (req === _teamReq) main.innerHTML = `<p class="empty below-avg">${e.message}</p>`;
   }
 }
 
@@ -1524,11 +1525,13 @@ async function renderCompare() {
     btnCompare.innerHTML = '<span class="spinner"></span>Comparando...';
 
     try {
-      const [dataA, dataB] = await Promise.all([api.team(codeA), api.team(codeB)]);
+      // Misma competencia para ambos equipos y para el `Ø` (RF-11): los promedios los calcula el servidor
       const comp = document.getElementById("compare-comp")?.value || "";
-      const avA = comp ? _computeAvg(_filterByComp(dataA.game_log, comp)) : dataA.averages;
-      const avB = comp ? _computeAvg(_filterByComp(dataB.game_log, comp)) : dataB.averages;
+      const params = comp ? { competition: comp } : {};
+      const [dataA, dataB] = await Promise.all([api.team(codeA, params), api.team(codeB, params)]);
+      const avA = dataA.averages, avB = dataB.averages;
       const lg  = dataA.league;
+      const radarOk = lg?.oer?.avg != null;
 
       const a = avA, b = avB;
       // Sin dato → "—", nunca 0 (Feature 12 RF-4)
@@ -1588,13 +1591,22 @@ async function renderCompare() {
         <td>${PCT(av.as_pct)}</td><td>${DEC2(av.pts)}</td><td>${DEC2(av.possessions)}</td>
       </tr>`;
 
+      // Fila "Ø liga": el promedio de la competencia, con los mismos valores que Equipo (RF-4, RF-11)
+      const lgCell = (k, f) => `<td>${fmtOrNull(lg?.[k]?.avg, f, lg?.[k]?.reason)}</td>`;
+      const lgRow = `<tr>
+        <td style="color:var(--muted);font-weight:600;text-align:left">Ø liga</td>
+        ${lgCell("oer", DEC2)}${lgCell("der", DEC2)}${lgCell("net_rating", DEC2)}
+        ${lgCell("efg_pct", PCT)}${lgCell("ts_pct", PCT)}${lgCell("pace", DEC2)}
+        ${lgCell("or_pct", PCT)}${lgCell("dr_pct", PCT)}${lgCell("to_pct", PCT)}
+        ${lgCell("as_pct", PCT)}${lgCell("pts", DEC2)}${lgCell("possessions", DEC2)}
+      </tr>`;
+
       document.getElementById("compare-result").innerHTML = `
         <div class="chart-grid">
           <div class="card">
             <div class="card-title">Radar comparativo</div>
-            <div class="radar-wrap">
-              <canvas id="chart-compare-radar"></canvas>
-            </div>
+            ${radarOk ? '<div class="radar-wrap"><canvas id="chart-compare-radar"></canvas></div>'
+                      : `<p class="empty">${_radarMsg(dataA)}</p>`}
           </div>
           <div class="card">
             <div class="card-title">${dataA.team_name} vs ${dataB.team_name}</div>
@@ -1622,12 +1634,14 @@ async function renderCompare() {
               <tbody>
                 ${advRow(dataA.team_name, avA, "var(--accent)")}
                 ${advRow(dataB.team_name, avB, "var(--blue)")}
+                ${lgRow}
               </tbody>
             </table>
           </div>
+          <p class="td-muted" style="margin:8px 0 0">${_refLegend(dataA, ["equipo", "equipos"])}</p>
         </div>`;
 
-      drawCompareRadar("chart-compare-radar", avA, avB, lg, dataA.team_name, dataB.team_name);
+      if (radarOk) drawCompareRadar("chart-compare-radar", avA, avB, lg, dataA.team_name, dataB.team_name);
     } catch (e) {
       toast(e.message, "err");
     } finally {
@@ -1804,41 +1818,76 @@ function _shotChartSVG(zones, totalShots, summary, hasCoordinates) {
     : _shotChart11SVG(zones, totalShots, summary);
 }
 
-// ── Player section ─────────────────────────────────────────────────────────
+// ── Player section — competencia resuelta en el servidor (C-02) ────────────
 let _playerData = null;
-let _playerComp = "";
+let _playerComp = null;   // id de competencia (string) o "all"; null = la elige el servidor
 let _playerCtx  = { teamCode: "", playerName: "" };
+let _playerReq  = 0;      // descarta respuestas viejas
 
 async function renderPlayer(teamCode, playerName, playerId = null) {
   const main = document.getElementById("player-main");
   main.innerHTML = '<p class="empty"><span class="spinner"></span>Cargando...</p>';
-  _playerComp = "";
+  _playerComp = null;   // sin competencia: la del partido más reciente del jugador (RF-6)
   _playerCtx  = { teamCode, playerName };
+  const req = ++_playerReq;
 
   try {
-    _playerData = playerId != null ? await api.playerById(playerId) : await api.player(teamCode, playerName);
-    _playerCtx  = { teamCode: _playerData.team_code, playerName: _playerData.player };   // grafía de la ficha
-    _renderPlayerContent(main, _playerData, "");
+    const data = playerId != null ? await api.playerById(playerId) : await api.player(teamCode, playerName);
+    if (req !== _playerReq) return;
+    _applyPlayerData(main, data);
   } catch (e) {
-    main.innerHTML = `<p class="empty below-avg">${e.message}</p>`;
+    if (req === _playerReq) main.innerHTML = `<p class="empty below-avg">${e.message}</p>`;
   }
 }
 
-function _renderPlayerContent(main, data, comp) {
+function _applyPlayerData(main, data) {
+  _playerData = data;
+  _playerComp = String(data.context.competition.id ?? "all");
+  _playerCtx  = { teamCode: data.team_code, playerName: data.player };   // grafía de la ficha
+  _renderPlayerContent(main, data);
+}
+
+// Cambió la competencia: se pide el perfil de nuevo al servidor (no se recalcula en el navegador)
+async function _reloadPlayer() {
+  if (!_playerData) return;
+  const main = document.getElementById("player-main");
+  const id = _playerData.player_id;
+  const req = ++_playerReq;
+  main.innerHTML = '<p class="empty"><span class="spinner"></span>Cargando...</p>';
+  let data;
+  try {
+    data = await api.playerById(id, { competition: _playerComp });
+  } catch (e) {
+    if (req !== _playerReq) return;
+    toast(e.message, "err");
+    try {
+      // competencia inexistente o sin publicar: volver a la por defecto; otro error: conservar la anterior
+      data = /competencia/i.test(e.message) ? await api.playerById(id) : _playerData;
+    } catch (e2) {
+      if (req === _playerReq) main.innerHTML = `<p class="empty below-avg">${e2.message}</p>`;
+      return;
+    }
+  }
+  if (req === _playerReq) _applyPlayerData(main, data);
+}
+
+function _renderPlayerContent(main, data) {
   const { teamCode, playerName } = _playerCtx;
-  const log  = _filterByComp(data.game_log, comp);
-  const av   = comp ? _computeAvg(log) : { ...data.averages, null_reasons: data.null_reasons };
-  const rs   = av.null_reasons || {};   // razón de cada nulo (C-11 RF-4)
-  // Promedio de liga de la COMPETENCIA activa (Feature 14 RF-1/RF-2)
-  const lg   = data.leagues?.[comp || ""] ?? data.league;
-  const comps = _logComps(data.game_log);
+  const log  = data.game_log;
+  const av   = { ...data.averages, null_reasons: data.null_reasons };
+  const rs   = av.null_reasons;   // razón de cada nulo (C-11 RF-4)
+  // Promedio de liga de la COMPETENCIA elegida, calculado por el servidor (C-02 RF-1)
+  const lg   = data.league;
+  const comps = data.competitions;
+  const radarOk = lg?.oer?.avg != null;
 
   {
     main.innerHTML = `
       ${comps.length > 1 ? `
       <div class="card">
-        <select id="player-comp" class="map-select">${_compOptions(comps, comp)}</select>
+        <select id="player-comp" class="map-select">${_compOptions(comps, _playerComp, "Todas las competencias", "all")}</select>
       </div>` : ""}
+      ${_selectionNote(data, ["jugador", "jugadores"])}
       <div class="card">
         <div class="card-title">Producción ofensiva</div>
         <div class="stat-grid">
@@ -1877,9 +1926,9 @@ function _renderPlayerContent(main, data, comp) {
         <div class="stat-grid">
           ${statBox(_hint("OR%", "Porción de los rebotes ofensivos disponibles que capturó mientras estuvo en cancha, " + _PCT_REB_HINT.replace("%s", "OR%")), av.or_pct, PCT(av.or_pct), "or_pct", lg, true, rs.or_pct)}
           ${statBox(_hint("DR%", "Porción de los rebotes defensivos disponibles que capturó mientras estuvo en cancha, " + _PCT_REB_HINT.replace("%s", "DR%")), av.dr_pct, PCT(av.dr_pct), "dr_pct", lg, true, rs.dr_pct)}
-          ${statBox("TO", av.tov, DEC2(av.tov), "to_ratio", lg, false, rs.tov)}
-          ${statBox("AS", av.ast, DEC2(av.ast), "ast_ratio", lg, true, rs.ast)}
-          ${_astPerBox(av, av.totals ?? data.totals, lg)}
+          ${statBox("TO", av.tov, DEC2(av.tov), "tov", lg, false, rs.tov)}
+          ${statBox("AS", av.ast, DEC2(av.ast), "ast", lg, true, rs.ast)}
+          ${_astPerBox(av, data.totals, lg)}
           ${statBox("% Reb Equipo", av.reb_share, PCT(av.reb_share), "reb_share", lg, true, rs.reb_share)}
           ${statBox("% RebOf Equipo", av.oreb_share, PCT(av.oreb_share), "oreb_share", lg, true, rs.oreb_share)}
           ${statBox("% RebDef Equipo", av.dreb_share, PCT(av.dreb_share), "dreb_share", lg, true, rs.dreb_share)}
@@ -1899,9 +1948,8 @@ function _renderPlayerContent(main, data, comp) {
       <div class="chart-grid">
         <div class="card">
           <div class="card-title">Perfil de jugador</div>
-          <div class="radar-wrap">
-            <canvas id="chart-player-radar"></canvas>
-          </div>
+          ${radarOk ? '<div class="radar-wrap"><canvas id="chart-player-radar"></canvas></div>'
+                    : `<p class="empty">${_radarMsg(data)}</p>`}
         </div>
         <div class="card">
           <div class="card-title">Evolución por partido</div>
@@ -1949,13 +1997,13 @@ function _renderPlayerContent(main, data, comp) {
           </table>
         </div>
       </div>`;
-    drawRadar("chart-player-radar", av, lg, playerName);
-    drawPlayerEvolution("chart-player-evo", log);
+    if (radarOk) drawRadar("chart-player-radar", av, lg, playerName);
+    drawPlayerEvolution("chart-player-evo", log, lg?.oer?.avg);
 
     if (comps.length > 1) {
       document.getElementById("player-comp").addEventListener("change", e => {
         _playerComp = e.target.value;
-        _renderPlayerContent(main, data, _playerComp);
+        _reloadPlayer();
       });
     }
 
@@ -2283,16 +2331,14 @@ function renderApp() {
     if (!pill || !_teamData) return;
     const n = parseInt(pill.dataset.n, 10);
     _teamLastN = n;
-    document.querySelectorAll(".filter-pill").forEach(p => p.classList.toggle("active", p === pill));
-    _renderTeamContent(document.getElementById("team-main"), _teamData, n);
+    _reloadTeam();   // el servidor recalcula la selección; el `Ø` de liga no cambia (C-02 RF-1)
   });
 
   // Competition filter (compone con las pills Últ. N)
   document.getElementById("team-comp").addEventListener("change", e => {
     if (!_teamData) return;
     _teamComp = e.target.value;
-    _renderTeamContent(document.getElementById("team-main"), _teamData, _teamLastN);
-    renderTeamClutch(_teamData.team_code);   // los cierres se calculan en el backend por competencia
+    _reloadTeam({ clutch: true });   // los cierres también dependen de la competencia
   });
 
   const logoutBtn = document.getElementById("btn-logout");

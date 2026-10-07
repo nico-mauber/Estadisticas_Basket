@@ -54,7 +54,7 @@ def _safe_div(num, den, default=None):
 
     Las métricas de tasa (%/ratios/puntos por posesión) que no tienen intentos
     en un partido valen `null`, no 0: un partido sin tiros libres no debe contar
-    como FT% 0 y arrastrar el promedio. Los promedios (app.py `_avg`,
+    como FT% 0 y arrastrar el promedio. Los promedios (`aggregate_games`,
     `league_averages`) y el frontend excluyen los `None`. Ver
     sdd/specs/08-nulos-vs-cero/spec.md.
     """
@@ -562,39 +562,138 @@ def calc_player_stats(p: dict, team_pos: float, team: dict = None, game_minutes:
     }
 
 
-def league_averages(all_team_stats: list[dict]) -> dict:
-    """Compute mean and best value across all team games."""
-    if not all_team_stats:
-        return {}
+# ── Agregación única de una selección (C-02) ─────────────────────────────────
+# Una selección es la lista de partidos de UNA entidad (equipo o jugador) que entran en el contexto:
+# una competencia, los últimos N… `aggregate_games` es el único camino que la convierte en promedios,
+# totales y razones de nulo: lo usan el perfil de la entidad y el valor de cada miembro de la población
+# de liga (population.py), de modo que el `Ø` y la card se calculan con el mismo criterio.
 
-    keys = [
-        "oer", "der", "net_rating", "efg_pct", "ts_pct",
-        "fg2_pct", "fg3_pct", "ft_pct", "ft_rate", "pps",
-        "or_pct", "dr_pct", "trb_pct",
-        "to_pct", "to_ratio", "as_pct", "ast_ratio",
-        "pace", "pts", "possessions",
-        "opp_efg_pct", "opp_ts_pct", "opp_to_pct",
-        "peso_1p", "peso_2p", "peso_3p",
-        "fg2_uso", "fg3_uso",
-        "stocks", "def_playmaking", "def_to_ratio",
-        "uso_pct",
-        # C-01 — indicadores por posesión y por minuto (Feature 15 RF-9)
-        "as_pos", "tov_pos", "pts_pos", "orb_min", "drb_min",
-        # C-07 — PPT por tipo de tiro (Feature 16)
-        "ppt_2", "ppt_3", "ppt_ft",
-    ]
-    # Metrics where lower = better
-    lower_is_better = {"der", "to_pct", "to_ratio", "opp_efg_pct", "opp_ts_pct", "tov_pos"}
+# Claves cuyo valor de selección es la media de los valores por partido, excluyendo los nulos. Las
+# tasas que se agregan como cociente de totales (DA-02) NO van acá: las entrega un grupo de
+# POOLED_GROUPS (AS/PER, DEF/TO y, para el jugador, las nueve de C-01).
+TEAM_AVG_KEYS = [
+    "oer", "der", "net_rating", "efg_pct", "ts_pct",
+    "fg2_pct", "fg3_pct", "ft_pct", "ft_rate", "ft_rate_report",
+    "pps", "fg2_uso", "fg3_uso",
+    "or_pct", "dr_pct", "trb_pct", "to_pct", "to_ratio",
+    "as_pct", "ast_ratio", "pace", "pts", "possessions", "plays",
+    "peso_1p", "peso_2p", "peso_3p",
+    "opp_efg_pct", "opp_ts_pct", "opp_to_pct", "opp_ft_rate",
+    "stocks", "def_playmaking",
+    "ppt_2", "ppt_3", "ppt_ft",
+    "fgm", "fga", "fgm2", "fga2", "fgm3", "fga3",
+    "ftm", "fta", "orb", "drb", "trb", "ast", "tov", "stl", "blk", "pf",
+    "opp_pf", "paint_pts", "second_chance_pts", "pts_from_tov", "bench_pts", "fast_break_pts",
+]
+PLAYER_AVG_KEYS = [
+    "efg_pct", "ts_pct", "fg2_pct", "fg3_pct",
+    "ft_pct", "ft_rate", "ft_rate_report", "pps", "ppp",
+    "fg2_uso", "fg3_uso", "peso_1p", "peso_2p", "peso_3p",
+    "to_pct", "to_ratio", "as_pct", "ast_ratio",
+    "ppt_2", "ppt_3", "ppt_ft",
+    "stocks", "def_playmaking", "physical_impact",
+    "reb_share", "oreb_share", "dreb_share",
+    "uso_pct",
+    "pts", "fgm", "fga", "fgm2", "fga2", "fgm3", "fga3",
+    "ftm", "fta", "orb", "drb", "ast", "tov", "stl", "blk",
+]
+AVG_KEYS = {"team": TEAM_AVG_KEYS, "player": PLAYER_AVG_KEYS}
 
-    result = {}
+# Totales de la selección que respaldan cocientes y detalle de tiro (C-07, C-04): C-07/C-04 los agregaron
+# a la respuesta; acá es el único lugar que los lista.
+TOTAL_KEYS = ("fga2", "fgm2", "fga3", "fgm3", "fta", "ftm", "ast", "tov")
+
+# Métricas donde un valor menor es mejor: solo definen el `best` de la población (escala del radar).
+LOWER_IS_BETTER = {"der", "to_pct", "to_ratio", "opp_efg_pct", "opp_ts_pct", "opp_ft_rate",
+                   "tov_pos", "tov", "pf"}
+
+
+def _season_balance(sums: dict) -> tuple:
+    """`(valores, razones)` de AS/PER y DEF/TO de una selección: cociente de totales (DA-02, C-04)."""
+    s = sums.get
+    vals = {"ast_to": season_ast_to(s("ast"), s("tov")),
+            "def_to_ratio": season_def_to_ratio(s("stl"), s("blk"), s("drb"), s("tov"))}
+    return vals, {k: "sin_perdidas" for k, v in vals.items() if v is None}
+
+
+# Grupos de tasas de temporada, por tipo de entidad. Cada grupo recibe las sumas de la selección
+# (`ast`, `tov`, … y `pool_*` de los términos privados) y devuelve `(valores, razones)`. Una familia
+# nueva de tasas pooled se registra acá (C-07: tiro; T-05: el resto) sin tocar `aggregate_games`.
+POOLED_GROUPS = {
+    "team":   [_season_balance],
+    "player": [_season_balance, season_player_rates],
+}
+
+
+def _finite(v) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and v == v and abs(v) != float("inf")
+
+
+def _sum_games(per_game: list) -> dict:
+    """Σ de cada clave numérica de los partidos; los términos privados `_pool` van con prefijo `pool_`."""
+    sums: dict = {}
+    for g in per_game:
+        for k, v in g.items():
+            if not k.startswith("_") and _finite(v):
+                sums[k] = sums.get(k, 0) + v
+        for k, v in (g.get("_pool") or {}).items():
+            sums["pool_" + k] = sums.get("pool_" + k, 0) + (v or 0)
+    return sums
+
+
+def aggregate_games(per_game: list, keys: list, *, entity_type: str = "team",
+                    empty_reason: str = "sin_datos") -> dict:
+    """Promedios, totales y razones de nulo de una selección de partidos de UNA entidad.
+
+    `per_game`: los dicts de `calc_team_stats` / `calc_player_stats` (más el desglose FIBA) de los
+    partidos de la selección; para un jugador, solo los JUGADOS (un DNP no se pasa). Devuelve
+    `{"games", "averages", "totals", "null_reasons"}`:
+    - cada clave de `keys` = media de sus valores por partido, sin los nulos (`round(…, 4)`);
+    - cada grupo de `POOLED_GROUPS[entity_type]` = cociente de los totales de la selección;
+    - `totals` = Σ de `TOTAL_KEYS`.
+    Sin partidos, todo es `None` con la razón `empty_reason` (`sin_datos` en equipo, `dnp` en jugador).
+    Nunca reemplaza un nulo por cero.
+    """
+    n = len(per_game)
+    sums = _sum_games(per_game)
+    averages = {}
     for k in keys:
-        vals = [s[k] for s in all_team_stats if k in s and s[k] is not None]
+        vals = [g[k] for g in per_game if _finite(g.get(k))]
+        averages[k] = round(sum(vals) / len(vals), 4) if vals else None
+    overrides: dict = {}
+    for group in POOLED_GROUPS[entity_type]:
+        vals, reasons = group(sums)
+        averages.update(vals)
+        overrides.update(reasons)
+    totals = {k: int(sums.get(k, 0)) for k in TOTAL_KEYS}
+    if not n:
+        reasons = {k: empty_reason for k in averages}
+    else:
+        reasons = null_reasons(averages, played=True, overrides=overrides)
+    return {"games": n, "averages": averages, "totals": totals, "null_reasons": reasons}
+
+
+def metric_keys(entity_type: str) -> list:
+    """Todas las claves de `averages` de un tipo de entidad (las del `Ø` de liga)."""
+    return list(aggregate_games([], AVG_KEYS[entity_type], entity_type=entity_type)["averages"])
+
+
+def league_averages(member_values: list, keys: list) -> dict:
+    """Promedio de la competencia (`Ø`) por métrica: la media de los valores de las ENTIDADES.
+
+    `member_values`: un dict por entidad (el `averages` de `aggregate_games` sobre TODOS sus partidos de
+    la competencia). Cada entidad pesa una vez (DA-08); un valor nulo no entra en la media ni cuenta como
+    0. Devuelve `{clave: {"avg", "best", "reason", "n"}}`: `best` es el mejor valor de la población
+    (solo escala el radar), `n` cuántas entidades aportaron un valor. Sin ningún valor: `avg`/`best`
+    `None` con razón `sin_datos`, nunca 0 (Feature 14 RF-3).
+    """
+    out = {}
+    for k in keys:
+        vals = [m[k] for m in member_values if _finite(m.get(k))]
         if not vals:
-            # Sin ningún valor válido → None, no 0. Un `Ø 0.0%` hace creer que el
-            # promedio de la liga es cero (Feature 14 RF-3; origen del bug de C-01).
-            result[k] = {"avg": None, "best": None}
+            out[k] = {"avg": None, "best": None, "reason": "sin_datos", "n": 0}
             continue
-        avg  = round(sum(vals) / len(vals), 4)
-        best = min(vals) if k in lower_is_better else max(vals)
-        result[k] = {"avg": avg, "best": best}
-    return result
+        out[k] = {"avg": round(sum(vals) / len(vals), 4),
+                  "best": min(vals) if k in LOWER_IS_BETTER else max(vals),
+                  "reason": None, "n": len(vals)}
+    return out

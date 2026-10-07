@@ -164,8 +164,11 @@ def backfill_player_ids() -> int:
 
 def group_key(row):
     """Clave para agrupar filas de un mismo jugador: su ficha, o (equipo, nombre normalizado) si la
-    fila todavía no la tiene (no debería ocurrir tras `backfill_player_ids`)."""
-    return row.player_id if row.player_id is not None else (row.team_code, norm_name(row.player_name))
+    fila todavía no la tiene (no debería ocurrir tras `backfill_player_ids`). Acepta filas ORM o dicts
+    (`repository.player_game_rows`)."""
+    get = row.get if isinstance(row, dict) else lambda k: getattr(row, k)
+    pid = get("player_id")
+    return pid if pid is not None else (get("team_code"), norm_name(get("player_name")))
 
 
 def aliases(player_id: int) -> list[str]:
