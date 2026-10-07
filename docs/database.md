@@ -221,6 +221,31 @@ Play-by-play completo: un registro por evento de FIBA (`raw["pbp"]`). Base de li
 
 Constantes asociadas en `app.py`: `ZONE_KEYS_11`, `ZONE_POINTS`, `_2PT_ZONES`, `_3PT_ZONES`. Tiros sin coordenadas (`x=0, y=0`) caen en `top_key_3` (3PT) o `mid_top` (2PT sin keyword de pintura).
 
+### `app_config`
+Configuración global de la aplicación (F-13). Solo almacena **overrides**: si el valor coincide con el default se borra la fila.
+
+| Columna | Tipo | Descripción |
+|---------|------|-------------|
+| `key` | TEXT PK | Clave del catálogo (`CONFIG_SPEC` en `config.py`) |
+| `value` | TEXT NOT NULL | Valor serializado como texto |
+| `updated_at` | TEXT NOT NULL | ISO-8601 |
+| `updated_by` | TEXT | Usuario que lo modificó |
+
+---
+
+### `user_prefs`
+Preferencias por usuario (F-13). Clave compuesta `(owner, scope, key)`.
+
+| Columna | Tipo | Descripción |
+|---------|------|-------------|
+| `owner` | TEXT NOT NULL | Usuario de sesión o `"_open"` si no hay auth |
+| `scope` | TEXT NOT NULL | Alcance: `table.columns`, `table.sort`, `table.colorize`, `panel.collapsed`, `ui` |
+| `key` | TEXT NOT NULL | Clave dentro del scope |
+| `value` | TEXT NOT NULL | Valor serializado |
+| `updated_at` | TEXT NOT NULL | ISO-8601 |
+
+---
+
 ## Inicialización y migración
 
 ```bash

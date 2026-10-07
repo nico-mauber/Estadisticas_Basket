@@ -5,13 +5,10 @@ Métricas con fórmulas de docs/metrics.md; semántica null de Feature 08 (tasa 
 denominador 0 → None).
 """
 from stats_engine import _safe_div
+import config
 
-# Único lugar del umbral de partido cerrado y de la ventana de cierre (C-06). La ruta y el
-# frontend los leen de la respuesta; F-13 los reemplaza por la configuración.
-DEFAULT_MARGIN = 10          # partido cerrado = diferencia ≤ 10 al entrar a la ventana (antes 15)
-DEFAULT_WINDOW_SECS = 300    # últimos 5 minutos del último período regular
-MARGIN_RANGE = (0, 40)       # valores aceptados en `?margin`
-WINDOW_RANGE = (60, 600)     # valores aceptados en `?window_secs`
+MARGIN_RANGE = (0, 40)
+WINDOW_RANGE = (60, 600)
 
 OVERTIME_TYPES = ("OVERTIME", "OT")   # FIBA manda OVERTIME; OT es el valor legado
 
@@ -122,8 +119,8 @@ def team_clutch(games, team_code, team_name, margin=None, window_secs=None, game
     `games_without_pbp`: partidos del equipo en el universo que no tienen pbp (solo se
     informan, para que el recuento cierre). Ver sdd/specs/05-clutch/spec.md §10.
     """
-    margin = DEFAULT_MARGIN if margin is None else margin
-    window_secs = DEFAULT_WINDOW_SECS if window_secs is None else window_secs
+    margin = config.get("clutch.margin") if margin is None else margin
+    window_secs = config.get("clutch.window_secs") if window_secs is None else window_secs
     per_game, team_boxes, opp_boxes = [], [], []
     excluded = without_events = wins = losses = ties = 0
 

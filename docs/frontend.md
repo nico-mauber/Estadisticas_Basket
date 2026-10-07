@@ -85,6 +85,13 @@ api.assignGame(gameId, compId)         // PATCH /api/games/<id> (admin)
 api.dataQuality(compId)                // GET /api/data-quality
 api.reprocess({game_ids} | {competition_id, offset})   // POST /api/reprocess (admin)
 api.seed()                  // POST   /api/seed  (dev)
+// Configuración (F-13)
+api.settings()              // GET    /api/settings
+api.saveSettings(values)    // PUT    /api/settings
+api.resetSettings(body)     // POST   /api/settings/reset
+api.prefs(scope)            // GET    /api/prefs?scope=
+api.savePref(scope, k, v)   // PUT    /api/prefs
+api.deletePref(scope, k)    // DELETE /api/prefs
 ```
 
 ## `charts.js`
@@ -205,7 +212,7 @@ El mismo mapa se muestra en dos lugares: en la vista **Jugador** (`renderPlayer`
 
 ## Service Worker (`sw.js`)
 
-Cache name: `smart-basket-v17`
+Cache name: `smart-basket-v19`
 
 **Estrategia:**
 - `install`: pre-cachea los archivos estáticos listados en `STATIC[]`
@@ -217,7 +224,9 @@ Cache name: `smart-basket-v17`
 **Assets cacheados:**
 ```js
 "/", "/manifest.json", "/css/style.css",
-"/js/app.js", "/js/api.js", "/js/charts.js", "/js/core/format.js", "/js/chart.umd.min.js"
+"/js/app.js", "/js/api.js", "/js/charts.js", "/js/core/format.js",
+"/js/core/prefs.js", "/js/components/identity-merge.js",
+"/js/components/settings-form.js", "/js/chart.umd.min.js"
 ```
 
 Todo módulo ES nuevo que importe `app.js` debe agregarse a `STATIC` (y subir `CACHE`): el fetch
@@ -268,6 +277,14 @@ Ver `sdd/specs/16-tiro-completo-ppt/`.
 > en backend por retro-compat pero no se muestra en UI. `SEARCH_METRICS` usa `ppt`.
 > Tasas de tiro pooled (`season_shooting`) calculan `ppt`, `ppt_2`, `ppt_3`, `ppt_ft`, `fg2_pct`,
 > `fg3_pct`, `ft_pct`, `fg2_uso`, `fg3_uso` desde totales de temporada.
+
+### Configuración (F-13)
+
+Ícono ⚙ en header (`btn-config`) abre sección `#sec-config`, fuera del nav principal. `renderConfig()` carga `api.settings()`, genera formulario con `renderSettingsForm(el, payload, {onSave, onReset})` (`components/settings-form.js`).
+
+Controles por tipo: `int`/`float` → number, `bool` → checkbox, `enum` → select, `int_or_null` con choices → select, `json` → textarea. Solo lectura si `!is_admin`. Pills de sección, badge "Modificado", botón ↺ por clave, "Restablecer módulo" por sección. Sección sin claves activas: mensaje con features consumidoras. Errores de validación en línea por campo.
+
+**Preferencias** (`core/prefs.js`): `loadPrefs(scope)` carga de API, cachea en memoria + localStorage. `getPref(scope, key, def)` lectura sync. `setPref(scope, key, value)` escritura optimista. Scopes: `table.columns`, `table.sort`, `table.colorize`, `panel.collapsed`, `ui`.
 
 ### Vista Liga — tabla general y ejes del mapa (C-09 / C-10)
 

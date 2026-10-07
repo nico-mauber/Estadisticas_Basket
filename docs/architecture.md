@@ -21,8 +21,10 @@ Smart-Basket es un monolito full-stack: Flask sirve tanto la API REST como los a
 │  │   data_quality.py  (panel de calidad)            │   │
 │  │   identity.py      (fichas de jugador)           │   │
 │  │   stats_engine.py  (métricas avanzadas)          │   │
-│  │   clutch.py        (cierres, sobre pbp_events)   │
-│   lineups.py       (quintetos: lineups + on/off) │   │
+│  │   clutch.py        (cierres, sobre pbp_events)   │   │
+│  │   lineups.py       (quintetos: lineups + on/off)  │   │
+│  │   config.py        (configuración global, F-13)   │   │
+│  │   prefs.py         (preferencias usuario, F-13)   │   │
 │  │   database.py      (SQLite vía /data/basketball.db)│  │
 │  └──────────────────────────────────────────────────┘   │
 │                                                         │
@@ -33,7 +35,7 @@ Smart-Basket es un monolito full-stack: Flask sirve tanto la API REST como los a
          ▼
 ┌──────────────────────┐
 │  Browser / PWA       │
-│  frontend/js/app.js  │  SPA, 6 vistas (+ login)
+│  frontend/js/app.js  │  SPA, 6 vistas + config (+ login)
 │  frontend/sw.js      │  Service Worker (cache offline)
 └──────────────────────┘
 ```
@@ -96,8 +98,14 @@ Calcula métricas avanzadas on-the-fly en cada request (no se persisten en DB).
 
 Ver [metrics.md](metrics.md) para fórmulas completas.
 
+### `config.py`
+Configuración global (F-13). `CONFIG_SPEC`: catálogo de 81 claves con tipo, default, rango, sección y status (`activa`/`reservada`). 6 claves activas: `clutch.margin`, `clutch.window_secs`, `standings.win_points`, `standings.loss_points`, `standings.tiebreak`, `ui.default_competition_id`. Las reservadas se habilitan al implementar su feature consumidora. `get(key)` lee override o default (overrides cacheados en `flask.g`). `set_values(values)` valida tipo/rango/coherencia y escribe atómicamente; borra la fila si el valor iguala al default (RF-2). `reset(keys)` / `reset_section(slug)` borran overrides. `spec_json()` / `payload()` generan la respuesta para el frontend.
+
+### `prefs.py`
+Preferencias por usuario (F-13). Scopes: `table.columns`, `table.sort`, `table.colorize`, `panel.collapsed`, `ui` (con claves restringidas). `current_owner()` resuelve usuario de sesión o `"_open"`. CRUD: `get_prefs(scope)`, `set_pref(scope, key, value)`, `delete_pref(scope, key)`.
+
 ### `clutch.py`
-Agrega el play-by-play (`pbp_events`) para la **ventana de cierre** del partido (último período REGULAR con reloj ≤ `window_secs` + todas las prórrogas, `period_type` `OVERTIME`/`OT`). Único lugar del umbral y la ventana: `DEFAULT_MARGIN = 10` y `DEFAULT_WINDOW_SECS = 300` (con sus rangos válidos `MARGIN_RANGE`/`WINDOW_RANGE`), que F-13 reemplaza por la configuración. `team_clutch(games, team_code, team_name, margin=None, window_secs=None, games_without_pbp=0)` retorna el cierre de UN equipo: un **agregado** ("mini-partido" de todos sus cierres apretados) + un **desglose por partido**, contando solo los partidos con diferencia ≤ `margin` al entrar a la ventana (`_entry_margin`), y el recuento completo de partidos (C-06). Usa las fórmulas de `stats_engine`. Alimenta `GET /api/clutch/<team_code>` en la vista Equipo. Base: Feature 02 (pbp persistido). Ver `sdd/specs/05-clutch/spec.md §10` (revisión v2).
+Agrega el play-by-play (`pbp_events`) para la **ventana de cierre** del partido (último período REGULAR con reloj ≤ `window_secs` + todas las prórrogas, `period_type` `OVERTIME`/`OT`). Umbral y ventana se leen de `config.get()` (F-13); los `DEFAULT_MARGIN`/`DEFAULT_WINDOW_SECS` anteriores fueron eliminados. `team_clutch(games, team_code, team_name, margin=None, window_secs=None, games_without_pbp=0)` retorna el cierre de UN equipo: un **agregado** ("mini-partido" de todos sus cierres apretados) + un **desglose por partido**, contando solo los partidos con diferencia ≤ `margin` al entrar a la ventana (`_entry_margin`), y el recuento completo de partidos (C-06). Usa las fórmulas de `stats_engine`. Alimenta `GET /api/clutch/<team_code>` en la vista Equipo. Base: Feature 02 (pbp persistido). Ver `sdd/specs/05-clutch/spec.md §10` (revisión v2).
 
 ### `lineups.py`
 Motor de reconstrucción de quintetos en cancha, compartido por **Feature 03 (lineups)** y **Feature 04 (on/off)**. `build_segments(events, team_code, starters)` camina `pbp_events` de un partido y parte en tramos cada vez que el equipo hace una `substitution`; cada tramo guarda el quinteto en cancha (`on_court`), sus eventos y los segundos transcurridos (exacto: 600 s por cuarto, 300 s por prórroga `OVERTIME`). `lineup_stats()` filtra tramos donde una combinación de 3-5 jugadores está en cancha; `onoff_stats()` parte todos los tramos en ON/OFF para un jugador (partición exhaustiva y disjunta por construcción). Alimenta `GET /api/lineup/<team>` y `GET /api/onoff/<team>/<player>`. Base: Feature 02 (`pbp_events` + `starter`).

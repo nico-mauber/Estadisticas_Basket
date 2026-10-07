@@ -2,6 +2,7 @@ import { api, setUnauthorizedHandler } from "./api.js";
 import { drawRadar, drawEvolution, drawPlayerEvolution, drawLeagueScatter, drawCompareRadar, resetZoom } from "./charts.js";
 import { PCT, PCT0, DEC1, DEC2, fmtNumber, isNull, nullDisplay, fmtOrNull } from "./core/format.js";
 import { renderDuplicateItems } from "./components/identity-merge.js";
+import { renderSettingsForm } from "./components/settings-form.js";
 
 // ── Toast ──────────────────────────────────────────────────────────────────
 function toast(msg, type = "ok") {
@@ -213,10 +214,12 @@ async function refreshCompareSelectors() {
 }
 
 // ── Nav ────────────────────────────────────────────────────────────────────
-const sections = ["import", "league", "team", "compare", "player", "search"];
+const sections = ["import", "league", "team", "compare", "player", "search", "config"];
 let activeSection = "import";
+let _lastSection = "import";
 
 function setSection(id) {
+  if (activeSection !== "config") _lastSection = activeSection;
   activeSection = id;
   document.querySelectorAll("nav button").forEach(b => b.classList.toggle("active", b.dataset.section === id));
   document.querySelectorAll(".section").forEach(s => s.style.display = s.id === `sec-${id}` ? "" : "none");
@@ -2193,10 +2196,11 @@ function renderApp() {
     <header>
       <span class="header-logo">🏀 Smart-Basket</span>
       <span class="header-sub">Basketball Advanced Analytics</span>
+      <button class="header-gear" id="btn-config" aria-label="Configuración" title="Configuración">⚙</button>
       ${_authRequired ? `<span class="header-user">${_authUser || ""} · <button class="header-logout" id="btn-logout">Salir</button></span>` : ""}
     </header>
     <nav>
-      ${sections.map(s => `
+      ${sections.filter(s => s !== "config").map(s => `
         <button data-section="${s}">
           <span class="nav-icon">${NAV_ITEMS[s].icon}</span>
           ${NAV_ITEMS[s].label}
@@ -2264,6 +2268,9 @@ function renderApp() {
       <div class="section" id="sec-search">
         <div id="search-main"><p class="empty"><span class="spinner"></span>Cargando buscador...</p></div>
       </div>
+
+      <!-- Config (F-13) -->
+      <div class="section" id="sec-config"></div>
     </main>`;
 
   // Nav clicks
@@ -2349,9 +2356,52 @@ function renderApp() {
     });
   }
 
+  document.getElementById("btn-config").addEventListener("click", () => {
+    setSection("config");
+    renderConfig();
+  });
+
   setSection("import");
   renderImport();
 }
+
+// ── Config screen (F-13) ─────────────────────────────────────────────────────
+
+async function renderConfig() {
+  const sec = document.getElementById("sec-config");
+  sec.innerHTML = `<div class="card"><div class="card-title">Configuración
+    <button class="btn btn-ghost btn-back-config" id="btn-config-back">← Volver</button></div>
+    <div id="config-body"><p class="empty"><span class="spinner"></span>Cargando configuración…</p></div>
+  </div>`;
+  document.getElementById("btn-config-back").addEventListener("click", () => {
+    setSection(_lastSection !== "config" ? _lastSection : "import");
+  });
+  try {
+    const data = await api.settings();
+    renderSettingsForm(document.getElementById("config-body"), data, {
+      onSave: async (values) => {
+        const result = await api.saveSettings(values);
+        toast("Configuración guardada. Los cálculos ya usan los valores nuevos.");
+        _teamData = null; _clutchData = null;
+        renderSettingsForm(document.getElementById("config-body"), result, { onSave: arguments.callee, onReset: arguments[1] });
+        renderConfig();
+      },
+      onReset: async (body) => {
+        const result = await api.resetSettings(body);
+        toast("Valores restablecidos.");
+        _teamData = null; _clutchData = null;
+        renderConfig();
+      },
+    });
+  } catch (e) {
+    const msg = e.message && e.message.includes("fetch") ? "Sin conexión: la configuración no está disponible."
+      : `No se pudo cargar la configuración. ${e.message}`;
+    document.getElementById("config-body").innerHTML = `<p class="empty">${msg}</p>
+      <button class="btn btn-ghost" id="btn-config-retry">Reintentar</button>`;
+    document.getElementById("btn-config-retry").addEventListener("click", () => renderConfig());
+  }
+}
+
 
 // ── Login screen ─────────────────────────────────────────────────────────────
 function showLogin(message = "") {

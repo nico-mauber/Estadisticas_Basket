@@ -45,9 +45,9 @@ def _game_fields(game: Game) -> dict:
 # ── Competencia de la petición ──────────────────────────────────────────────
 
 def _configured_default() -> int | None:
-    """Hook de F-13: `ui.default_competition_id` de la configuración. Hasta F-13 no hay
-    configuración y devuelve None; si el id no existe o no está publicada se ignora."""
-    return None
+    """F-13: `ui.default_competition_id` de la configuración."""
+    import config
+    return config.get("ui.default_competition_id")
 
 
 def _entity_competition(team_code: str | None, player_id: int | None) -> int | None:

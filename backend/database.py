@@ -217,6 +217,28 @@ class PbpEvent(db.Model):
     action_number = db.Column(db.Integer)
 
 
+class AppConfig(db.Model):
+    """Configuración global de la app (F-13). Solo guarda overrides del default."""
+    __tablename__ = "app_config"
+
+    key        = db.Column(db.String, primary_key=True)
+    value      = db.Column(db.Text, nullable=False)
+    updated_at = db.Column(db.String, nullable=False)
+    updated_by = db.Column(db.String)
+
+
+class UserPref(db.Model):
+    """Preferencias personales por usuario de sesión (F-13)."""
+    __tablename__  = "user_prefs"
+    __table_args__ = (db.PrimaryKeyConstraint("owner", "scope", "key"),)
+
+    owner      = db.Column(db.String, nullable=False)
+    scope      = db.Column(db.String, nullable=False)
+    key        = db.Column(db.String, nullable=False)
+    value      = db.Column(db.Text, nullable=False)
+    updated_at = db.Column(db.String, nullable=False)
+
+
 class GameSource(db.Model):
     """JSON crudo de FIBA archivado (gzip) para reprocesar sin volver a descargarlo (F-11, DA-12)."""
     __tablename__ = "game_sources"

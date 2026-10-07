@@ -17,7 +17,9 @@ import context
 import data_quality
 import identity
 import ingest
+import config
 import population
+import prefs
 import repository
 from competitions import CompetitionError
 from context import ContextError
@@ -980,8 +982,9 @@ def league_overview():
         result.append({
             "team_code":  code,
             "team_name":  name,
-            # C-09 — tabla general: games, wins, losses, table_points, pts_for, pts_against
-            **standings_row([(r.pts, r.opp_pts) for r in rows]),
+            **standings_row([(r.pts, r.opp_pts) for r in rows],
+                           win_points=config.get("standings.win_points"),
+                           loss_points=config.get("standings.loss_points")),
             "oer":        _avg("oer"),
             "der":        _avg("der"),
             "net_rating": _avg("net_rating"),
@@ -996,7 +999,8 @@ def league_overview():
         })
 
     # Posición en la tabla general (C-09): el orden y el desempate se deciden acá.
-    for pos, row in enumerate(sorted(result, key=standings_sort_key), start=1):
+    tiebreak = config.get("standings.tiebreak")
+    for pos, row in enumerate(sorted(result, key=lambda r: standings_sort_key(r, tiebreak)), start=1):
         row["standings_pos"] = pos
 
     # Orden null-safe: desde la Feature 14 `_avg` puede devolver None, y comparar
@@ -1092,6 +1096,89 @@ def seed_games():
         "failed":   len(results) - imported,
         "results":  results,
     })
+
+
+# ── Configuración (F-13) ──────────────────────────────────────────────────
+
+@app.route("/api/settings")
+@login_required
+def get_settings():
+    return jsonify(config.payload())
+
+
+@app.route("/api/settings", methods=["PUT"])
+@admin_required
+def put_settings():
+    body = request.get_json(silent=True) or {}
+    values = body.get("values")
+    if not values or not isinstance(values, dict):
+        return jsonify({"error": "No hay valores para guardar", "code": "parametro_invalido"}), 400
+    try:
+        result = config.set_values(values)
+    except config.ConfigError as e:
+        code = "parametro_invalido"
+        for v in e.errors.values():
+            if "habilita con" in str(v) or "desconocida" in str(v).lower():
+                code = "clave_no_disponible"
+                break
+        return jsonify({"error": "Hay valores inválidos", "code": code, "details": e.errors}), 400
+    return jsonify(result)
+
+
+@app.route("/api/settings/reset", methods=["POST"])
+@admin_required
+def reset_settings():
+    body = request.get_json(silent=True) or {}
+    keys = body.get("keys")
+    section = body.get("section")
+    if not keys and not section:
+        return jsonify({"error": "Indicá claves o una sección", "code": "parametro_invalido"}), 400
+    try:
+        if section:
+            result = config.reset_section(section)
+        else:
+            result = config.reset(keys)
+    except config.ConfigError as e:
+        return jsonify({"error": "Hay valores inválidos", "code": "clave_no_disponible", "details": e.errors}), 400
+    return jsonify(result)
+
+
+@app.route("/api/prefs")
+@login_required
+def get_prefs():
+    scope = request.args.get("scope", "")
+    try:
+        values = prefs.get_prefs(scope)
+    except ValueError as e:
+        return jsonify({"error": str(e), "code": "parametro_invalido"}), 400
+    return jsonify({"scope": scope, "values": values})
+
+
+@app.route("/api/prefs", methods=["PUT"])
+@login_required
+def put_pref():
+    body = request.get_json(silent=True) or {}
+    scope = body.get("scope", "")
+    key = body.get("key", "")
+    value = body.get("value")
+    try:
+        prefs.set_pref(scope, key, value)
+    except ValueError as e:
+        return jsonify({"error": str(e), "code": "parametro_invalido"}), 400
+    return jsonify({"scope": scope, "key": key, "value": value})
+
+
+@app.route("/api/prefs", methods=["DELETE"])
+@login_required
+def delete_pref():
+    body = request.get_json(silent=True) or {}
+    scope = body.get("scope", "")
+    key = body.get("key", "")
+    try:
+        deleted = prefs.delete_pref(scope, key)
+    except ValueError as e:
+        return jsonify({"error": str(e), "code": "parametro_invalido"}), 400
+    return jsonify({"scope": scope, "key": key, "deleted": deleted})
 
 
 # ── PWA ────────────────────────────────────────────────────────────────────

@@ -19,7 +19,11 @@ async function apiFetch(path, opts = {}) {
   }
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(err.error || res.statusText);
+    const e = new Error(err.error || res.statusText);
+    e.code = err.code || null;
+    e.details = err.details || null;
+    e.status = res.status;
+    throw e;
   }
   return res.json();
 }
@@ -56,4 +60,11 @@ export const api = {
   assignGame:        (gid, compId) => send(`/api/games/${encodeURIComponent(gid)}`, "PATCH", { competition_id: compId }),
   dataQuality:       comp         => apiFetch(`/api/data-quality${qs({ competition: comp })}`),
   reprocess:         body         => send("/api/reprocess", "POST", body),
+  // Configuración (F-13)
+  settings:          ()           => apiFetch("/api/settings"),
+  saveSettings:      values       => send("/api/settings", "PUT", { values }),
+  resetSettings:     body         => send("/api/settings/reset", "POST", body),
+  prefs:             scope        => apiFetch(`/api/prefs${qs({ scope })}`),
+  savePref:          (scope, key, value) => send("/api/prefs", "PUT", { scope, key, value }),
+  deletePref:        (scope, key) => apiFetch("/api/prefs", { method: "DELETE", headers: JSON_HEADERS, body: JSON.stringify({ scope, key }) }),
 };

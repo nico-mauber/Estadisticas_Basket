@@ -748,3 +748,117 @@ thead th[data-key]:hover  { color: var(--text); }
   .dup-item { grid-template-columns: 64px 1fr 220px auto; align-items: center; gap: var(--sp-4); }
   .dup-action .btn { min-height: 0; }
 }
+
+/* ── settings-form (F-13) ────────────────────────────── */
+.header-gear {
+  background: none;
+  border: none;
+  font-size: 20px;
+  cursor: pointer;
+  padding: 4px 6px;
+  line-height: 1;
+  color: var(--muted);
+  margin-left: auto;
+}
+.header-gear:hover { color: var(--accent); }
+
+.settings-form { padding: var(--sp-2) 0; }
+.settings-pills { display: flex; gap: var(--sp-2); flex-wrap: wrap; margin-bottom: var(--sp-4); }
+.settings-row {
+  padding: var(--sp-3) 0;
+  border-bottom: 1px solid var(--border);
+}
+.settings-label {
+  font-weight: 600;
+  font-size: 13px;
+  margin-bottom: var(--sp-1);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.settings-control input,
+.settings-control select,
+.settings-control textarea {
+  width: 100%;
+  max-width: 300px;
+  padding: 6px 8px;
+  font-size: 13px;
+  font-family: var(--font);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+}
+.settings-control input:disabled,
+.settings-control select:disabled,
+.settings-control textarea:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.settings-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: 13px;
+  cursor: pointer;
+}
+.settings-toggle input { width: auto; max-width: none; }
+.settings-info {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-top: var(--sp-1);
+  font-size: 11px;
+  color: var(--muted);
+}
+.settings-modified {
+  background: var(--accent);
+  color: #fff;
+  padding: 1px 6px;
+  border-radius: var(--radius);
+  font-size: 10px;
+  font-weight: 700;
+}
+.settings-meta { font-style: italic; }
+.settings-error { color: var(--negative); font-size: 11px; margin-top: 2px; min-height: 0; }
+.settings-empty { padding: var(--sp-4); color: var(--muted); text-align: center; }
+.settings-readonly-notice {
+  padding: var(--sp-3);
+  background: var(--bg);
+  border-radius: var(--radius);
+  color: var(--muted);
+  text-align: center;
+  margin-top: var(--sp-3);
+}
+.settings-actions {
+  display: flex;
+  gap: var(--sp-3);
+  padding: var(--sp-3) 0;
+  position: sticky;
+  bottom: calc(var(--bottom-nav-h, 60px) + 8px);
+  background: var(--surface);
+  z-index: 5;
+}
+.settings-reset-key {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--muted);
+  padding: 0 4px;
+}
+.settings-reset-key:hover { color: var(--accent); }
+.btn-back-config {
+  margin-left: auto;
+  font-size: 12px;
+}
+@media (min-width: 768px) {
+  .settings-row {
+    display: grid;
+    grid-template-columns: 260px 1fr;
+    gap: var(--sp-2) var(--sp-4);
+    align-items: start;
+  }
+  .settings-info { grid-column: 2; }
+  .settings-error { grid-column: 2; }
+}

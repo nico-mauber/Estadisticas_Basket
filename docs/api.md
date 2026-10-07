@@ -696,3 +696,70 @@ Importa el set fijo de partidos `SEED_URLS` (definido en `app.py`) en una sola o
 ```
 
 **Errores:** `403` — `SEED_ENABLED` no está habilitado.
+
+---
+
+## `GET /api/settings` — Configuración vigente (F-13)
+
+**Auth:** `login_required`.
+
+Response 200:
+```json
+{
+  "version": 0,
+  "is_admin": true,
+  "values": {
+    "clutch.margin": 10, "clutch.window_secs": 300,
+    "standings.win_points": 2, "standings.loss_points": 1,
+    "standings.tiebreak": "diferencia",
+    "ui.default_competition_id": null
+  },
+  "sections": [{"slug": "umbrales", "label": "Umbrales de muestra"}, ...],
+  "spec": [{"key": "clutch.margin", "type": "int", "default": 10, "min": 0, "max": 40, ...}]
+}
+```
+
+`values` incluye solo claves **activas**. `spec` incluye todas (activas y reservadas con `status`).
+
+---
+
+## `PUT /api/settings` — Guardar configuración (F-13)
+
+**Auth:** `admin_required`. Body: `{"values": {"clutch.margin": 5}}`.
+
+Response 200: mismo shape que GET con valores actualizados. Errores:
+- `400 parametro_invalido` — tipo, rango o coherencia inválida; `details` con error por clave.
+- `400 clave_no_disponible` — clave reservada o desconocida.
+- `403 requiere_admin`.
+
+---
+
+## `POST /api/settings/reset` — Restablecer configuración (F-13)
+
+**Auth:** `admin_required`. Body: `{"keys": ["clutch.margin"]}` o `{"section": "contexto"}`.
+
+Response 200: mismo shape que GET. Las claves vuelven a su default.
+
+---
+
+## `GET /api/prefs?scope=<scope>` — Preferencias del usuario (F-13)
+
+**Auth:** `login_required`. Scopes: `table.columns`, `table.sort`, `table.colorize`, `panel.collapsed`, `ui`.
+
+Response 200: `{"scope": "panel.collapsed", "values": {"tiro": true}}`.
+
+---
+
+## `PUT /api/prefs` — Guardar preferencia (F-13)
+
+**Auth:** `login_required`. Body: `{"scope": "panel.collapsed", "key": "tiro", "value": true}`.
+
+Response 200: `{"scope": "...", "key": "...", "value": ...}`.
+
+---
+
+## `DELETE /api/prefs` — Borrar preferencia (F-13)
+
+**Auth:** `login_required`. Body: `{"scope": "panel.collapsed", "key": "tiro"}`.
+
+Response 200: `{"scope": "...", "key": "...", "deleted": true}`.
