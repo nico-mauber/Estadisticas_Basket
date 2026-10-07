@@ -30,7 +30,7 @@ Todas las rutas bajo `/api/`. Respuestas en JSON. Errores retornan `{"error": "m
 
 > **Métricas de jugador por posesión y por minuto.** `game_log[]` y `averages` de los endpoints de jugador incluyen `as_pos`, `tov_pos` (`PER/pos`), `pts_pos`, `orb_min` y `drb_min`; y `or_pct`/`dr_pct`/`trb_pct`, que antes estaban **ausentes** y ahora traen el valor de la fórmula individual (ver `docs/metrics.md`). Todos pueden ser `null` con denominador 0 o sin datos del rival.
 >
-> **`ast_to` cambió de semántica**: era el promedio de los ratios por partido; ahora es el **acumulado de temporada** (`AST_total / TOV_total`), en equipo y en jugador. Un mismo jugador puede mostrar un valor distinto al de antes — el anterior era incorrecto. `null` si no hubo pérdidas (antes `99.0`). Ver `sdd/specs/15-metricas-jugador/`.
+> **`ast_to` cambió de semántica**: era el promedio de los ratios por partido; ahora `averages.ast_to` es el **acumulado de la selección** (`ΣAS / ΣPER`), en equipo y en jugador. `null` si no hubo pérdidas (antes `99.0`). `GET /api/team/<code>` y `GET /api/player/…` devuelven además `totals.ast` y `totals.tov` (Σ de la selección; en jugador, solo partidos jugados) para reproducir el cociente con el box score, y `GET /api/team/<code>` trae `game_log[].ast_to` (AS/PER **de ese partido**, `null` con razón `sin_perdidas` si tuvo 0 pérdidas). Ver `sdd/specs/v2/fase-1-confiabilidad/08-C-04-as-per/`.
 
 > **Competencias en borrador (F-11).** Los partidos de una competencia con `status: "borrador"` no entran en **ninguna** respuesta de lectura (equipos, liga, jugadores, buscador, mapas de tiro, quintetos, ON/OFF, cierres) hasta publicarla. Solo se ven en `GET /api/games`, `GET /api/competitions?include_hidden=1` y `GET /api/data-quality` (sección Datos).
 

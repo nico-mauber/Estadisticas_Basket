@@ -44,7 +44,7 @@ function statBox(label, value, display, leagueKey, league, higherIsBetter = true
   // el `includes("to_")` lo formatea como % y un 3.275 se muestra "327.5%" — la misma
   // familia de valor imposible que reporta C-02 (Feature 14 RF-5).
   // `as_pos` cae en el mismo heurístico por `includes("as_")` y es un ratio (Feature 15 D-6)
-  const NOT_PCT = ["def_to_ratio", "as_pos"];
+  const NOT_PCT = ["def_to_ratio", "as_pos", "ast_to"];   // AS/PER es un cociente, no un %
   const isPct = !!leagueKey && !NOT_PCT.includes(leagueKey) &&
     (leagueKey.includes("pct") || leagueKey.includes("or_") || leagueKey.includes("dr_") || leagueKey.includes("to_") || leagueKey.includes("as_"));
   const fmt   = v => v != null ? (isPct ? PCT(v) : DEC2(v)) : "—";
@@ -61,6 +61,18 @@ function statBox(label, value, display, leagueKey, league, higherIsBetter = true
       <div class="stat-value ${cls}">${isNull(value) ? nullDisplay(reason) : display}</div>
       ${context}
     </div>`;
+}
+
+// Totales que respaldan un cociente: " (43/29)" bajo el valor (C-04). Vacío si falta alguno.
+const _ratioSub = (a, b) => a == null || b == null ? ""
+  : `<span style="font-size:9px;color:var(--muted)"> (${a}/${b})</span>`;
+
+// Caja de AS/PER (asistencias sobre pérdidas acumuladas de la selección). PER = pérdidas.
+// Sin `Ø` ni color mientras no exista un promedio de liga del mismo criterio (C-02).
+function _astPerBox(av, totals, lg) {
+  const label = '<span title="Asistencias sobre pérdidas, acumulado de la selección (PER = pérdidas)">AS/PER</span>';
+  return statBox(label, av.ast_to, DEC2(av.ast_to) + _ratioSub(totals?.ast, totals?.tov),
+                 "ast_to", lg, true, av.null_reasons?.ast_to);
 }
 
 // ── Compute averages from a game_log array (for last-N filter) ─────────────
@@ -98,10 +110,15 @@ function _computeAvg(gameLog) {
   const sum = k => gameLog.reduce((s, g) => s + (g[k] || 0), 0);
   const tov = sum("tov");
   result.def_to_ratio = tov ? Math.round(((sum("stl") + sum("blk") + sum("drb")) / tov) * 10000) / 10000 : null;
+  // AS/PER acumulado de la selección (C-04): ΣAS/ΣPER, nunca la media de los ratios por partido
+  result.ast_to = tov ? Math.round((sum("ast") / tov) * 10000) / 10000 : null;
+  result.totals = { ast: sum("ast"), tov };   // respaldan el AS/PER mostrado
   // Razón de cada nulo: la que comparten los partidos del filtro; si difieren, genérica.
+  // Los cocientes por pérdidas son nulos solo por no tener pérdidas en la selección.
   result.null_reasons = {};
   for (const [k, v] of Object.entries(result)) {
     if (v != null) continue;
+    if (k === "ast_to" || k === "def_to_ratio") { result.null_reasons[k] = "sin_perdidas"; continue; }
     const rs = new Set(gameLog.map(g => g.null_reasons?.[k]).filter(Boolean));
     result.null_reasons[k] = rs.size === 1 ? [...rs][0] : "sin_intentos";
   }
@@ -1199,6 +1216,7 @@ function _renderTeamContent(main, data, n) {
         ${statBox("Reb%", av.trb_pct, PCT(av.trb_pct), "trb_pct", lg, true, rs.trb_pct)}
         ${statBox("TO", av.tov, DEC2(av.tov), "to_ratio", lg, false, rs.tov)}
         ${statBox("AS", av.ast, DEC2(av.ast), "ast_ratio", lg, true, rs.ast)}
+        ${_astPerBox(av, av.totals ?? data.totals, lg)}
       </div>
     </div>
     <div class="card">
@@ -1228,7 +1246,7 @@ function _renderTeamContent(main, data, n) {
           <thead><tr>
             <th>Fecha</th><th>Rival</th><th>L/V</th>
             <th>Pts</th><th>OER</th><th>DER</th><th>eFG%</th><th>TS%</th>
-            <th>OR%</th><th>DR%</th><th>TO%</th>
+            <th>OR%</th><th>DR%</th><th>TO%</th><th title="AS/PER del partido">AS/PER</th>
           </tr></thead>
           <tbody>
             ${filtered.map(g => {
@@ -1246,6 +1264,7 @@ function _renderTeamContent(main, data, n) {
                 <td>${c("or_pct", PCT)}</td>
                 <td>${c("dr_pct", PCT)}</td>
                 <td>${c("to_pct", PCT)}</td>
+                <td>${c("ast_to", DEC2)}</td>
               </tr>`; }).join("")}
           </tbody>
         </table>
@@ -1525,10 +1544,10 @@ async function renderCompare() {
           <td class="${winCls(pctB, pctA)}">${shot(madeB, attB, pctB)}</td>
         </tr>`;
       };
-      const rawRow = (label, va, vb, lowerBetter = false) => `<tr>
-          <td class="${winCls(va, vb, lowerBetter)}">${DEC1(va)}</td>
+      const rawRow = (label, va, vb, lowerBetter = false, fmt = DEC1) => `<tr>
+          <td class="${winCls(va, vb, lowerBetter)}">${fmt(va)}</td>
           <td class="lbl">${label}</td>
-          <td class="${winCls(vb, va, lowerBetter)}">${DEC1(vb)}</td>
+          <td class="${winCls(vb, va, lowerBetter)}">${fmt(vb)}</td>
         </tr>`;
 
       const pfA = a.pf, pfB = b.pf, oppPfA = a.opp_pf, oppPfB = b.opp_pf;
@@ -1542,6 +1561,7 @@ async function renderCompare() {
         rawRow("ST",        a.stl,  b.stl),
         rawRow("Blq",       a.blk,  b.blk),
         rawRow("PER",       a.tov,  b.tov,  true),
+        rawRow("AS/PER",    a.ast_to, b.ast_to, false, DEC2),   // acumulado ΣAS/ΣPER (C-04)
         `<tr>
           <td class="${winCls(pfA, pfB, true)}">${N1(pfA)} (${N1(oppPfA)})</td>
           <td class="lbl">FP</td>
@@ -1855,7 +1875,7 @@ function _renderPlayerContent(main, data, comp) {
           ${statBox("DR%", av.dr_pct, PCT(av.dr_pct), "dr_pct", lg, true, rs.dr_pct)}
           ${statBox("TO", av.tov, DEC2(av.tov), "to_ratio", lg, false, rs.tov)}
           ${statBox("AS", av.ast, DEC2(av.ast), "ast_ratio", lg, true, rs.ast)}
-          ${statBox("AST/TO", av.ast_to, DEC2(av.ast_to), "ast_ratio", lg, true, rs.ast_to)}
+          ${_astPerBox(av, av.totals ?? data.totals, lg)}
           ${statBox("% Reb Equipo", av.reb_share, PCT(av.reb_share), "reb_share", lg, true, rs.reb_share)}
           ${statBox("% RebOf Equipo", av.oreb_share, PCT(av.oreb_share), "oreb_share", lg, true, rs.oreb_share)}
           ${statBox("% RebDef Equipo", av.dreb_share, PCT(av.dreb_share), "dreb_share", lg, true, rs.dreb_share)}
@@ -1891,7 +1911,7 @@ function _renderPlayerContent(main, data, comp) {
             <thead><tr>
               <th>Fecha</th><th>Rival</th><th>Pts</th>
               <th>FGM/A</th><th>3PM/A</th><th>FTM/A</th>
-              <th>OR</th><th>DR</th><th>Ast</th><th>TOV</th>
+              <th>OR</th><th>DR</th><th>Ast</th><th>TOV</th><th title="AS/PER del partido">AS/PER</th>
               <th>OER</th><th>eFG%</th><th>TS%</th>
             </tr></thead>
             <tbody>
@@ -1901,7 +1921,7 @@ function _renderPlayerContent(main, data, comp) {
                 <tr>
                   <td class="td-muted">${_fmtDate(g.date)}</td>
                   <td>${g.opponent}</td>
-                  <td colspan="11" class="td-muted null-val" title="No jugó (DNP)">DNP</td>
+                  <td colspan="12" class="td-muted null-val" title="No jugó (DNP)">DNP</td>
                 </tr>`;
                 const c = (k, f) => fmtOrNull(g[k], f, g.null_reasons?.[k]);
                 return `
@@ -1916,6 +1936,7 @@ function _renderPlayerContent(main, data, comp) {
                   <td>${g.drb}</td>
                   <td>${g.ast}</td>
                   <td>${g.tov}</td>
+                  <td>${c("ast_to", DEC2)}</td>
                   <td>${c("oer", DEC2)}</td>
                   <td>${c("efg_pct", PCT)}</td>
                   <td>${c("ts_pct", PCT)}</td>
@@ -1974,7 +1995,7 @@ const SEARCH_COLS = [
   { key: "minutes", label: "Min" }, { key: "plus_minus", label: "+/-" },
   { key: "efg_pct", label: "eFG%", pct: true }, { key: "ts_pct", label: "TS%", pct: true },
   { key: "oer", label: "OER" }, { key: "uso_pct", label: "USO%", pct: true },
-  { key: "pts", label: "Pts" }, { key: "ast", label: "Ast" }, { key: "tov", label: "TOV" },
+  { key: "pts", label: "Pts" }, { key: "ast", label: "Ast" }, { key: "tov", label: "TOV" }, { key: "ast_to", label: "AS/PER" },
   { key: "stl", label: "ST" }, { key: "blk", label: "Blq" },
 ];
 

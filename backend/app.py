@@ -378,7 +378,8 @@ def team_stats(team_code: str):
     # DEF/TO acumulado (pooled, DA-02): sin centinela, un partido sin pérdidas no se pierde (C-11)
     averages["def_to_ratio"] = season_def_to_ratio(_sum("stl"), _sum("blk"), _sum("drb"), _sum("tov"))
     # C-07: totales de temporada, además del promedio por partido (Feature 16 RF-5)
-    totals = {k: _sum(k) for k in ("fga2", "fgm2", "fga3", "fgm3", "fta", "ftm")}
+    # C-04: `ast`/`tov` respaldan AS/PER (ΣAS/ΣPER) para poder reproducirlo con el box score
+    totals = {k: _sum(k) for k in ("fga2", "fgm2", "fga3", "fgm3", "fta", "ftm", "ast", "tov")}
 
     wins      = sum(1 for g in game_stats if g.get("pts", 0) > g.get("opp_pts", 0))
     losses    = len(game_stats) - wins
@@ -589,7 +590,7 @@ def _player_payload(pid: int) -> dict | None:
     # DEF/TO acumulado (pooled, DA-02), mismo criterio que AS/PER (C-11)
     averages["def_to_ratio"] = season_def_to_ratio(_sum("stl"), _sum("blk"), _sum("drb"), _sum("tov"))
     # C-07: totales de temporada sobre los partidos JUGADOS (Feature 16 RF-5 + Feature 12 RF-6)
-    totals = {k: _sum(k) for k in ("fga2", "fgm2", "fga3", "fgm3", "fta", "ftm")}
+    totals = {k: _sum(k) for k in ("fga2", "fgm2", "fga3", "fgm3", "fta", "ftm", "ast", "tov")}
 
     return {
         "player":    player_name,

@@ -175,12 +175,17 @@ faltan los datos del rival o si el jugador no disputó minutos.
 | **TO Ratio** | `TOV / PLAYS` | Pérdidas por play |
 | **AST%** | `AST / FGM` | % de canastas con asistencia |
 | **AST Ratio** | `AST / PLAYS` | Asistencias por play |
-| **AST/TO** *(equipo y jugador)* | `AST_temporada / TOV_temporada` | Ratio asistencias/pérdidas — **acumulado de temporada** |
+| **AS/PER** *(equipo y jugador; clave `ast_to`)* | `ΣAS / ΣPER` de la selección | Asistencias sobre pérdidas — **acumulado de la selección**. **PER = pérdidas** (no el Player Efficiency Rating). El valor de **un partido** (`AS/PER` de ese partido) existe solo como columna del game log |
 
-> **AS/PER es acumulado, no promediado.** Se calcula como el cociente de los **totales** de la
-> temporada, no como el promedio de los ratios por partido: un partido de 2/1 no debe pesar lo mismo
-> que uno de 10/5. Mismo criterio en equipo y en jugador. Vale `null` si no hubo pérdidas.
-> Ver `sdd/specs/15-metricas-jugador/`.
+> **AS/PER es acumulado, no promediado (definición única, C-04).** Se calcula como el cociente de los
+> **totales** de la selección que se está viendo (todas las competencias, una competencia o los últimos N),
+> no como el promedio de los ratios por partido: un partido de 2/1 no debe pesar lo mismo que uno de 10/5.
+> Mismo criterio en equipo y en jugador, en el perfil, en Comparar y en el Buscador (`stats_engine.season_ast_to`;
+> el filtro del cliente lo recalcula con los mismos totales). En el jugador solo cuentan los partidos
+> **jugados** (un DNP no suma). La respuesta trae los totales que lo respaldan (`totals.ast`, `totals.tov`) y la
+> card los muestra: `1,48 (43/29)`. Vale `null` con razón `sin_perdidas` si `ΣPER = 0` y `0,00` si `ΣAS = 0` con
+> pérdidas. Sin `Ø` ni color de rendimiento hasta que exista un promedio de liga del mismo criterio (C-02).
+> Ver `sdd/specs/15-metricas-jugador/` y `sdd/specs/v2/fase-1-confiabilidad/08-C-04-as-per/`.
 
 ---
 

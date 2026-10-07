@@ -208,6 +208,7 @@ def calc_team_stats(t: dict, opp: dict) -> dict:
         "to_ratio":    to_ratio,
         "as_pct":      as_pct,
         "ast_ratio":   ast_ratio,
+        "ast_to":      _safe_div(t["ast"], t["tov"]),   # AS/PER del partido; 0 pérdidas → None (C-04, DA-07)
         # Opponent defensive metrics
         "opp_efg_pct": opp_efg_pct,
         "opp_ts_pct":  opp_ts_pct,
@@ -240,11 +241,14 @@ def calc_team_stats(t: dict, opp: dict) -> dict:
 
 
 def season_ast_to(total_ast, total_tov):
-    """AS/PER de temporada = AST acumuladas / PER acumuladas. `None` si no hubo pérdidas.
+    """AS/PER de una selección = AST acumuladas / PER acumuladas. `None` si no hubo pérdidas.
 
-    Definición ÚNICA para equipo y jugador (C-04). NO es el promedio de los ratios por
-    partido: ese promedio da igual peso a un partido de 2/1 que a uno de 10/5 y no
-    coincide con el box score acumulado. Ver sdd/specs/15-metricas-jugador/spec.md RF-7.
+    Definición ÚNICA de AS/PER (C-04), igual para equipo y jugador: PER = pérdidas (no el Player
+    Efficiency Rating) y la selección es la que se está viendo (todo, una competencia, últimos N).
+    NO es el promedio de los ratios por partido: ese promedio da igual peso a un partido de 2/1 que
+    a uno de 10/5 y no coincide con el box score acumulado. El valor de UN partido es `ast_to` de
+    `calc_team_stats` / `calc_player_stats` y solo aparece en el game log.
+    Ver sdd/specs/15-metricas-jugador/spec.md RF-7 y docs/metrics.md.
     """
     return _safe_div(total_ast or 0, total_tov or 0)
 

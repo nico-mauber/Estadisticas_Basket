@@ -36,6 +36,8 @@ La navegación es por `#hash` o botones de tab. No hay routing del servidor.
 
 **Vista Equipo — card "Desglose ofensivo":** siempre visible: PtsEnPint / Seg. Op. / Ptos/PER / Banca / PCA (columnas `paint_pts`, `second_chance_pts`, `pts_from_tov`, `bench_pts`, `fast_break_pts`). Toda etiqueta nueva de `paint_pts` (catálogo de métricas, cabeceras de exportación, traducciones) es `PtsEnPint` (C-05). Si la competencia no publica un campo se ve "—" con la razón "La competencia no registra este dato" (C-11). *(Seg. Op. y PCA se poblaban en 0 por claves FIBA mal escritas — corregido en `fiba_fetcher.py`: `PointsSecondChance`/`PointsFastBreak`.)*
 
+**AS/PER (C-04):** la caja "AS/PER" (`_astPerBox`, con `title` "Asistencias sobre pérdidas, acumulado de la selección (PER = pérdidas)") está en la card "Rebotes & Misc" de Equipo y en "Rebotes & distribución" de Jugador y muestra `ΣAS/ΣPER` con los totales debajo (`1,48 (43/29)`); sin pérdidas es "—" con `title` "Sin pérdidas: el cociente no está definido". No muestra `Ø` ni color mientras no exista un promedio de liga del mismo criterio (C-02). Los game logs de Equipo y Jugador tienen la columna "AS/PER" (`title` "AS/PER del partido"), Comparar equipos la fila "AS/PER" y el Buscador la columna "AS/PER" (ordenable, nulos al final).
+
 **Filtro por competencia (Feature 09, por id desde F-11):** helpers compartidos `_logComps`/`_filterByComp`/`_compOptions`, que trabajan con `competition_id` y la etiqueta `competition_label` (el texto de FIBA puede renombrarse o fusionarse). Las competencias en borrador no aparecen. Selectores en **Liga** (refetch `api.league(comp)`), **Equipo** (`#team-comp`, filtra el `game_log` y recomputa con `_computeAvg`; compone con las pills Últ. N), **Comparar** (`#compare-comp`) y **Jugador** (`#player-comp`, `renderPlayer`→`_renderPlayerContent`). Cada `<select>` se oculta si hay ≤1 competencia. `_computeAvg` incluye las keys de jugador `uso_pct`/`ast_to`.
 
 **ON/OFF — minutos:** el panel muestra `N' en cancha` (tiempo de juego del equipo con el jugador en cancha/banca). La suma de segundos por partido es exacta (arreglado el doble-conteo por reloj no-monótono en `build_segments`).
@@ -114,7 +116,7 @@ Lógica principal. Funciones clave:
 | `_renderLeague()` | Renderiza tabla de liga con sort clickeable |
 | `_renderTeamContent(data)` | Record card + Four Factors + métricas + shot chart + game log |
 | `_renderPlayerContent(data)` | Métricas jugador + shot chart por zonas + game log |
-| `_computeAvg(gameLog)` | Promedia un array de partidos (filtro de competencia / últimos N). Excluye las entradas con `played === false` (DNP). `def_to_ratio` es acumulado (pooled). Devuelve además `null_reasons` para las claves nulas (la razón común de los partidos, o `sin_intentos`) |
+| `_computeAvg(gameLog)` | Promedia un array de partidos (filtro de competencia / últimos N). Excluye las entradas con `played === false` (DNP). `def_to_ratio` y `ast_to` (AS/PER) son acumulados (pooled): `ΣAS/ΣPER` de la selección, con `null` y razón `sin_perdidas` sin pérdidas; devuelve además `totals {ast, tov}` del subconjunto. Devuelve además `null_reasons` para las claves nulas (la razón común de los partidos, o `sin_intentos`) |
 | `_cmpNullsLast(av, bv, dir)` | **Comparador único de tablas ordenables.** Ver "Orden de nulos" abajo |
 | `_fourFactorsCard(av, name)` | Tabla Four Factors equipo vs rival con color-coding |
 | `_recordCard(record, name)` | Display W/L con porcentaje, local, visitante |
