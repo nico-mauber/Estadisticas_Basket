@@ -1172,7 +1172,7 @@ function _renderTeamContent(main, data) {
         ${statBox("DER", av.der, DEC2(av.der), "der", lg, false, rs.der)}
         ${statBox("Net Rating", av.net_rating, DEC2(av.net_rating), "net_rating", lg, true, rs.net_rating)}
         ${statBox("Pace", av.pace, DEC2(av.pace), "pace", lg, true, rs.pace)}
-        ${statBox("PPT", av.pps, DEC2(av.pps), "pps", lg, true, rs.pps)}
+        ${statBox("PPT", av.ppt, DEC2(av.ppt), "ppt", lg, true, rs.ppt)}
         ${statBox("FT Rate", av.ft_rate, DEC2(av.ft_rate), "ft_rate", lg, true, rs.ft_rate)}
       </div>
     </div>
@@ -1706,7 +1706,7 @@ function _shotDetailGrid(av, totals, lg) {
     </div>
     <div class="card-title" style="margin-top:14px;font-size:11px;color:var(--muted)">Puntos por tiro</div>
     <div class="stat-grid">
-      ${statBox("PPT",    av.pps,    DEC2(av.pps),    "pps",    lg, true, rs.pps)}
+      ${statBox("PPT",    av.ppt,    DEC2(av.ppt),    "ppt",    lg, true, rs.ppt)}
       ${statBox("PPT 2",  av.ppt_2,  DEC2(av.ppt_2),  "ppt_2",  lg, true, rs.ppt_2)}
       ${statBox("PPT 3",  av.ppt_3,  DEC2(av.ppt_3),  "ppt_3",  lg, true, rs.ppt_3)}
       ${statBox("PPT TL", av.ppt_ft, DEC2(av.ppt_ft), "ppt_ft", lg, true, rs.ppt_ft)}
@@ -1894,7 +1894,7 @@ function _renderPlayerContent(main, data) {
           ${statBox("OER", av.oer, DEC2(av.oer), "oer", lg, true, rs.oer)}
           ${statBox("USO%", av.uso_pct, PCT(av.uso_pct), "uso_pct", lg, true, rs.uso_pct)}
           ${statBox("PPP", av.ppp, DEC2(av.ppp), "ppp", lg, true, rs.ppp)}
-          ${statBox("PPT", av.pps, DEC2(av.pps), "pps", lg, true, rs.pps)}
+          ${statBox("PPT", av.ppt, DEC2(av.ppt), "ppt", lg, true, rs.ppt)}
           ${statBox("eFG%", av.efg_pct, PCT(av.efg_pct), "efg_pct", lg, true, rs.efg_pct)}
           ${statBox("TS%", av.ts_pct, PCT(av.ts_pct), "ts_pct", lg, true, rs.ts_pct)}
           ${statBox("FT Rate", av.ft_rate, DEC2(av.ft_rate), "ft_rate", lg, true, rs.ft_rate)}
@@ -2031,7 +2031,7 @@ let _searchSort = { key: "player", dir: 1 };
 const SEARCH_METRICS = [
   { key: "efg_pct", label: "eFG%", pct: true }, { key: "ts_pct", label: "TS%", pct: true },
   { key: "oer", label: "OER" }, { key: "uso_pct", label: "USO%", pct: true },
-  { key: "ppp", label: "PPP" }, { key: "pps", label: "PPT" },
+  { key: "ppp", label: "PPP" }, { key: "ppt", label: "PPT" },
   { key: "fg2_pct", label: "FG2%", pct: true }, { key: "fg3_pct", label: "FG3%", pct: true },
   { key: "ft_pct", label: "FT%", pct: true },
   { key: "pts", label: "Pts/g" }, { key: "ast", label: "Ast/g" }, { key: "tov", label: "Pérd/g" },

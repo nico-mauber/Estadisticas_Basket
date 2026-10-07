@@ -537,7 +537,7 @@ def search_players():
     display = {p.id: p.display_name for p in Player.query.all()}
 
     metric_keys = [
-        "efg_pct", "ts_pct", "oer", "uso_pct", "ppp", "pps",
+        "efg_pct", "ts_pct", "oer", "uso_pct", "ppp", "pps", "ppt",
         "fg2_pct", "fg3_pct", "ft_pct",
         "reb_share", "oreb_share", "dreb_share",
         "physical_impact", "stocks", "def_playmaking",

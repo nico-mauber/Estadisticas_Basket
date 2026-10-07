@@ -66,7 +66,8 @@ Similar a posesiones pero sin descuento de rebotes ofensivos. Representa el tota
 | **FG2%** | `2PM / 2PA` | Porcentaje de dobles |
 | **FG3%** | `3PM / 3PA` | Porcentaje de triples |
 | **FT%** | `FTM / FTA` | Porcentaje de tiros libres |
-| **PPT** | `PTS / FGA` | Puntos por tiro intentado (solo tiros de campo) |
+| **PPT** | `(2×FGM2 + 3×FGM3) / FGA` | Puntos por tiro de campo (excluye FT del numerador). Clave API: `ppt` |
+| **PPS** *(legado)* | `PTS / FGA` | Points Per Shot — incluye FT en numerador. Clave API: `pps`. Mantener solo para retro-compat |
 | **PPT 2** | `(2 × 2PM) / 2PA` | Puntos por intento de 2 |
 | **PPT 3** | `(3 × 3PM) / 3PA` | Puntos por intento de 3 |
 | **PPT TL** | `FTM / FTA` | Puntos por tiro libre intentado |

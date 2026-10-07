@@ -149,8 +149,8 @@ def calc_team_stats(t: dict, opp: dict) -> dict:
     der = _safe_div(opp["pts"], o_pos)
     net = round(oer - der, 4) if (oer is not None and der is not None) else None
 
-    # ── PPT por tipo de tiro (C-07 / Feature 16 RF-6) ─────────────────────────
-    # El PPT general es `pps` (PTS / FGA, docs/metrics.md) — no se duplica acá.
+    # ── PPT por tipo de tiro (C-07) ─────────────────────────────────────────────
+    ppt    = _safe_div(2 * t["fgm2"] + 3 * t["fgm3"], t["fga2"] + t["fga3"])
     ppt_2  = _safe_div(2 * t["fgm2"], t["fga2"])
     ppt_3  = _safe_div(3 * t["fgm3"], t["fga3"])
     ppt_ft = _safe_div(ftm, fta)
@@ -206,6 +206,7 @@ def calc_team_stats(t: dict, opp: dict) -> dict:
         "ft_rate":     ft_rate,
         "ft_rate_report": ft_rate_report,
         "pps":         pps,
+        "ppt":         ppt,
         "fg2_uso":     fg2_uso,
         "fg3_uso":     fg3_uso,
         "ppt_2":       ppt_2,
@@ -435,7 +436,8 @@ def calc_player_stats(p: dict, team_pos: float, team: dict = None, game_minutes:
     ft   = _safe_div(ftm, fta)
     fg2_uso = _safe_div(p["fga2"], fga)
     fg3_uso = _safe_div(p["fga3"], fga)
-    # C-07: PPT abierto por tipo de tiro (Feature 16 RF-6). El PPT general es `pps`.
+    # C-07: PPT (glosario: puntos de campo / tiros de campo intentados)
+    ppt    = _safe_div(2 * p["fgm2"] + 3 * p["fgm3"], p["fga2"] + p["fga3"])
     ppt_2  = _safe_div(2 * p["fgm2"], p["fga2"])
     ppt_3  = _safe_div(3 * p["fgm3"], p["fga3"])
     ppt_ft = _safe_div(ftm, fta)
@@ -511,6 +513,7 @@ def calc_player_stats(p: dict, team_pos: float, team: dict = None, game_minutes:
         "ft_rate_report": ft_rate_report,
         "pps":            pps,
         "ppp":            ppp,
+        "ppt":            ppt,
         "fg2_pct":        fg2,
         "fg3_pct":        fg3,
         "ft_pct":         ft,
@@ -574,7 +577,7 @@ def calc_player_stats(p: dict, team_pos: float, team: dict = None, game_minutes:
 TEAM_AVG_KEYS = [
     "oer", "der", "net_rating", "efg_pct", "ts_pct",
     "fg2_pct", "fg3_pct", "ft_pct", "ft_rate", "ft_rate_report",
-    "pps", "fg2_uso", "fg3_uso",
+    "pps", "ppt", "fg2_uso", "fg3_uso",
     "or_pct", "dr_pct", "trb_pct", "to_pct", "to_ratio",
     "as_pct", "ast_ratio", "pace", "pts", "possessions", "plays",
     "peso_1p", "peso_2p", "peso_3p",
@@ -587,7 +590,7 @@ TEAM_AVG_KEYS = [
 ]
 PLAYER_AVG_KEYS = [
     "efg_pct", "ts_pct", "fg2_pct", "fg3_pct",
-    "ft_pct", "ft_rate", "ft_rate_report", "pps", "ppp",
+    "ft_pct", "ft_rate", "ft_rate_report", "pps", "ppp", "ppt",
     "fg2_uso", "fg3_uso", "peso_1p", "peso_2p", "peso_3p",
     "to_pct", "to_ratio", "as_pct", "ast_ratio",
     "ppt_2", "ppt_3", "ppt_ft",
@@ -616,12 +619,37 @@ def _season_balance(sums: dict) -> tuple:
     return vals, {k: "sin_perdidas" for k, v in vals.items() if v is None}
 
 
+def season_shooting(sums: dict) -> tuple:
+    """`(valores, razones)` de las 9 tasas de tiro de una selección: cociente de totales (DA-02, C-07).
+
+    `ppt` = (2·FGM2 + 3·FGM3) / (FGA2 + FGA3) — glosario v2 §6, DA-03.
+    `pps` (PTS/FGA) queda como legado, no se recalcula pooled.
+    """
+    s = sums.get
+    fga2, fgm2 = s("fga2", 0), s("fgm2", 0)
+    fga3, fgm3 = s("fga3", 0), s("fgm3", 0)
+    fta, ftm = s("fta", 0), s("ftm", 0)
+    fga = fga2 + fga3
+    vals = {
+        "ppt":     _safe_div(2 * fgm2 + 3 * fgm3, fga),
+        "ppt_2":   _safe_div(2 * fgm2, fga2),
+        "ppt_3":   _safe_div(3 * fgm3, fga3),
+        "ppt_ft":  _safe_div(ftm, fta),
+        "fg2_pct": _safe_div(fgm2, fga2),
+        "fg3_pct": _safe_div(fgm3, fga3),
+        "ft_pct":  _safe_div(ftm, fta),
+        "fg2_uso": _safe_div(fga2, fga),
+        "fg3_uso": _safe_div(fga3, fga),
+    }
+    return vals, {k: "sin_intentos" for k, v in vals.items() if v is None}
+
+
 # Grupos de tasas de temporada, por tipo de entidad. Cada grupo recibe las sumas de la selección
 # (`ast`, `tov`, … y `pool_*` de los términos privados) y devuelve `(valores, razones)`. Una familia
 # nueva de tasas pooled se registra acá (C-07: tiro; T-05: el resto) sin tocar `aggregate_games`.
 POOLED_GROUPS = {
-    "team":   [_season_balance],
-    "player": [_season_balance, season_player_rates],
+    "team":   [_season_balance, season_shooting],
+    "player": [_season_balance, season_player_rates, season_shooting],
 }
 
 

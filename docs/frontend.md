@@ -263,6 +263,12 @@ La card "Tiro" (Equipo y Jugador) incluye `_shotDetailGrid(av, totals, lg)`: `T2
 `TLi`/`TLc` como `promedio (total temporada)`, más `PPT`, `PPT 2`, `PPT 3` y `PPT TL`.
 Ver `sdd/specs/16-tiro-completo-ppt/`.
 
+> **C-07: `ppt` vs `pps`.** Las labels "PPT" en cards Eficiencia (equipo) y Producción (jugador) usan
+> clave `ppt` = `(2·FGM2 + 3·FGM3) / FGA`. `pps` (`PTS/FGA`, incluye FT en numerador) se mantiene
+> en backend por retro-compat pero no se muestra en UI. `SEARCH_METRICS` usa `ppt`.
+> Tasas de tiro pooled (`season_shooting`) calculan `ppt`, `ppt_2`, `ppt_3`, `ppt_ft`, `fg2_pct`,
+> `fg3_pct`, `ft_pct`, `fg2_uso`, `fg3_uso` desde totales de temporada.
+
 ### Vista Liga — tabla general y ejes del mapa (C-09 / C-10)
 
 **Tabla general** (`_standingsCardHTML(teams, compSelHTML, pickComp)`): tabla de posiciones clásica
