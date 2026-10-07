@@ -19,6 +19,7 @@ Smart-Basket es un monolito full-stack: Flask sirve tanto la API REST como los a
 │  │   ingest.py        (persistencia + reproceso)    │   │
 │  │   competitions.py  (competencias y temporadas)   │   │
 │  │   data_quality.py  (panel de calidad)            │   │
+│  │   identity.py      (fichas de jugador)           │   │
 │  │   stats_engine.py  (métricas avanzadas)          │   │
 │  │   clutch.py        (cierres, sobre pbp_events)   │
 │   lineups.py       (quintetos: lineups + on/off) │   │
@@ -71,6 +72,9 @@ Competencias y temporadas (F-11): el texto de FIBA se mapea a una competencia po
 
 ### `data_quality.py`
 Informe de calidad de una competencia (F-11): partidos sin pbp, con datos básicos faltantes, pendientes de reproceso, pbp que no cuadra con el box, quintetos inconsistentes (usa `lineups`), sin coordenadas, campos nulos, posibles duplicados; "posesiones que no cerraron" queda `no_disponible` hasta A-01.
+
+### `identity.py`
+Identidad de jugador (C-08): una ficha por jugador y equipo (`players`), clave `(equipo, nombre normalizado)`. `resolve_player_id` crea o encuentra la ficha; `assign_game(game_id)` la asocia a cada fila de un partido (la llama `ingest.persist_game`) y `backfill_player_ids()` completa el histórico al arrancar (idempotente). `aliases`/`name_index`/`canonicalize_pbp_games` permiten consultar por nombre en cualquier grafía sobre `shots` y `pbp_events`, que guardan el nombre crudo. `duplicate_candidates` alimenta el panel de calidad y `merge_players` es la fusión manual de un administrador. `norm_name`/`resolve_identity` (puras) siguen en `stats_engine.py`.
 
 ### `stats_engine.py`
 Calcula métricas avanzadas on-the-fly en cada request (no se persisten en DB).

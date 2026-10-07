@@ -1,6 +1,7 @@
 import { api, setUnauthorizedHandler } from "./api.js";
 import { drawRadar, drawEvolution, drawPlayerEvolution, drawLeagueScatter, drawCompareRadar, resetZoom } from "./charts.js";
 import { PCT, PCT0, DEC1, DEC2, fmtNumber, isNull, nullDisplay, fmtOrNull } from "./core/format.js";
+import { renderDuplicateItems } from "./components/identity-merge.js";
 
 // ── Toast ──────────────────────────────────────────────────────────────────
 function toast(msg, type = "ok") {
@@ -591,10 +592,10 @@ function _qualityCheckCard(title, c, key) {
         <td>${i.label}</td><td style="text-align:right">${i.nulls} / ${i.total}</td>
         <td style="text-align:right" class="${i.nulls ? "" : "td-muted"}">${PCT(i.pct)}</td></tr>`).join("")}</tbody>
     </table></div>`;
+  } else if (key === "possible_duplicates") {
+    body = '<div id="dup-panel"></div>';   // lo dibuja identity-merge.js (C-08)
   } else if (c.items.length) {
-    const line = key === "possible_duplicates"
-      ? i => `<li><b>${i.team_code}</b> · ${i.variants.map(v => `${esc(v.player_name)} (${v.games} PJ)`).join(" / ")}</li>`
-      : i => `<li>${_fmtDate(i.date)} · ${esc(i.label)}${i.team_code ? ` · <b>${i.team_code}</b>` : ""}${i.detail ? ` — <span class="td-muted">${esc(i.detail)}</span>` : ""}</li>`;
+    const line = i => `<li>${_fmtDate(i.date)} · ${esc(i.label)}${i.team_code ? ` · <b>${i.team_code}</b>` : ""}${i.detail ? ` — <span class="td-muted">${esc(i.detail)}</span>` : ""}</li>`;
     body = `<details${c.items.length <= 5 ? " open" : ""}><summary>Ver ${c.items.length}</summary>
       <ul class="quality-items">${c.items.map(line).join("")}</ul></details>`;
   }
@@ -641,6 +642,11 @@ async function _renderQualityTab(el) {
       </div>` : '<p class="empty">Esta competencia no tiene partidos.</p>'}
     </div>
     ${s.games ? QUALITY_CHECKS.map(([k, t]) => _qualityCheckCard(t, rep.checks[k], k)).join("") : ""}`;
+
+  renderDuplicateItems(document.getElementById("dup-panel"), rep.checks.possible_duplicates, {
+    isAdmin: _isAdmin, toast,
+    onMerged: () => { _afterDataChange(); _renderQualityTab(el); },
+  });
 
   document.getElementById("quality-comp").addEventListener("change", e => {
     _qualityComp = e.target.value;
@@ -1096,6 +1102,13 @@ function _filteredLog(gameLog, n) {
   return sorted.slice(0, n);
 }
 
+// Jugador elegido en el select de Equipo: la ficha (value) y su nombre visible (C-08)
+function _selectedPlayer() {
+  const sel = document.getElementById("player-select");
+  const opt = sel.selectedOptions[0];
+  return sel.value && opt ? { id: Number(sel.value), name: opt.dataset.name } : null;
+}
+
 // ── Usage ranking card ──────────────────────────────────────────────────────
 function _renderUsageRanking(players) {
   const el = document.getElementById("usage-ranking");
@@ -1107,8 +1120,8 @@ function _renderUsageRanking(players) {
     const bar = p.uso_pct != null ? Math.round((p.uso_pct / maxUso) * 100) : 0;
     const pts = DEC1(p.pts);
     return `
-      <tr class="clickable-row" data-player="${p.name}">
-        <td style="font-weight:600">${p.name}</td>
+      <tr class="clickable-row" data-player-id="${p.player_id ?? ""}" data-player="${esc(p.name)}">
+        <td style="font-weight:600">${esc(p.name)}</td>
         <td style="width:120px">
           <div style="background:var(--border);border-radius:3px;height:8px;overflow:hidden">
             <div style="width:${bar}%;height:100%;background:var(--accent);border-radius:3px"></div>
@@ -1134,8 +1147,7 @@ function _renderUsageRanking(players) {
     </div>`;
   el.querySelectorAll(".clickable-row").forEach(tr => {
     tr.addEventListener("click", () => {
-      const pName = tr.dataset.player;
-      document.getElementById("player-select").value = pName;
+      document.getElementById("player-select").value = tr.dataset.playerId;
       document.getElementById("player-select").dispatchEvent(new Event("change"));
     });
   });
@@ -1288,7 +1300,7 @@ async function renderTeam(teamCode) {
     const players = await api.players(teamCode);
     const pSel = document.getElementById("player-select");
     pSel.innerHTML = '<option value="">— Seleccionar jugador —</option>' +
-      players.map(p => `<option value="${p.name}">${p.name}</option>`).join("");
+      players.map(p => `<option value="${p.player_id ?? ""}" data-name="${esc(p.name)}">${esc(p.name)}</option>`).join("");
     _renderUsageRanking(players);
 
     const lineupCard = document.getElementById("team-lineup-card");
@@ -1773,14 +1785,15 @@ let _playerData = null;
 let _playerComp = "";
 let _playerCtx  = { teamCode: "", playerName: "" };
 
-async function renderPlayer(teamCode, playerName) {
+async function renderPlayer(teamCode, playerName, playerId = null) {
   const main = document.getElementById("player-main");
   main.innerHTML = '<p class="empty"><span class="spinner"></span>Cargando...</p>';
   _playerComp = "";
   _playerCtx  = { teamCode, playerName };
 
   try {
-    _playerData = await api.player(teamCode, playerName);
+    _playerData = playerId != null ? await api.playerById(playerId) : await api.player(teamCode, playerName);
+    _playerCtx  = { teamCode: _playerData.team_code, playerName: _playerData.player };   // grafía de la ficha
     _renderPlayerContent(main, _playerData, "");
   } catch (e) {
     main.innerHTML = `<p class="empty below-avg">${e.message}</p>`;
@@ -1936,6 +1949,10 @@ function _renderPlayerContent(main, data, comp) {
 
 // ── Search section ───────────────────────────────────────────────────────────
 let _searchData = null;
+let _searchComp = "";   // id de competencia del último fetch ("" = todas)
+
+// Grupos de posición del filtro (el backend manda `position_group`: G, F, C o null)
+const POSITION_GROUPS = [["G", "Base/Escolta (G)"], ["F", "Alero/Ala-pívot (F)"], ["C", "Pívot (C)"]];
 let _searchSort = { key: "player", dir: 1 };
 
 const SEARCH_METRICS = [
@@ -1965,14 +1982,13 @@ async function renderSearch() {
   const main = document.getElementById("search-main");
   if (!_searchData) {
     main.innerHTML = '<p class="empty"><span class="spinner"></span>Cargando buscador...</p>';
-    try { _searchData = await api.searchPlayers(); }
+    try { _searchData = await api.searchPlayers({ competition: _searchComp }); }
     catch (e) { main.innerHTML = `<p class="empty below-avg">No se pudo cargar el buscador</p>`; return; }
   }
-  if (!_searchData.length) { main.innerHTML = `<p class="empty">No hay jugadores importados todavía</p>`; return; }
+  if (!_searchData.length && !_searchComp) { main.innerHTML = `<p class="empty">No hay jugadores importados todavía</p>`; return; }
 
-  const teams     = [...new Set(_searchData.map(p => p.team_code))].sort();
-  const comps     = [...new Set(_searchData.flatMap(p => p.competitions))].sort();
-  const positions = [...new Set(_searchData.map(p => p.position).filter(Boolean))].sort();
+  const comps = await api.competitions().catch(() => []);
+  const teams = [...new Set(_searchData.map(p => p.team_code))].sort();
 
   main.innerHTML = `
     <div class="card">
@@ -1980,8 +1996,8 @@ async function renderSearch() {
       <div class="search-filters">
         <input type="text" id="sf-name" placeholder="Nombre contiene...">
         <select id="sf-team"><option value="">Equipo (todos)</option>${teams.map(t=>`<option>${t}</option>`).join("")}</select>
-        <select id="sf-comp"><option value="">Competencia (todas)</option>${comps.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join("")}</select>
-        <select id="sf-pos"><option value="">Posición (todas)</option>${positions.map(p=>`<option>${p}</option>`).join("")}</select>
+        <select id="sf-comp"><option value="">Competencia (todas)</option>${comps.map(c=>`<option value="${c.id}"${String(c.id) === _searchComp ? " selected" : ""}>${esc(c.label)}</option>`).join("")}</select>
+        <select id="sf-pos"><option value="">Posición (todas)</option>${POSITION_GROUPS.map(([v, l])=>`<option value="${v}">${l}</option>`).join("")}</select>
       </div>
       <div class="search-ranges">
         ${SEARCH_METRICS.map(m => `
@@ -2000,9 +2016,22 @@ async function renderSearch() {
     <div id="search-results"></div>`;
 
   document.getElementById("sf-apply").addEventListener("click", _applySearch);
-  document.getElementById("sf-clear").addEventListener("click", () => {
+  // Cambiar de competencia recalcula los promedios en el backend (RF-7)
+  document.getElementById("sf-comp").addEventListener("change", async e => {
+    _searchComp = e.target.value;
+    const box = document.getElementById("search-results");
+    box.innerHTML = '<p class="empty"><span class="spinner"></span>Cargando buscador...</p>';
+    try { _searchData = await api.searchPlayers({ competition: _searchComp }); }
+    catch { box.innerHTML = '<p class="empty below-avg">No se pudo cargar el buscador</p>'; return; }
+    _applySearch();
+  });
+  document.getElementById("sf-clear").addEventListener("click", async () => {
     main.querySelectorAll(".search-filters input, .search-ranges input").forEach(i => i.value = "");
     main.querySelectorAll(".search-filters select").forEach(s => s.value = "");
+    if (_searchComp) {   // volver a "todas las competencias"
+      _searchComp = "";
+      try { _searchData = await api.searchPlayers(); } catch { return; }
+    }
     _applySearch();
   });
   _applySearch();
@@ -2011,7 +2040,6 @@ async function renderSearch() {
 function _applySearch() {
   const name = document.getElementById("sf-name").value.trim().toLowerCase();
   const team = document.getElementById("sf-team").value;
-  const comp = document.getElementById("sf-comp").value;
   const pos  = document.getElementById("sf-pos").value;
   const ranges = [];
   document.querySelectorAll(".sf-min").forEach(inp => {
@@ -2028,8 +2056,7 @@ function _applySearch() {
   const filtered = _searchData.filter(p => {
     if (name && !p.player.toLowerCase().includes(name)) return false;
     if (team && p.team_code !== team) return false;
-    if (comp && !p.competitions.includes(comp)) return false;
-    if (pos  && p.position !== pos) return false;
+    if (pos  && p.position_group !== pos) return false;   // grupo G/F/C; sin posición no entra en ninguno
     for (const r of ranges) {
       const v = p[r.key];
       if (v == null) return false;               // null no matchea rango (Feature 08)
@@ -2059,7 +2086,7 @@ function _renderSearchResults(rows) {
           <thead><tr>${SEARCH_COLS.map(c => `<th data-key="${c.key}">${c.label}</th>`).join("")}</tr></thead>
           <tbody>
             ${sorted.map(p => `
-              <tr data-team="${p.team_code}" data-player="${p.player.replace(/"/g,'&quot;')}">
+              <tr data-team="${p.team_code}" data-player-id="${p.player_id ?? ""}" data-player="${p.player.replace(/"/g,'&quot;')}">
                 ${SEARCH_COLS.map(c => `<td>${fmt(c, p)}</td>`).join("")}
               </tr>`).join("")}
           </tbody>
@@ -2074,7 +2101,7 @@ function _renderSearchResults(rows) {
   }));
   box.querySelectorAll("tbody tr").forEach(tr => tr.addEventListener("click", () => {
     setSection("player");
-    renderPlayer(tr.dataset.team, tr.dataset.player);
+    renderPlayer(tr.dataset.team, tr.dataset.player, tr.dataset.playerId ? Number(tr.dataset.playerId) : null);
   }));
 }
 
@@ -2192,26 +2219,26 @@ function renderApp() {
   // Player button
   document.getElementById("btn-show-player").addEventListener("click", () => {
     const team   = document.getElementById("team-select").value;
-    const player = document.getElementById("player-select").value;
+    const player = _selectedPlayer();
     if (!team || !player) return toast("Selecciona equipo y jugador", "err");
     setSection("player");
-    renderPlayer(team, player);
+    renderPlayer(team, player.name, player.id);
   });
 
   // Shot map button — muestra el mapa de tiro DENTRO de Equipo
   document.getElementById("btn-show-shotmap").addEventListener("click", () => {
     const team   = document.getElementById("team-select").value;
-    const player = document.getElementById("player-select").value;
+    const player = _selectedPlayer();
     if (!team || !player) return toast("Selecciona equipo y jugador", "err");
-    renderTeamShotmap(team, player);
+    renderTeamShotmap(team, player.name);
   });
 
   // ON/OFF button
   document.getElementById("btn-show-onoff").addEventListener("click", () => {
     const team   = document.getElementById("team-select").value;
-    const player = document.getElementById("player-select").value;
+    const player = _selectedPlayer();
     if (!team || !player) return toast("Selecciona equipo y jugador", "err");
-    renderTeamOnOff(team, player);
+    renderTeamOnOff(team, player.name);
   });
 
   // Lineup (combinación) button

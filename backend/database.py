@@ -39,6 +39,28 @@ class CompetitionAlias(db.Model):
     competition_id = db.Column(db.Integer, db.ForeignKey("competitions.id"), nullable=False)
 
 
+class Player(db.Model):
+    """Ficha persistente de un jugador EN un equipo (C-08).
+
+    Clave de identidad: (team_code, norm_key) donde `norm_key` es el nombre normalizado
+    (minúsculas, sin tildes, sin espacios dobles). La competencia NO es parte de la clave: es
+    un filtro. `merged_into` apunta a la ficha que absorbió a esta (fusión manual); las
+    consultas siempre resuelven a la ficha canónica (`merged_into IS NULL`).
+    """
+    __tablename__  = "players"
+    __table_args__ = (db.UniqueConstraint("team_code", "norm_key"),)
+
+    id           = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    team_code    = db.Column(db.String,  nullable=False)
+    norm_key     = db.Column(db.String,  nullable=False)
+    display_name = db.Column(db.String,  nullable=False)   # grafía real más reciente
+    first_name   = db.Column(db.String)
+    family_name  = db.Column(db.String)
+    photo_url    = db.Column(db.String)
+    merged_into  = db.Column(db.Integer, db.ForeignKey("players.id"))
+    created_at   = db.Column(db.String,  default=lambda: datetime.utcnow().isoformat())
+
+
 class Game(db.Model):
     __tablename__ = "games"
 
@@ -123,6 +145,12 @@ class PlayerGameStats(db.Model):
     position    = db.Column(db.String,  default="")   # playingPosition FIBA (G/F/C...)
     plus_minus  = db.Column(db.Integer, default=0)    # sPlusMinusPoints FIBA (por partido)
     starter     = db.Column(db.Integer, default=0)    # 1=titular (FIBA `starter`)
+    # C-08: ficha del jugador y datos de identidad de FIBA. NULL = "no importado todavía"
+    # (los partidos viejos los reciben al reprocesar; `player_id` lo completa identity.py).
+    player_id   = db.Column(db.Integer)
+    first_name  = db.Column(db.String)
+    family_name = db.Column(db.String)
+    photo_url   = db.Column(db.String)
 
     pts  = db.Column(db.Integer, default=0)
     fgm  = db.Column(db.Integer, default=0)
@@ -224,6 +252,11 @@ def upgrade_db(app):
         ("games", "ingest_version", "INTEGER"),
         ("shots", "court_x",        "REAL"),
         ("shots", "court_y",        "REAL"),
+        # C-08 — identidad de jugador (sin DEFAULT: NULL = "no importado todavía")
+        ("player_game_stats", "player_id",   "INTEGER"),
+        ("player_game_stats", "first_name",  "TEXT"),
+        ("player_game_stats", "family_name", "TEXT"),
+        ("player_game_stats", "photo_url",   "TEXT"),
     ]
     with app.app_context():
         conn = db.engine.raw_connection()
@@ -233,6 +266,8 @@ def upgrade_db(app):
                 cur.execute(f"ALTER TABLE {table} ADD COLUMN {col} {typedef}")
             except Exception:
                 pass  # column already exists
+        # C-08: el completado y todas las consultas de ficha filtran por player_id
+        cur.execute("CREATE INDEX IF NOT EXISTS ix_pgs_player_id ON player_game_stats(player_id)")
         conn.commit()
         conn.close()
 

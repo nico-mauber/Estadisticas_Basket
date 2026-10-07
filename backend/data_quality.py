@@ -11,10 +11,10 @@ quintetos inconsistentes). Sin coordenadas, campos nulos y posibles duplicados s
 """
 from collections import defaultdict
 
+import identity
 import lineups
 from database import db, Game, TeamGameStats, PlayerGameStats, Shot, PbpEvent
 from ingest import INGEST_VERSION, needs_reprocess
-from stats_engine import norm_name
 
 # Campos cuyo nulo se informa (tabla, columna, etiqueta). Un 0 informado por FIBA no es nulo.
 NULL_FIELDS = [
@@ -109,7 +109,7 @@ def report(competition_id: int) -> dict:
         "lineup_inconsistencies":  _check(lineup_issues, True),
         "games_without_coords":    _check(no_coords, False),
         "null_fields":             _null_fields(gids),
-        "possible_duplicates":     _duplicates(player_rows),
+        "possible_duplicates":     _duplicates(competition_id),
         # INCREMENTO DIFERIDO (→ A-01): requiere el motor de posesiones
         "possession_gaps":         {"status": "no_disponible", "count": None, "counts_as_incomplete": False,
                                     "reason": "requiere_posesiones", "items": []},
@@ -143,15 +143,11 @@ def _null_fields(gids: list[str]) -> dict:
             "counts_as_incomplete": False, "items": items}
 
 
-def _duplicates(player_rows: dict) -> dict:
-    """Fichas del mismo equipo cuyo nombre normalizado coincide con grafías distintas
-    (C-08): hoy se unifican al leer; el panel las muestra para que se vean."""
-    groups = defaultdict(lambda: defaultdict(set))
-    for gid, rows in player_rows.items():
-        for r in rows:
-            groups[(r.team_code, norm_name(r.player_name))][r.player_name].add(gid)
-    items = [{"team_code": team, "norm_key": key,
-              "variants": [{"player_name": n, "games": len(g)} for n, g in sorted(names.items())]}
-             for (team, key), names in sorted(groups.items()) if len(names) > 1]
+def _duplicates(competition_id: int) -> dict:
+    """Candidatos a fusión manual y fichas que parecen reunir a personas distintas (C-08).
+
+    Los duplicados por grafía (mayúsculas, tildes, espacios) ya no existen: `identity` los
+    unifica al importar. Acá quedan los que la normalización no puede decidir sola."""
+    items = identity.duplicate_candidates(competition_id)
     return {"status": "alerta" if items else "ok", "count": len(items),
             "counts_as_incomplete": False, "items": items}

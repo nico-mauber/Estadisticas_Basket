@@ -105,6 +105,24 @@ Stats de box score por equipo por partido. Incluye stats del rival pre-calculada
 
 ---
 
+### `players`
+Ficha persistente de cada jugador **en un equipo** (C-08). Es la identidad: todas las filas de `player_game_stats` de una misma persona apuntan a una ficha por `player_id`.
+
+| Columna | Tipo | Descripción |
+|---------|------|-------------|
+| `id` | INTEGER PK AUTOINCREMENT | Identificador estable del jugador (se usa en URLs y filtros) |
+| `team_code` | TEXT NOT NULL | |
+| `norm_key` | TEXT NOT NULL | Nombre normalizado: minúsculas, sin tildes, espacios colapsados |
+| `display_name` | TEXT NOT NULL | Grafía real del partido más reciente (nunca la clave normalizada) |
+| `first_name` / `family_name` | TEXT | Nombre completo de FIBA (`firstName` / `familyName`); `NULL` hasta reprocesar el partido |
+| `photo_url` | TEXT | Foto de FIBA (`photoT`/`photoS`); `NULL` si no la publica |
+| `merged_into` | INTEGER FK → players | Ficha que absorbió a esta (fusión manual). `NULL` = ficha vigente |
+| `created_at` | TEXT | ISO-8601 |
+
+**Restricción única:** `(team_code, norm_key)`. La competencia **no** forma parte de la clave: es un filtro.
+
+---
+
 ### `player_game_stats`
 Stats individuales por jugador por partido.
 
@@ -120,6 +138,9 @@ Stats individuales por jugador por partido.
 | `position` | TEXT DEFAULT `''` | Posición FIBA (`playingPosition`: G/F/C/PG/PF...). Vacío en partidos importados antes de su incorporación hasta reimportar |
 | `plus_minus` | INTEGER DEFAULT 0 | Plus/Minus del partido (`sPlusMinusPoints` FIBA; puede ser negativo). `NULL` si FIBA no manda la clave (C-11) |
 | `starter` | INTEGER DEFAULT 0 | 1=titular en ese partido (`starter` FIBA). Base para reconstruir el quinteto inicial (lineups/on-off) |
+| `player_id` | INTEGER | Ficha del jugador (`players.id`). La completa `identity.assign_game` al importar/reprocesar y `identity.backfill_player_ids` al arrancar. Índice `ix_pgs_player_id` |
+| `first_name` / `family_name` | TEXT | Nombre completo de FIBA. `NULL` en partidos anteriores a `INGEST_VERSION` 3 hasta reprocesar |
+| `photo_url` | TEXT | Foto de FIBA. `NULL` si no la publica |
 | `pts` | INTEGER | |
 | `fgm` / `fga` | INTEGER | |
 | `fgm2` / `fga2` | INTEGER | |
@@ -130,7 +151,7 @@ Stats individuales por jugador por partido.
 
 **Restricción única:** `(game_id, team_code, player_name)` — sobre el nombre **crudo**, tal como llega de FIBA.
 
-> **Identidad vs unicidad.** La restricción de arriba no define quién es un jugador: solo impide dos filas idénticas en un mismo partido. La **identidad** se resuelve al leer, por nombre normalizado + equipo (`norm_name()` en `stats_engine.py`), de modo que dos grafías del mismo nombre (`"C. Zinaich"` / `"C.  ZINAICH"`) se unifican en una sola ficha sin tocar los datos. Esto cubre todo el histórico sin migración. Ver `sdd/specs/13-dedup-jugadores/`.
+> **Identidad vs unicidad.** La restricción de arriba no define quién es un jugador: solo impide dos filas idénticas en un mismo partido. La **identidad** es la ficha de `players`: clave `(team_code, nombre normalizado)` (`norm_name()` en `stats_engine.py`), de modo que dos grafías del mismo nombre (`"C. Zinaich"` / `"C.  ZINAICH"`) comparten `player_id` sin tocar el nombre crudo, que se conserva en `player_game_stats`, `shots` y `pbp_events`. Los nombres que la normalización no une (`"J. Feldeine"` / `"Jerome Feldeine"`) los fusiona un administrador (`POST /api/identity/merge`): la ficha absorbida queda con `merged_into` y sus filas pasan a `player_id` de la vigente. Ver `sdd/specs/v2/fase-1-confiabilidad/07-C-08-jugadores-duplicados/`.
 >
 > La columna `position` puede venir vacía en algunos partidos (FIBA no siempre carga `playingPosition`): al unificar gana la más frecuente entre las no vacías.
 

@@ -17,14 +17,16 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 import competitions
 import fiba_fetcher
+import identity
 from database import db, Game, GameSource, TeamGameStats, PlayerGameStats, Shot, PbpEvent
 
 # Versión de la ingesta con que se guardó cada partido (`games.ingest_version`).
 #   NULL / 1 — previa a F-11 (sin minutos reales ni coordenadas de tiro)
 #   2        — F-11: minutos reales, coordenadas, archivo crudo
+#   3        — C-08: nombre completo y foto del jugador (identidad de ficha)
 # Subirla cuando un cambio del parser deba llegar a los partidos ya importados: el panel de
 # calidad los marca "pendientes de reproceso".
-INGEST_VERSION = 2
+INGEST_VERSION = 3
 
 # Partidos por petición de reproceso. Peor caso sin archivo: 5 descargas × 20 s de timeout de
 # urllib = 100 s, por debajo de los 180 s de gunicorn (render.yaml).
@@ -109,7 +111,7 @@ def persist_game(game: dict) -> None:
                  "opp_pts", "opp_fga2", "opp_fga3", "opp_fta", "opp_orb", "opp_drb", "opp_tov", "opp_pf",
                  "paint_pts", "second_chance_pts", "pts_from_tov", "bench_pts", "fast_break_pts")
     player_cols = ("team_code", "team_name", "player_name", "jersey", "minutes", "position",
-                   "plus_minus", "starter", "pts", "fgm", "fga", "fgm2", "fga2", "fgm3", "fga3",
+                   "plus_minus", "starter", "first_name", "family_name", "photo_url", "pts", "fgm", "fga", "fgm2", "fga2", "fgm3", "fga3",
                    "ftm", "fta", "orb", "drb", "trb", "ast", "tov", "stl", "blk", "pf")
     shot_cols = ("team_code", "player_name", "x", "y", "court_x", "court_y", "made",
                  "action_type", "sub_type", "period", "action_number")
@@ -132,6 +134,9 @@ def persist_game(game: dict) -> None:
         if rows:
             db.session.execute(sqlite_insert(model),
                                [{"game_id": game_id, **{c: r.get(c) for c in cols}} for r in rows])
+
+    # C-08: cada jugador del partido queda asociado a su ficha en la misma transacción
+    identity.assign_game(game_id)
 
 
 def reprocess_games(game_ids: list[str]) -> dict:

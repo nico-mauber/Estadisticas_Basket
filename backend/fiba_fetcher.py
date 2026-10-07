@@ -366,6 +366,10 @@ def _parse_fiba_json(raw: dict, game_id: str) -> dict:
                     "position":    (p.get("playingPosition") or "").strip(),
                     "plus_minus":  _i(p, ["sPlusMinusPoints"], default=None),   # ausente → None (C-11 RF-11)
                     "starter":     int(p.get("starter") or 0),
+                    # C-08: datos de identidad (None si FIBA no los publica; nunca "")
+                    "first_name":  (p.get("firstName") or p.get("internationalFirstName") or "").strip() or None,
+                    "family_name": (p.get("familyName") or p.get("internationalFamilyName") or "").strip() or None,
+                    "photo_url":   (p.get("photoT") or p.get("photoS") or "").strip() or None,
                     "pts":  pi(["Points"]),
                     "fgm2": pi(["TwoPointersMade"]),
                     "fga2": pi(["TwoPointersAttempted"]),

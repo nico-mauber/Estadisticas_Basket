@@ -4,15 +4,16 @@ from datetime import timedelta
 from flask import Flask, jsonify, request, session
 from flask_cors import CORS
 from sqlalchemy import func
-from database import db, init_db, upgrade_db, Game, TeamGameStats, PlayerGameStats, Shot, PbpEvent, DB_PATH
+from database import db, init_db, upgrade_db, Game, TeamGameStats, PlayerGameStats, Player, Shot, PbpEvent, DB_PATH
 from stats_engine import (calc_team_stats, calc_player_stats, league_averages,
-                          _parse_minutes, played, norm_name, resolve_identity,
+                          _parse_minutes, played, resolve_identity,
                           season_ast_to, season_def_to_ratio, null_reasons,
                           standings_row, standings_sort_key)
 from clutch import team_clutch, MARGIN_RANGE, WINDOW_RANGE
 import lineups
 import competitions
 import data_quality
+import identity
 import ingest
 from competitions import CompetitionError
 from auth import (
@@ -41,6 +42,7 @@ init_db(app)
 upgrade_db(app)
 with app.app_context():
     competitions.backfill()   # partidos sin competencia (idempotente, F-11 RF-4)
+    identity.backfill_player_ids()   # fichas de jugador de partidos ya importados (idempotente, C-08 RF-2)
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────
@@ -413,19 +415,23 @@ def team_stats(team_code: str):
 @login_required
 def team_players(team_code: str):
     team_code = team_code.upper()
-    # Una entrada por jugador con nombre NORMALIZADO: dos grafías del mismo nombre
-    # son un solo jugador (Feature 13 RF-1/RF-2). Orden por fecha para que
-    # `resolve_identity` desempate por "más reciente".
+    try:
+        comp_id = competitions.resolve(request.args.get("competition"))   # ausente = todas
+    except CompetitionError as e:
+        return jsonify({"error": str(e)}), e.status
+    # Una entrada por ficha de jugador (C-08): dos grafías del mismo nombre son un solo jugador.
     game_dates = {g.game_id: (g.date or "") for g in Game.query.all()}
-    groups: dict[str, list] = {}
-    for pr in sorted(_visible(PlayerGameStats.query.filter_by(team_code=team_code), PlayerGameStats).all(),
-                     key=lambda r: (game_dates.get(r.game_id, ""), r.game_id)):
-        groups.setdefault(norm_name(pr.player_name), []).append(pr)
+    q = _visible(PlayerGameStats.query.filter_by(team_code=team_code), PlayerGameStats)
+    if comp_id:
+        q = q.filter(PlayerGameStats.game_id.in_(db.session.query(Game.game_id).filter_by(competition_id=comp_id)))
+    display = {p.id: p.display_name for p in Player.query.filter_by(team_code=team_code).all()}
+    groups: dict = {}
+    for pr in sorted(q.all(), key=lambda r: (game_dates.get(r.game_id, ""), r.game_id)):
+        groups.setdefault(identity.group_key(pr), []).append(pr)
 
     result = []
-    for _norm_key in sorted(groups):
-        rows = groups[_norm_key]
-        name, _position = resolve_identity(rows)
+    for rows in groups.values():
+        name = display.get(rows[0].player_id) or resolve_identity(rows)[0]
         uso_vals, pts_vals = [], []
         played_rows = [r for r in rows if played(r.minutes)]   # Feature 12 RF-6
         for row in played_rows:
@@ -447,28 +453,35 @@ def team_players(team_code: str):
         avg_uso = round(sum(uso_vals) / len(uso_vals), 4) if uso_vals else None
         avg_pts = round(sum(pts_vals) / len(pts_vals), 2) if pts_vals else None
         result.append({
+            "player_id": rows[0].player_id,
             "name":    name,
             "games":   len(played_rows),   # partidos JUGADOS — Feature 12 RF-7
             "uso_pct": avg_uso,
             "pts":     avg_pts,
         })
-    result.sort(key=lambda x: (x["uso_pct"] is None, -(x["uso_pct"] or 0)))
+    result.sort(key=lambda x: (x["uso_pct"] is None, -(x["uso_pct"] or 0), x["name"]))
     return jsonify(result)
 
 
-@app.route("/api/player/<team_code>/<player_name>")
-@login_required
-def player_stats(team_code: str, player_name: str):
-    team_code = team_code.upper()
-    # Resolver por nombre NORMALIZADO: acepta cualquier grafía en la URL y devuelve
-    # TODOS los partidos del jugador, aunque el nombre haya variado (Feature 13 RF-5).
-    key  = norm_name(player_name)
-    rows = [r for r in _visible(PlayerGameStats.query.filter_by(team_code=team_code), PlayerGameStats).all()
-            if norm_name(r.player_name) == key]
+def _resolve_legacy_player(team_code: str, name: str) -> int | None:
+    """Ficha de un jugador por (equipo, nombre en cualquier grafía). None si no existe (C-08 RF-10)."""
+    try:
+        return identity.resolve_player_id(team_code.upper(), name or "", create=False)
+    except ValueError:
+        return None
+
+
+def _player_payload(pid: int) -> dict | None:
+    """Perfil completo de una ficha: TODOS sus partidos aunque el nombre haya variado (C-08)."""
+    rows = _visible(PlayerGameStats.query.filter_by(player_id=pid), PlayerGameStats).all()
     if not rows:
-        return jsonify({"error": "Jugador no encontrado"}), 404
-    rows.sort(key=lambda r: r.game_id)
-    player_name, _pos = resolve_identity(rows)   # grafía real para la respuesta (RF-4)
+        return None
+    game_dates = {g.game_id: (g.date or "") for g in Game.query.all()}
+    rows.sort(key=lambda r: (game_dates.get(r.game_id, ""), r.game_id))
+    ficha       = db.session.get(Player, pid)
+    player_name = ficha.display_name   # grafía real de la ficha (nunca el nombre normalizado)
+    position    = resolve_identity(rows)[1]
+    team_code   = rows[-1].team_code
     labels = competitions.labels()
 
     game_log = []
@@ -578,10 +591,13 @@ def player_stats(team_code: str, player_name: str):
     # C-07: totales de temporada sobre los partidos JUGADOS (Feature 16 RF-5 + Feature 12 RF-6)
     totals = {k: _sum(k) for k in ("fga2", "fgm2", "fga3", "fgm3", "fta", "ftm")}
 
-    return jsonify({
+    return {
         "player":    player_name,
+        "player_id": pid,
+        "position":  position,
+        "position_group": identity.position_group(position),
         "team_code": team_code,
-        "team_name": rows[0].team_name,
+        "team_name": rows[-1].team_name,
         "games":     len(played_log),   # partidos JUGADOS (excluye DNP) — Feature 12 RF-7
         "averages":  averages,
         # Sin partidos jugados, todo `averages` es null por DNP (C-11 RF-3)
@@ -590,7 +606,27 @@ def player_stats(team_code: str, player_name: str):
         "leagues":   leagues,    # promedio de liga por competencia (Feature 14 RF-1)
         "totals":    totals,     # totales de temporada (Feature 16 RF-5)
         "game_log":  game_log,
-    })
+    }
+
+
+@app.route("/api/player/<int:player_id>")
+@login_required
+def player_by_id(player_id: int):
+    pid = identity.canonical_id(player_id)   # una ficha absorbida responde la que la absorbió
+    payload = _player_payload(pid) if pid is not None else None
+    if payload is None:
+        return jsonify({"error": "Jugador no encontrado"}), 404
+    return jsonify(payload)
+
+
+@app.route("/api/player/<team_code>/<player_name>")
+@login_required
+def player_stats(team_code: str, player_name: str):
+    pid = _resolve_legacy_player(team_code, player_name)
+    payload = _player_payload(pid) if pid is not None else None
+    if payload is None:
+        return jsonify({"error": "Jugador no encontrado"}), 404
+    return jsonify(payload)
 
 
 # ── Shots (jugador y equipo) ─────────────────────────────────────────────────
@@ -631,11 +667,15 @@ def _zones_from_shots(rows):
 @login_required
 def player_shots(team_code: str, player_name: str):
     team_code = team_code.upper()
-    rows = _visible(Shot.query.filter_by(team_code=team_code, player_name=player_name), Shot).all()
+    pid = _resolve_legacy_player(team_code, player_name)
+    if pid is None:
+        return jsonify({"error": "Jugador no encontrado"}), 404
+    names = identity.aliases(pid)   # tiros y pbp guardan el nombre crudo: se usan todas las grafías
+    rows = _visible(Shot.query.filter(Shot.team_code == team_code, Shot.player_name.in_(names)), Shot).all()
     zones, total_fga, total_pts, fgm2, fgm3, has_coordinates = _zones_from_shots(rows)
 
-    games = _visible(db.session.query(Shot.game_id).filter_by(
-        team_code=team_code, player_name=player_name
+    games = _visible(db.session.query(Shot.game_id).filter(
+        Shot.team_code == team_code, Shot.player_name.in_(names)
     ), Shot).distinct().count()
 
     pgs = _visible(db.session.query(
@@ -643,7 +683,7 @@ def player_shots(team_code: str, player_name: str):
         func.sum(PlayerGameStats.fga).label("fga"),
         func.sum(PlayerGameStats.fta).label("fta"),
         func.sum(PlayerGameStats.tov).label("tov"),
-    ).filter_by(team_code=team_code, player_name=player_name), PlayerGameStats).first()
+    ).filter(PlayerGameStats.player_id == pid), PlayerGameStats).first()
 
     ppp = None
     if pgs and pgs.fga:
@@ -707,9 +747,14 @@ def team_shots(team_code: str):
 def search_players():
     """Todos los jugadores de la base con sus promedios, para el buscador.
 
-    Una entrada por (team_code, player_name). Tasas promediadas excluyendo None
-    (Feature 08); conteos incluyen 0. Filtrado y orden se hacen en el frontend.
+    Una entrada por ficha de jugador (C-08). Tasas promediadas excluyendo None
+    (Feature 08); conteos incluyen 0. Filtrado y orden se hacen en el frontend; el filtro
+    opcional `competition` recorta los partidos que alimentan los promedios.
     """
+    try:
+        comp_id = competitions.resolve(request.args.get("competition"))   # ausente = todas
+    except CompetitionError as e:
+        return jsonify({"error": str(e)}), e.status
     games     = {g.game_id: g for g in Game.query.all()}
     team_rows = {(tr.game_id, tr.team_code): tr for tr in TeamGameStats.query.all()}
     labels    = competitions.labels()
@@ -721,7 +766,8 @@ def search_players():
                      key=lambda r: ((games[r.game_id].date if r.game_id in games else ""), r.game_id))
     groups = {}
     for pr in all_prs:
-        groups.setdefault((pr.team_code, norm_name(pr.player_name)), []).append(pr)
+        groups.setdefault(identity.group_key(pr), []).append(pr)
+    display = {p.id: p.display_name for p in Player.query.all()}
 
     metric_keys = [
         "efg_pct", "ts_pct", "oer", "uso_pct", "ppp", "pps",
@@ -736,10 +782,14 @@ def search_players():
     count_keys = ["pts", "ast", "tov", "stl", "blk"]
 
     result = []
-    for (team_code, _norm_key), rows in groups.items():
+    for rows in groups.values():
+        team_code = rows[0].team_code
         per_game, comps, pm_vals, min_vals = [], set(), [], []
-        # Grafía real + posición determinista del grupo unificado (Feature 13 RF-3/RF-4)
+        # Grafía real de la ficha + posición determinista entre TODOS sus partidos (C-08 RF-4/RF-6)
         player_name, position = resolve_identity(rows)
+        player_name = display.get(rows[0].player_id) or player_name
+        if comp_id and not any(games.get(r.game_id) and games[r.game_id].competition_id == comp_id for r in rows):
+            continue   # la ficha no tiene partidos en la competencia pedida
         for pr in rows:
             # La competencia sale de TODAS las fichas: estar convocado sin jugar
             # igual ubica al jugador en esa competencia.
@@ -747,6 +797,9 @@ def search_players():
             if g and g.competition_id in labels:
                 comps.add(labels[g.competition_id]["label"])
 
+            # Filtro de competencia: solo los partidos de esa competencia alimentan los promedios
+            if comp_id and not (g and g.competition_id == comp_id):
+                continue
             # Un DNP no entra en ningún promedio (Feature 12 RF-6).
             if not played(pr.minutes):
                 continue
@@ -785,12 +838,16 @@ def search_players():
             return round(sum(vals) / len(vals), 2) if vals else None
 
         rec = {
+            "player_id":    rows[0].player_id,
             "player":       player_name,
             "team_code":    team_code,
             "team_name":    rows[-1].team_name,
             "competitions": sorted(comps),
+            "competition_ids": sorted({games[r.game_id].competition_id for r in rows
+                                       if r.game_id in games and games[r.game_id].competition_id}),
             "games":        len(per_game),   # partidos JUGADOS — Feature 12 RF-7
             "position":     position,
+            "position_group": identity.position_group(position),
             "minutes":      round(sum(min_vals) / len(min_vals), 1) if min_vals else None,
             "plus_minus":   round(sum(pm_vals) / len(pm_vals), 1) if pm_vals else None,
         }
@@ -886,12 +943,23 @@ def lineup_route(team_code: str):
     if not (3 <= len(players) <= 5):
         return jsonify({"error": "Elegí entre 3 y 5 jugadores"}), 400
 
+    pids = []
+    for name in players:
+        pid = _resolve_legacy_player(team_code, name)
+        if pid is None:
+            return jsonify({"error": f"Jugador no encontrado: {name}"}), 400
+        if pid not in pids:
+            pids.append(pid)
+    if len(pids) < 3:   # dos nombres de la misma ficha cuentan una sola vez
+        return jsonify({"error": "Elegí entre 3 y 5 jugadores"}), 400
+
     games = _team_pbp_games(team_code)
     if not games:
         return jsonify({"error": "Equipo no encontrado o sin play-by-play"}), 404
 
-    result = lineups.lineup_stats(games, team_code, players)
-    result.update({"team_code": team_code, "players": players, "size": len(players)})
+    names = [db.session.get(Player, pid).display_name for pid in pids]
+    result = lineups.lineup_stats(identity.canonicalize_pbp_games(games, team_code), team_code, names)
+    result.update({"team_code": team_code, "players": names, "size": len(names)})
     return jsonify(result)
 
 
@@ -904,15 +972,17 @@ def onoff_route(team_code: str, player_name: str):
     if not games:
         return jsonify({"error": "Equipo no encontrado o sin play-by-play"}), 404
 
-    if not _visible(PlayerGameStats.query.filter_by(team_code=team_code, player_name=player_name),
-                    PlayerGameStats).first():
+    pid = _resolve_legacy_player(team_code, player_name)
+    player_rows = (_visible(PlayerGameStats.query.filter_by(player_id=pid), PlayerGameStats).all()
+                   if pid is not None else [])
+    if not player_rows:
         return jsonify({"error": "Sin datos ON/OFF para este jugador"}), 404
 
-    result = lineups.onoff_stats(games, team_code, player_name)
+    display_name = db.session.get(Player, pid).display_name
+    result = lineups.onoff_stats(identity.canonicalize_pbp_games(games, team_code), team_code, display_name)
 
     uso_vals = []
-    for pr in _visible(PlayerGameStats.query.filter_by(team_code=team_code, player_name=player_name),
-                       PlayerGameStats).all():
+    for pr in player_rows:
         p = _to_dict(pr)
         p.setdefault("trb", p["orb"] + p["drb"])
         team_row = TeamGameStats.query.filter_by(game_id=pr.game_id, team_code=team_code).first()
@@ -922,7 +992,8 @@ def onoff_route(team_code: str, player_name: str):
             uso_vals.append(adv["uso_pct"])
     result["usg_pct"] = round(sum(uso_vals) / len(uso_vals), 4) if uso_vals else None
     result["team_code"] = team_code
-    result["player"] = player_name
+    result["player"] = display_name
+    result["player_id"] = pid
     return jsonify(result)
 
 
@@ -1022,6 +1093,25 @@ def merge_competition(comp_id: int):
         return jsonify({"ok": True, **competitions.merge(comp_id, source_id)})
     except CompetitionError as e:
         return jsonify({"error": str(e)}), e.status
+
+
+# ── Identidad de jugador (C-08) ─────────────────────────────────────────────
+
+@app.route("/api/identity/merge", methods=["POST"])
+@admin_required
+def identity_merge():
+    """Une dos fichas del mismo equipo: `target_id` absorbe a `source_id`."""
+    body = request.get_json(silent=True) or {}
+    t, s = body.get("target_id"), body.get("source_id")
+    if not all(isinstance(v, int) and not isinstance(v, bool) for v in (t, s)):
+        return jsonify({"error": "Indicá target_id y source_id enteros"}), 400
+    try:
+        result = identity.merge_players(t, s)
+        db.session.commit()
+    except identity.IdentityError as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), e.status
+    return jsonify(result)
 
 
 # ── Calidad de datos + reproceso (F-11) ─────────────────────────────────────

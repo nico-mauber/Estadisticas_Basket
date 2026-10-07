@@ -731,3 +731,20 @@ thead th[data-key]:hover  { color: var(--text); }
 /* ── ON / OFF ───────────────────────────────────────── */
 .onoff-table td, .onoff-table th { text-align: center; min-width: 0; }
 .onoff-table .lbl { color: var(--muted); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; white-space: nowrap; }
+
+/* ── identity-merge (C-08) ── */
+.dup-list { list-style: none; margin: var(--sp-2) 0 0; padding: 0; }
+.dup-item {
+  display: grid; grid-template-columns: 1fr; gap: var(--sp-1);
+  padding: var(--sp-3) 0; border-top: 1px solid var(--border); font-size: 13px;
+}
+.dup-item:first-child { border-top: 0; }
+.dup-team { font-weight: 700; color: var(--accent); }
+.dup-sep { margin: 0 var(--sp-2); color: var(--muted); }
+.dup-action .btn { min-height: 44px; }
+.dup-note { margin-top: var(--sp-3); font-size: 11px; }
+.modal-radio { display: flex; align-items: center; gap: var(--sp-2); margin-bottom: var(--sp-3); font-size: 13px; min-height: 44px; }
+@media (min-width: 768px) {
+  .dup-item { grid-template-columns: 64px 1fr 220px auto; align-items: center; gap: var(--sp-4); }
+  .dup-action .btn { min-height: 0; }
+}

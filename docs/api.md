@@ -14,12 +14,11 @@ Todas las rutas bajo `/api/`. Respuestas en JSON. Errores retornan `{"error": "m
 >
 > Un partido **con** minutos y 0 puntos sí cuenta — ese 0 es real. Campos que además pueden valer `null` donde antes devolvían `0`: `reb_share`, `oreb_share`, `dreb_share` (tasas: denominador 0 o sin fila de equipo), `uso_pct` en `/api/players/<team>`, y `record.win_pct` en `/api/team/<code>`. Ver `sdd/specs/12-nulos-orden-color-dnp/`.
 
-> **Identidad de jugador.** Los tres endpoints de jugador resuelven la identidad por **nombre normalizado** (minúsculas, sin tildes, espacios colapsados) + equipo: dos fichas cuyo nombre normaliza igual son el mismo jugador y se unifican al leer, sumando sus partidos. La tabla conserva el nombre crudo — la unificación no altera datos.
-> - `GET /api/player/<team>/<name>` acepta **cualquier grafía** en la URL y devuelve todos los partidos del jugador. `404` solo si no resuelve a ninguna ficha.
-> - El `player`/`name` devuelto es siempre una grafía real (la de la ficha más reciente), nunca la clave normalizada.
-> - `position` es la más frecuente entre las no vacías; a igual frecuencia, la de la ficha más reciente.
->
-> La normalización es tipográfica, no semántica: `J. Feldeine` y `Jerome Feldeine` **no** se unifican. La competencia no entra en la clave (un jugador con partidos en dos competencias es una sola ficha, con `competitions[]`). Ver `sdd/specs/13-dedup-jugadores/`.
+> **Identidad de jugador (C-08).** Cada jugador es una **ficha** (`player_id`, tabla `players`) con clave `(equipo, nombre normalizado)`: minúsculas, sin tildes, espacios colapsados. Dos grafías del mismo nombre son una sola ficha y suman sus partidos; la tabla conserva el nombre crudo.
+> - Los endpoints `…/<team>/<name>` (perfil, mapa de tiro, ON/OFF) y `GET /api/lineup/<team>` aceptan **cualquier grafía** y usan **todos** los partidos, tiros y eventos de la ficha. `GET /api/player/<player_id>` y los listados devuelven el `player_id`.
+> - El `player`/`name` devuelto es siempre una grafía real (la del partido más reciente), nunca la clave normalizada.
+> - `position` es la más frecuente entre las no vacías; a igual frecuencia, la más reciente. `position_group` la agrupa: `G` = G/PG/SG, `F` = F/SF/PF, `C` = C; `null` sin posición.
+> - La normalización es tipográfica, no semántica: `J. Feldeine` y `Jerome Feldeine` **no** se unen solos; el panel de calidad los lista como candidatos y un administrador los fusiona (`POST /api/identity/merge`). La competencia no entra en la clave.
 
 > **Promedios de liga por competencia.** `GET /api/team/<code>` y `GET /api/player/<team>/<name>` devuelven `leagues`: un mapa `{"<competencia>": {…}}` con el promedio de liga de cada competencia en que la entidad tiene partidos, más la clave `""` con el agregado de todas. El campo `league` se conserva y equivale a `leagues[""]`.
 > - El promedio es la media **sobre todos los partidos** de esa competencia (ponderada: un equipo con 2 partidos aporta el doble que uno con 1), no la media de los promedios por equipo.
@@ -229,23 +228,33 @@ Stats completas del equipo: promedios, record, contexto de liga y game log.
 
 ## GET `/api/players/<team_code>`
 
-Lista los jugadores del equipo (nombres únicos).
+Plantel del equipo: una entrada por **ficha** de jugador, ordenado por USO% descendente.
+
+**Query:** `competition` (opcional) — id de competencia (o texto de FIBA legado); recorta los partidos que alimentan `games`, `uso_pct` y `pts`. Ausente = todas.
 
 **Response:**
 ```json
-["García Juan", "López Pedro", "Martínez Carlos"]
+[
+  { "player_id": 12, "name": "C. Zinaich", "games": 2, "uso_pct": 0.2145, "pts": 19.0 },
+  { "player_id": 15, "name": "J. Feldeine", "games": 2, "uso_pct": null, "pts": 11.5 }
+]
 ```
+
+`games` = partidos **jugados** (excluye DNP). `uso_pct` y `pts` son `null` sin partidos jugados. **Errores:** `400` — `{"error": "La competencia no existe."}`.
 
 ---
 
 ## GET `/api/player/<team_code>/<player_name>`
 
-Stats completas del jugador.
+Stats completas del jugador. Acepta cualquier grafía del nombre (ver nota de identidad) y devuelve la ficha vigente, con `player_id`.
 
 **Response:**
 ```json
 {
   "player": "García Juan",
+  "player_id": 12,
+  "position": "PF",
+  "position_group": "F",
   "team_code": "FUBB",
   "team_name": "Federación Uruguaya",
   "games": 10,
@@ -275,13 +284,21 @@ Stats completas del jugador.
 }
 ```
 
-**Errores:** `404` — jugador no encontrado.
+**Errores:** `404` — `{"error": "Jugador no encontrado"}`.
+
+---
+
+## GET `/api/player/<player_id>`
+
+Mismo contenido que `GET /api/player/<team_code>/<player_name>` (incluido `player_id`, `position`, `position_group`), pero por identificador de ficha. Si la ficha fue absorbida por otra (fusión), responde la vigente: el `player_id` de la respuesta es el canónico. Es la ruta que usan el buscador y el plantel para abrir el perfil.
+
+**Errores:** `404` — `{"error": "Jugador no encontrado"}`.
 
 ---
 
 ## GET `/api/shots/<team_code>/<player_name>`
 
-Shot chart de **11 zonas** del jugador (ver clasificación en [database.md](database.md#clasificación-de-zonas-de-tiro)).
+Shot chart de **11 zonas** del jugador (ver clasificación en [database.md](database.md#clasificación-de-zonas-de-tiro)). Suma los tiros de **todas las grafías** de la ficha. **Errores:** `404` — `{"error": "Jugador no encontrado"}` si el nombre no resuelve a ninguna ficha del equipo.
 
 **Response:**
 ```json
@@ -344,18 +361,23 @@ Verificación del play-by-play persistido de un partido (Feature 02). Solo lectu
 
 ## GET `/api/search/players`
 
-Todos los jugadores de la base con sus promedios, para el buscador avanzado (una entrada por `(team_code, player_name)`). El filtrado y el orden se hacen en el frontend.
+Todos los jugadores de la base con sus promedios, para el buscador avanzado (una entrada por **ficha**, C-08). El filtrado y el orden se hacen en el frontend; el filtro opcional `competition` recorta en el backend los partidos que alimentan los promedios.
+
+**Query:** `competition` (opcional) — id de competencia (o texto de FIBA legado). Ausente = todas. Con valor, solo aparecen las fichas con partidos en esa competencia. `400` si no existe.
 
 **Response:**
 ```json
 [
   {
+    "player_id": 12,
     "player": "A. Varela",
     "team_code": "AGU",
     "team_name": "Aguada",
     "competitions": ["Liga Uruguaya de Basquetbol 2025/2026"],
+    "competition_ids": [3],
     "games": 3,
     "position": "G",
+    "position_group": "G",
     "minutes": 27.4,
     "plus_minus": 4.5,
     "efg_pct": 0.55, "ts_pct": 0.58, "oer": 1.08, "uso_pct": 0.24,
@@ -367,7 +389,8 @@ Todos los jugadores de la base con sus promedios, para el buscador avanzado (una
 ]
 ```
 
-- `position` — última posición no vacía observada (`playingPosition` FIBA); `""` si nunca hubo dato.
+- `position` — posición FIBA más frecuente entre las no vacías (desempate: la más reciente); `""` si nunca hubo dato. Es un atributo de la ficha: no cambia con el filtro de competencia. `position_group` — `"G"`, `"F"`, `"C"` o `null` (el filtro de posición del buscador usa este campo).
+- `competition_ids` — ids de las competencias de la ficha, sin correspondencia posicional con `competitions`; usarlo solo para pertenencia.
 - `plus_minus` / `minutes` — promedio por partido (`plus_minus` puede ser negativo).
 - Las tasas siguen la regla de nulos (ver nota al inicio): `null` si no hay dato, excluidas del promedio.
 - Un jugador que jugó en dos equipos aparece una vez por equipo.
@@ -453,7 +476,7 @@ Rendimiento del equipo mientras los jugadores indicados (3 a 5, separados por `|
 - `sample.seconds` = tiempo de juego del equipo con esos jugadores en cancha. La suma de segundos de todos los tramos de un partido es exacta (PERIOD_LEN por período: 600 regular / 300 OT); no modela reloj detenido dentro de un tramo.
 - Tasas `null` si su denominador es 0 (regla de nulos, ver nota al inicio).
 
-**Errores:** `400` — `{"error": "Elegí entre 3 y 5 jugadores"}` (menos de 3 o más de 5 nombres) · `404` — equipo sin partidos con play-by-play.
+**Errores:** `400` — `{"error": "Elegí entre 3 y 5 jugadores"}` (menos de 3 o más de 5 nombres, o nombres que son el mismo jugador) · `400` — `{"error": "Jugador no encontrado: <nombre>"}` si un nombre no resuelve a una ficha del equipo · `404` — equipo sin partidos con play-by-play. Cada nombre puede usar cualquier grafía; `players` devuelve la grafía real de cada ficha.
 
 ---
 
@@ -464,7 +487,7 @@ Rendimiento del equipo con el jugador en cancha (**ON**) vs. en el banco (**OFF*
 **Response 200:**
 ```json
 {
-  "team_code": "CNF", "player": "E. Oglivie", "usg_pct": 0.0947,
+  "team_code": "CNF", "player": "E. Oglivie", "player_id": 12, "usg_pct": 0.0947,
   "games_used": 2, "games_excluded": 0,
   "on":  { "possessions": 87.0, "seconds": 2682.0, "pts_for": 103, "pts_against": 63, "reb": 53, "orb": 15, "drb": 38, "ast": 13, "tov": 11, "stl": 8, "blk": 3, "oer": 1.1839, "der": 0.7475, "net_rating": 0.4364, "efg_pct": 0.5513, "ts_pct": 0.5787 },
   "off": { "possessions": 77.0, "seconds": 2201.0, "pts_for": 104, "pts_against": 91, "reb": 36, "orb": 10, "drb": 26, "ast": 18, "tov": 9, "stl": 5, "blk": 1, "oer": 1.3506, "der": 1.1837, "net_rating": 0.1669, "efg_pct": 0.6692, "ts_pct": 0.6842 },
@@ -525,14 +548,37 @@ Informe de calidad de una competencia (F-11). **Query:** `?competition=<id>` (ob
     "games_without_coords":    { "counts_as_incomplete": false },
     "null_fields":             { "items": [{ "table": "player_game_stats", "field": "position",
                                              "label": "Posición del jugador", "nulls": 18, "total": 312, "pct": 0.0577 }] },
-    "possible_duplicates":     { "items": [{ "team_code": "OMU", "norm_key": "a. caldas",
-                                             "variants": [{ "player_name": "A. Caldas", "games": 5 }] }] },
+    "possible_duplicates":     { "status": "alerta", "count": 1, "counts_as_incomplete": false,
+                                 "items": [{ "kind": "candidato", "reason": "apellido_inicial", "team_code": "CNF", "can_merge": true,
+                                             "players": [{ "player_id": 15, "name": "J. Feldeine", "games": 12, "jerseys": ["7"], "first_date": "2025-10-02", "last_date": "2026-03-01" },
+                                                         { "player_id": 41, "name": "Jerome Feldeine", "games": 1, "jerseys": ["7"], "first_date": "2026-03-08", "last_date": "2026-03-08" }] }] },
     "possession_gaps":         { "status": "no_disponible", "count": null, "reason": "requiere_posesiones" }
   }
 }
 ```
 
 Un partido es **incompleto** si falla un chequeo con `counts_as_incomplete: true`; la competencia está lista para publicar si no tiene incompletos. `status` de cada chequeo: `ok` · `alerta` · `no_disponible`.
+
+`possible_duplicates` (C-08) lista **avisos**, nunca partidos incompletos: `kind: "candidato"` = dos fichas del mismo equipo que **nunca jugaron el mismo partido** y que parecen la misma persona (`reason`: `apellido_inicial` — mismo apellido e inicial compatible, p. ej. `J. Feldeine`/`Jerome Feldeine`; `dorsal_apellido` — mismo dorsal y apellido que comparte 4+ caracteres iniciales), con `can_merge: true`; `kind: "posible_fusion_incorrecta"` (`reason: "nombre_completo_distinto"`) = una ficha cuyos partidos traen nombres completos de FIBA distintos, es decir que la clave tipográfica pudo juntar a dos personas (solo detectable en partidos reprocesados con `INGEST_VERSION` ≥ 3).
+
+---
+
+## POST `/api/identity/merge` — admin
+
+Une dos fichas de jugador **del mismo equipo** (C-08): `target_id` conserva el id y absorbe a `source_id`. Las filas de `player_game_stats` de la absorbida pasan a la vigente y `source_id` queda con `merged_into`, de modo que `GET /api/player/<source_id>` y cualquier consulta por su nombre resuelven a la ficha vigente. No se modifica ninguna estadística ni nombre crudo.
+
+**Body:** `{ "target_id": 15, "source_id": 41 }`
+
+**Response 200:**
+```json
+{
+  "player": { "player_id": 15, "team_code": "CNF", "display_name": "Jerome Feldeine", "position": "PG", "position_group": "G",
+              "games": 13, "games_listed": 13, "aliases": ["J. Feldeine", "Jerome Feldeine"], "competition_ids": [1] },
+  "merged": { "source_id": 41, "rows_moved": 1 }
+}
+```
+
+**Errores:** `400` — `{"error": "Indicá target_id y source_id enteros"}` / `{"error": "No se puede unificar una ficha consigo misma"}` · `401` sin sesión · `403` usuario sin permiso de administrador (`ADMIN_USERS`) · `404` — `{"error": "Jugador no encontrado"}` · `409` — `{"error": "Solo se pueden unificar fichas del mismo equipo"}`.
 
 ---
 
