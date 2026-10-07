@@ -12,18 +12,19 @@
 resumida, la tabla completa con el conjunto estándar de T-05. Las tarjetas y los gráficos son la lectura rápida; la tabla es
 el dato." Y en §3: "T-05 y T-06 son los que evitan que cada apartado nuevo vuelva a quedar incompleto."
 
-**Qué existe hoy (verificado en código).** Rama `main` y rama `dev` (commit `0cc4de6`, integrado por el Grupo 0 de C-11,
-DA-01). No existe ningún componente de tabla genérico ni ninguna exportación. Cada tabla es HTML armado a mano en
+**Qué existe hoy (verificado en código).** Rama `v2`, con el Bloque C de `dev` integrado (C-11, Grupo 0) y ya implementados
+F-11 (versión acotada), C-05, C-10, C-06 y C-09 (ver `../../00-decisiones.md` y los `progress.md` de esas carpetas). No existe
+ningún componente de tabla genérico ni ninguna exportación. Cada tabla es HTML armado a mano en
 `frontend/js/app.js` con columnas fijas elegidas por pantalla:
 
 | # | Tabla actual (función en `app.js` de `dev`) | Filas | Columnas hoy | Orden | Destino en v2 |
 |---|---|---|---|---|---|
-| 1 | Ranking de Liga (`_leagueTableHTML`, `_sortedLeague`, `_bindLeagueTableEvents`) | equipos | ~15 métricas fijas | sí, con `_cmpNullsLast` (dev) | **migra en T-06** (`league_teams`) |
+| 1 | Ranking de Liga (`_leagueTableHTML`, `_sortedLeague`, `_bindLeagueTableEvents`) | equipos | ~15 métricas fijas | sí, con `_cmpNullsLast` (`app.js`) | **migra en T-06** (`league_teams`) |
 | 2 | Tabla general (`_standingsCardHTML`, C-09) | equipos | PJ, PG, PP, Pts, PF, PC | no | **migra en T-06** (`league_standings`) |
 | 3 | Game log de equipo (`_renderTeamContent`, tabla "Game log") | partidos | Fecha, Rival, L/V, Pts, OER, DER, eFG%, TS%, OR%, DR%, TO% | no | **migra en T-06** (`team_game_log`) |
 | 4 | Game log de jugador (`_renderPlayerContent`, tabla "Game log — …") | partidos | Fecha, Rival, Pts, FGM/A, 3PM/A, FTM/A, OR, DR, Ast, TOV, OER, eFG%, TS% | no | **migra en T-06** (`player_game_log`) |
-| 5 | Buscador de jugadores (`_renderSearchResults`, `SEARCH_COLS`, `_applySearch`) | jugadores | columnas fijas + filtros locales | sí, con `_cmpNullsLast` (dev) | **migra en T-06** (`search_players`) |
-| 6 | Cierres por partido (`_drawClutchTable`, C-06) | partidos cerrados | fijas | sí, con `_cmpNullsLast` (dev) | **migra en T-06** (`clutch_games`) |
+| 5 | Buscador de jugadores (`_renderSearchResults`, `SEARCH_COLS`, `_applySearch`) | jugadores | columnas fijas + filtros locales | sí, con `_cmpNullsLast` (`app.js`) | **migra en T-06** (`search_players`) |
+| 6 | Cierres por partido (`_drawClutchTable`, `CLUTCH_COLS`, C-06) | partidos cerrados | 17 fijas (Fecha, Rival, L/V, Δ al inicio del tramo, PR, Dif, Pts, Off, Def, eFG%, TS%, TOV, AST, REB, FR, FC, Finaliza, Crea) | sí, con `_cmpNullsLast` (`app.js`) | **migra en T-06** (`clutch_games`) |
 | 7 | Ranking de uso (`_renderUsageRanking`) | jugadores del equipo | USO%, PPG, PJ | no | F-08 (`team_roster`); en T-06 solo botón de exportación |
 | 8 | ON/OFF (`renderTeamOnOff`, `.onoff-table`) | métricas | ON · OFF · Δ | no | F-06 (`team_onoff`); en T-06 solo botón de exportación |
 | 9 | Combinación (`renderTeamLineup`) | 1 quinteto | 18 fijas | no | F-06 (`team_lineups`); en T-06 solo botón de exportación |
@@ -34,8 +35,14 @@ DA-01). No existe ningún componente de tabla genérico ni ninguna exportación.
 
 Otros hechos verificados: `frontend/js/api.js` → `apiFetch` siempre devuelve JSON (no hay descarga de archivos);
 `frontend/css/style.css` no tiene reglas `@media print`; `backend/app.py` no usa `send_file` ni respuestas binarias;
-`frontend/sw.js` usa `CACHE = "smart-basket-v9"` con lista `STATIC` fija (un módulo nuevo no incluido no funciona offline).
-El orden null-safe `_cmpNullsLast(av, bv, dir)` existe solo en `dev` (C-11 lo mueve a `core/format.js` como `cmpNullsLast`).
+`frontend/sw.js` usa `CACHE = "smart-basket-v13"` con lista `STATIC` fija que ya incluye `/js/core/format.js` (un módulo nuevo no
+incluido no funciona offline). El orden null-safe `_cmpNullsLast(av, bv, dir)` sigue definido en `frontend/js/app.js` (l.25):
+C-11 lo dejó ahí (`progress.md` de C-11: "T-06 lo moverá si su componente de tabla vive en otro módulo"), así que T-06 lo mueve a
+`core/format.js` como `cmpNullsLast`. `/api/league` ya devuelve `wins/losses/table_points/pts_for/pts_against/standings_pos`
+(C-09, `stats_engine.standings_row`/`standings_sort_key`) y la tabla general no se muestra con "Todas" cuando hay varias
+competencias (decisión de C-09). F-11 difirió `cache.py`, `repository.py` y la competencia por defecto (DA-14 → C-02); los errores
+siguen siendo `{"error": "..."}`; `competitions.resolve(value)` resuelve `competition` (id o texto legado) y
+`competitions.visible(query, model)` excluye las competencias en borrador. DA-21 (resuelta): sin `t()` ni `core/i18n.js`.
 
 **Qué resolvieron features anteriores.** Feature 12 (`dev`): nulos al final al ordenar en Liga, Cierres y Buscador.
 C-11: contrato "nulo con razón" y `nullDisplay`. T-05: conjunto estándar (catálogo + `compute_standard` + `apply_base` con
@@ -112,7 +119,7 @@ Sin cambios de esquema (Arq. §5: "Sin cambios de esquema … T-06"). Usa tablas
 
 ## 6. Estados de UI
 
-Copy nuevo (marcado para `docs/frontend.md`), siempre vía `t()`.
+Copy nuevo (marcado para `docs/frontend.md`), en español directo: DA-21 está resuelta sin `t()` ni `core/i18n.js` en fase 1 (F-21 extrae el copy).
 
 | Vista/Componente | loading | vacío | error | sin conexión | éxito |
 |---|---|---|---|---|---|
@@ -150,7 +157,7 @@ inferior; la paginación queda en una línea ("‹ 1/5 ›  Ver todas").
 - INCREMENTO DIFERIDO (→ T-03, [../../fase-2-contexto-comparabilidad/02-T-03-selector-global-contexto/spec.md](../../fase-2-contexto-comparabilidad/02-T-03-selector-global-contexto/spec.md)): dimensiones de contexto distintas de `competition` y `last` y su barra de filtros; la tabla ya las respeta porque usa el parser de contexto común, y los filtros aparecen en la cabecera de exportación sin cambios en T-06.
 - INCREMENTO DIFERIDO (→ T-04, [../../fase-2-contexto-comparabilidad/03-T-04-base-normalizacion/spec.md](../../fase-2-contexto-comparabilidad/03-T-04-base-normalizacion/spec.md)): bases "por 40" y "por 100" y el selector de base; en fase 1 las vistas ofrecen solo "Totales" y "Por partido" donde ya existe ese selector.
 - INCREMENTO DIFERIDO (→ X-01, [../../fase-2-contexto-comparabilidad/01-X-01-reorganizacion-navegacion/spec.md](../../fase-2-contexto-comparabilidad/01-X-01-reorganizacion-navegacion/spec.md)): la exportación masiva vive en la vista Importar; X-01 la reubica en Datos → Exportar sin cambiar el componente.
-- INCREMENTO DIFERIDO (→ F-21): traducción de las cabeceras de exportación y de las etiquetas de la portada (en fase 1 en español, vía `t()` en el cliente y textos fijos en español en el servidor).
+- INCREMENTO DIFERIDO (→ F-21): traducción de las cabeceras de exportación y de las etiquetas de la portada (en fase 1, texto en español directo en el cliente y en el servidor).
 - INCREMENTO DIFERIDO (→ F-05 / F-06 / F-08): migración al componente de las tablas de Comparar, ON/OFF, combinación y ranking de uso (en T-06 solo reciben el botón de exportación).
 - Exportación masiva de fichas personales de jugadores (Arq. R-12): no se incluye.
 - Scroll virtual (se elige paginación, ver §9 D-2), edición de celdas, filtros por columna dentro de la tabla, gráficos dentro de la tabla.
@@ -167,3 +174,5 @@ inferior; la paginación queda en una línea ("‹ 1/5 ›  Ver todas").
 - D-8 [DECISIÓN PROPUESTA — confirmar] **Tablas de 1–2 filas o de métricas en filas** (ON/OFF, combinación, comparar, Four Factors, detalle de tiro): no migran al componente en T-06 (sus dueños las rediseñan con el conjunto completo); reciben igual el botón de exportación con los 4 formatos sobre sus datos visibles.
 - D-9 [DECISIÓN PROPUESTA — confirmar] **Contenido de la exportación masiva**: todas las columnas del conjunto estándar (no las preferencias de columnas), orden por defecto de cada tabla, base `ui.default_base` salvo que se elija otra; la portada lo dice. Equipo: `team_game_log`, `clutch_games` y `search_players` filtrado por el equipo (una fila por jugador del plantel, hoja "Jugadores"); competencia: `league_teams`, `league_standings`, `search_players`. Cada requisito posterior agrega sus tablas al alcance (`bulk_scopes`).
 - D-10 [DECISIÓN PROPUESTA — confirmar] **Límite de filas del XLSX por petición**: 50.000 filas por hoja y 10 MB de cuerpo; por encima, 413 con "La tabla es demasiado grande para exportar en XLSX; exportá en CSV." (el CSV se genera en el cliente sin límite).
+- D-11 [DECISIÓN PROPUESTA — confirmar] **`league_standings` con varias competencias y "Todas"**: respeta la decisión de C-09 (`../../00-decisiones.md`): con `competition` vacío o `all` y más de una competencia publicada, la tabla no se arma (el servidor responde 400 "Elegí una competencia para ver la tabla general.") y la vista muestra ese mismo mensaje; con una sola competencia se arma siempre. El orden por defecto es el de `standings_pos` (puntos y desempate de `stats_engine.standings_sort_key`), no un criterio propio de T-06.
+- D-12 [DECISIÓN PROPUESTA — confirmar] **Errores con `code`**: F-11 mantuvo el formato `{"error": "..."}` (no implementó §7.8). Los tres endpoints nuevos de T-06 agregan `code` y `details` como campos adicionales (compatibles con `api.js`, que solo lee `error`); no se migran los endpoints existentes.

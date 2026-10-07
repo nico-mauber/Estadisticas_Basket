@@ -40,4 +40,30 @@
 
 ## Grupo F — Docs y verificación
 - [x] T-F1 · `docs/api.md`, `database.md`, `architecture.md`, `frontend.md`, `deployment.md` (`ADMIN_USERS`, timeout real), `metrics.md` (PACE)
-- [x] T-F2 · Verificación (ver progress.md)
+- [x] T-F2 · Backend arranca sin traceback (`python backend/app.py`)
+- [x] T-F3 · `python backend/database.py` corre 2 veces seguidas sin error (`upgrade_db` idempotente; backfill de `competition_id` estable, ver progress.md)
+- [x] T-F4 · Cada endpoint nuevo/tocado probado (competencias, calidad, reproceso, permisos; ver progress.md)
+- [x] T-F5 · Consola del navegador sin errores JS al recorrer Importar/Calidad/Competencias (Chromium headless, ver progress.md)
+- [x] T-F6 · Recorrer cada CA del spec manualmente y marcar ✅ (ver progress.md; CA-18 solo verificado por código, no en navegador)
+
+## Matriz de cobertura
+| CA | Tareas |
+|---|---|
+| CA-1 | T-E3, T-D4 |
+| CA-2 | T-A3, T-C1 |
+| CA-3 | T-D4 (chequeo `sin pbp`) |
+| CA-4 | T-B4, T-B5, T-D4 |
+| CA-5 | T-D4 (chequeo `possible_duplicates`) |
+| CA-6 | T-D4 (chequeo `possession_gaps` `no_disponible`) |
+| CA-7 | T-C1, T-D3 |
+| CA-8 | T-C1 (reasignación sobrevive a reproceso) |
+| CA-9 | T-C2, T-E2 |
+| CA-10 | T-B2, T-B3, T-B6 |
+| CA-11 | T-B4, T-B5 |
+| CA-12 | T-B5, T-D4, T-E4 |
+| CA-13 | T-B5 (modo archivo sin red) |
+| CA-14 | T-C3 |
+| CA-15 | T-B1, T-B2 |
+| CA-16 | T-D5 |
+| CA-17 | T-D4 (chequeo discrepancias pbp/box) |
+| CA-18 | T-E3 (estados vacíos) |
