@@ -32,6 +32,7 @@ export const NULL_REASON_LABELS = {
   sin_intentos:  "Sin intentos: no se puede calcular",
   sin_perdidas:  "Sin pérdidas: el cociente no está definido",
   dnp:           "No jugó (DNP)",
+  estimacion_invalida: "Estimación no válida: la muestra de minutos es demasiado chica",
   no_registrado: "La competencia no registra este dato. Si cambió, reimportá sus partidos",
 };
 

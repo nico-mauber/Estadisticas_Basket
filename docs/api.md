@@ -28,7 +28,7 @@ Todas las rutas bajo `/api/`. Respuestas en JSON. Errores retornan `{"error": "m
 >
 > Ver `sdd/specs/14-promedios-de-liga/`.
 
-> **Métricas de jugador por posesión y por minuto.** `game_log[]` y `averages` de los endpoints de jugador incluyen `as_pos`, `tov_pos` (`PER/pos`), `pts_pos`, `orb_min` y `drb_min`; y `or_pct`/`dr_pct`/`trb_pct`, que antes estaban **ausentes** y ahora traen el valor de la fórmula individual (ver `docs/metrics.md`). Todos pueden ser `null` con denominador 0 o sin datos del rival.
+> **Métricas de jugador por posesión y por minuto.** `game_log[]` y `averages` de los endpoints de jugador incluyen `as_pos`, `tov_pos` (`PER/pos`), `pts_pos`, `orb_min` y `drb_min`; y `or_pct`/`dr_pct`/`trb_pct`, que antes estaban **ausentes** y ahora traen el valor de la fórmula individual (ver `docs/metrics.md`). Todos pueden ser `null` con denominador 0 o sin datos del rival. **Agregación (C-01):** en `averages` (perfil y Buscador) las ocho tasas y `oer` son el **cociente de los totales de los partidos jugados** (ver `docs/metrics.md`), no la media de las tasas por partido; en `game_log[]` valen lo de ese partido. Una tasa por posesión nunca es negativa (`POS ≤ 0` → `null`, `sin_intentos`) y un `or_pct`/`dr_pct`/`trb_pct` > 100 % tampoco se devuelve (`null`, `estimacion_invalida`).
 >
 > **`ast_to` cambió de semántica**: era el promedio de los ratios por partido; ahora `averages.ast_to` es el **acumulado de la selección** (`ΣAS / ΣPER`), en equipo y en jugador. `null` si no hubo pérdidas (antes `99.0`). `GET /api/team/<code>` y `GET /api/player/…` devuelven además `totals.ast` y `totals.tov` (Σ de la selección; en jugador, solo partidos jugados) para reproducir el cociente con el box score, y `GET /api/team/<code>` trae `game_log[].ast_to` (AS/PER **de ese partido**, `null` con razón `sin_perdidas` si tuvo 0 pérdidas). Ver `sdd/specs/v2/fase-1-confiabilidad/08-C-04-as-per/`.
 
@@ -45,7 +45,8 @@ Todas las rutas bajo `/api/`. Respuestas en JSON. Errores retornan `{"error": "m
 >   | `dnp` | El jugador no disputó minutos en ese partido (o en ninguno, para `averages`) |
 >   | `no_registrado` | La competencia no publica ese campo (FIBA no manda la clave): `paint_pts`, `second_chance_pts`, `pts_from_tov`, `bench_pts`, `fast_break_pts`, `plus_minus` |
 >   | `sin_perdidas` | `ast_to` o `def_to_ratio` con 0 pérdidas: el cociente no está definido |
->   | `sin_intentos` | Cualquier otra tasa con denominador 0 |
+>   | `sin_intentos` | Cualquier otra tasa con denominador 0 (también una tasa por posesión de jugador con `POS ≤ 0`) |
+>   | `estimacion_invalida` | `or_pct`, `dr_pct` o `trb_pct` individuales que darían más de 100 % (estimación por minutos con muestra ínfima) |
 >
 > - **Sin centinelas**: `ast_to` y `def_to_ratio` con 0 pérdidas valen `null` (`sin_perdidas`), también por partido — antes `99.0` (DA-07). Ninguna respuesta contiene `Infinity` ni `NaN`.
 > - **`averages.def_to_ratio`** es el acumulado `(ΣROB + ΣTAP + ΣRD) / ΣPER` (pooled, DA-02), igual que `ast_to`; antes era el promedio de los ratios por partido.

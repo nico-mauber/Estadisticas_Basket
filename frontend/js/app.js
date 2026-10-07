@@ -63,6 +63,10 @@ function statBox(label, value, display, leagueKey, league, higherIsBetter = true
     </div>`;
 }
 
+// Etiqueta con su definición al pasar el cursor / tocar (C-01): `statBox` inserta el label como HTML.
+const _hint = (label, text) => `<span title="${esc(text)}">${label}</span>`;
+const _PCT_REB_HINT = "estimado por minutos mientras estuvo en cancha. No es comparable con el %s de equipo.";
+
 // Totales que respaldan un cociente: " (43/29)" bajo el valor (C-04). Vacío si falta alguno.
 const _ratioSub = (a, b) => a == null || b == null ? ""
   : `<span style="font-size:9px;color:var(--muted)"> (${a}/${b})</span>`;
@@ -1850,11 +1854,11 @@ function _renderPlayerContent(main, data, comp) {
       <div class="card">
         <div class="card-title">Por posesión y por minuto</div>
         <div class="stat-grid">
-          ${statBox("AS/pos",  av.as_pos,  DEC2(av.as_pos),  "as_pos",  lg, true, rs.as_pos)}
-          ${statBox("PER/pos", av.tov_pos, DEC2(av.tov_pos), "tov_pos", lg, false, rs.tov_pos)}
-          ${statBox("PTS/pos", av.pts_pos, DEC2(av.pts_pos), "pts_pos", lg, true, rs.pts_pos)}
-          ${statBox("RO/min",  av.orb_min, DEC2(av.orb_min), "orb_min", lg, true, rs.orb_min)}
-          ${statBox("RD/min",  av.drb_min, DEC2(av.drb_min), "drb_min", lg, true, rs.drb_min)}
+          ${statBox(_hint("AS/pos", "Asistencias por posesión propia (posesión = T2i + T3i + 0,44 × TLi + PER − RO)"), av.as_pos, DEC2(av.as_pos), "as_pos", lg, true, rs.as_pos)}
+          ${statBox(_hint("PER/pos", "Pérdidas por posesión propia (PER = pérdidas)"), av.tov_pos, DEC2(av.tov_pos), "tov_pos", lg, false, rs.tov_pos)}
+          ${statBox(_hint("PTS/pos", "Puntos por posesión propia (igual al OER del jugador)"), av.pts_pos, DEC2(av.pts_pos), "pts_pos", lg, true, rs.pts_pos)}
+          ${statBox(_hint("RO/min", "Rebotes ofensivos por minuto disputado"), av.orb_min, DEC2(av.orb_min), "orb_min", lg, true, rs.orb_min)}
+          ${statBox(_hint("RD/min", "Rebotes defensivos por minuto disputado"), av.drb_min, DEC2(av.drb_min), "drb_min", lg, true, rs.drb_min)}
         </div>
       </div>
       <div class="card">
@@ -1871,8 +1875,8 @@ function _renderPlayerContent(main, data, comp) {
       <div class="card">
         <div class="card-title">Rebotes & distribución</div>
         <div class="stat-grid">
-          ${statBox("OR%", av.or_pct, PCT(av.or_pct), "or_pct", lg, true, rs.or_pct)}
-          ${statBox("DR%", av.dr_pct, PCT(av.dr_pct), "dr_pct", lg, true, rs.dr_pct)}
+          ${statBox(_hint("OR%", "Porción de los rebotes ofensivos disponibles que capturó mientras estuvo en cancha, " + _PCT_REB_HINT.replace("%s", "OR%")), av.or_pct, PCT(av.or_pct), "or_pct", lg, true, rs.or_pct)}
+          ${statBox(_hint("DR%", "Porción de los rebotes defensivos disponibles que capturó mientras estuvo en cancha, " + _PCT_REB_HINT.replace("%s", "DR%")), av.dr_pct, PCT(av.dr_pct), "dr_pct", lg, true, rs.dr_pct)}
           ${statBox("TO", av.tov, DEC2(av.tov), "to_ratio", lg, false, rs.tov)}
           ${statBox("AS", av.ast, DEC2(av.ast), "ast_ratio", lg, true, rs.ast)}
           ${_astPerBox(av, av.totals ?? data.totals, lg)}

@@ -148,6 +148,12 @@ TRB% = (REB_jug × duración_partido) / (min_jug × (REB_equipo + REB_rival))
 Responde "de los rebotes disponibles mientras estuvo en cancha, ¿qué porción capturó?". `null` si
 faltan los datos del rival o si el jugador no disputó minutos.
 
+**Temporada (C-01):** la cifra de una selección de partidos es el **cociente de los totales** de los
+términos —`OR% = Σ(RO·L) / Σ(min·(RO_eq + RD_rival))`, igual para DR% y TRB%, con `L` = duración de cada
+partido—, no la media de los % de cada partido (un partido de 1 minuto no pesa lo que uno de 35). Es una
+estimación por minutos: con muestras ínfimas explota (15 s con 1 RO daría 516 %). **Un OR%/DR%/TRB% mayor a
+100 % no se muestra**: vale `null` con razón `estimacion_invalida`.
+
 > ⚠️ El `OR%` de jugador y el de equipo comparten nombre pero son escalas distintas: el de equipo
 > ronda 29%, el individual ~4%. No compararlos entre sí.
 
@@ -163,7 +169,15 @@ faltan los datos del rival o si el jugador no disputó minutos.
 | **RO/min** | `OR / min_jugador` | Rebotes ofensivos por minuto disputado |
 | **RD/min** | `DR / min_jugador` | Rebotes defensivos por minuto disputado |
 
-`POS_jugador` usa la fórmula de posesiones de arriba. Todas valen `null` con denominador 0.
+`POS_jugador = T2i + T3i + 0,44 × TLi + PER − RO` (fórmula de posesiones de arriba).
+
+**Temporada (C-01, DA-02):** la cifra de una selección de partidos es el **cociente de los totales**, no la media
+de las tasas de cada partido: `AS/pos = ΣAST / ΣPOS_jug`, `PER/pos = ΣTOV / ΣPOS_jug`, `PTS/pos = ΣPTS / ΣPOS_jug`,
+`RO/min = ΣRO / Σmin`, `RD/min = ΣRD / Σmin`; solo con partidos **jugados** (un DNP no suma). Como a la posesión se
+le resta el rebote ofensivo, puede ser ≤ 0 (un partido con 2 tiros libres y 1 RO da −0,12): **una tasa por posesión
+nunca es negativa**; con `POS ≤ 0` (en el partido o en la selección) vale `null` con razón `sin_intentos`. `RO/min`
+y `RD/min` tienen valor siempre que haya minutos (0,00 es un cero real). El OER de jugador es el mismo número que
+PTS/pos y sigue el mismo criterio. Se reproducen sumando el box score de la selección.
 
 ---
 

@@ -163,7 +163,12 @@ Ya obligó a dos parches; lo correcto sería declarar el formato junto a cada m�
 
 `AS/pos`, `PER/pos`, `PTS/pos`, `RO/min`, `RD/min` (`sdd/specs/15-metricas-jugador/`). `PER` es
 **pérdidas**, no Player Efficiency Rating — convención ya vigente en la app (`Ptos/PER`, fila `PER`
-de Comparar). `PER/pos` se renderiza con `higherIsBetter = false`.
+de Comparar). `PER/pos` se renderiza con `higherIsBetter = false`. Cada etiqueta lleva su definición en un `title`
+(`_hint`): AS/pos "Asistencias por posesión propia (posesión = T2i + T3i + 0,44 × TLi + PER − RO)", PER/pos "Pérdidas por
+posesión propia (PER = pérdidas)", PTS/pos "Puntos por posesión propia (igual al OER del jugador)", RO/min y RD/min
+"… por minuto disputado". En "Rebotes & distribución", `OR%`/`DR%` aclaran que son la porción de los rebotes disponibles
+que capturó mientras estuvo en cancha, **estimada por minutos y no comparable con el OR%/DR% de equipo**. Un nulo por
+estimación imposible muestra "—" con `title` "Estimación no válida: la muestra de minutos es demasiado chica".
 
 ### Orden de nulos en tablas ordenables
 

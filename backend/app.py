@@ -8,6 +8,7 @@ from database import db, init_db, upgrade_db, Game, TeamGameStats, PlayerGameSta
 from stats_engine import (calc_team_stats, calc_player_stats, league_averages,
                           _parse_minutes, played, resolve_identity,
                           season_ast_to, season_def_to_ratio, null_reasons,
+                          sum_pool, season_player_rates, strip_private,
                           standings_row, standings_sort_key)
 from clutch import team_clutch, MARGIN_RANGE, WINDOW_RANGE
 import lineups
@@ -485,7 +486,7 @@ def _player_payload(pid: int) -> dict | None:
     team_code   = rows[-1].team_code
     labels = competitions.labels()
 
-    game_log = []
+    game_log, per_game_adv = [], []
     for row in rows:
         p = _to_dict(row)
         p.setdefault("trb", p["orb"] + p["drb"])
@@ -514,6 +515,7 @@ def _player_payload(pid: int) -> dict | None:
             adv["reb_share"] = adv["oreb_share"] = adv["dreb_share"] = None
 
         is_played = played(row.minutes)
+        per_game_adv.append((adv, is_played))
         game_log.append({
             "game_id":       row.game_id,
             "date":          game_info.date if game_info else "",
@@ -522,7 +524,7 @@ def _player_payload(pid: int) -> dict | None:
             "opponent":      opp.team_name  if opp else "",
             "opponent_code": opp.team_code  if opp else "",
             "played":        is_played,   # false = DNP (Feature 12 RF-6)
-            **adv,
+            **strip_private(adv),
             "null_reasons":  null_reasons(adv, played=is_played),   # C-11 RF-3
         })
 
@@ -589,6 +591,10 @@ def _player_payload(pid: int) -> dict | None:
     averages["ast_to"] = season_ast_to(_sum("ast"), _sum("tov"))
     # DEF/TO acumulado (pooled, DA-02), mismo criterio que AS/PER (C-11)
     averages["def_to_ratio"] = season_def_to_ratio(_sum("stl"), _sum("blk"), _sum("drb"), _sum("tov"))
+    # C-01: AS/pos, PER/pos, PTS/pos (= OER), RO/min, RD/min, OR%, DR%, TRB% como cociente de
+    # totales de los partidos JUGADOS (DA-02), no como media de las tasas de cada partido
+    rate_vals, rate_reasons = season_player_rates(sum_pool([a for a, pl in per_game_adv if pl]))
+    averages.update(rate_vals)
     # C-07: totales de temporada sobre los partidos JUGADOS (Feature 16 RF-5 + Feature 12 RF-6)
     totals = {k: _sum(k) for k in ("fga2", "fgm2", "fga3", "fgm3", "fta", "ftm", "ast", "tov")}
 
@@ -602,7 +608,7 @@ def _player_payload(pid: int) -> dict | None:
         "games":     len(played_log),   # partidos JUGADOS (excluye DNP) — Feature 12 RF-7
         "averages":  averages,
         # Sin partidos jugados, todo `averages` es null por DNP (C-11 RF-3)
-        "null_reasons": null_reasons(averages, played=bool(played_log)),
+        "null_reasons": null_reasons(averages, played=bool(played_log), overrides=rate_reasons),
         "league":    league,     # = leagues[""] — se conserva por compatibilidad
         "leagues":   leagues,    # promedio de liga por competencia (Feature 14 RF-1)
         "totals":    totals,     # totales de temporada (Feature 16 RF-5)
@@ -856,12 +862,15 @@ def search_players():
             rec[k] = _avg_metric(k)
         for k in count_keys:
             rec[k] = _avg_count(k)
+        # C-01: las 9 tasas por posesión / por minuto / de rebote individual, como cociente de totales
+        rate_vals, rate_reasons = season_player_rates(sum_pool(per_game))
+        rec.update(rate_vals)
         # AS/PER de temporada — mismo criterio acumulado (C-04 / Feature 15 RF-7)
         rec["ast_to"] = season_ast_to(sum(gm.get("ast", 0) or 0 for gm in per_game),
                                       sum(gm.get("tov", 0) or 0 for gm in per_game))
         stat_keys = metric_keys + count_keys + ["minutes", "plus_minus", "ast_to"]
         rec["null_reasons"] = null_reasons({k: rec[k] for k in stat_keys},
-                                           played=bool(per_game))   # C-11 RF-3
+                                           played=bool(per_game), overrides=rate_reasons)   # C-11 RF-3
         result.append(rec)
 
     result.sort(key=lambda r: r["player"])

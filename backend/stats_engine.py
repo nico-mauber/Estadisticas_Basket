@@ -61,6 +61,22 @@ def _safe_div(num, den, default=None):
     return round(num / den, 4) if den else default
 
 
+def _safe_pos_div(num, den):
+    """Cociente por posesión propia (C-01): la posesión individual puede ser ≤ 0 porque se le
+    resta el rebote ofensivo; una tasa por posesión negativa no tiene sentido → `None`."""
+    return round(num / den, 4) if den is not None and den > 0 else None
+
+
+def _pct_individual(num, den):
+    """`(valor, invalido)` de un % de rebote individual (C-01). El OR%/DR% individual estima por
+    minutos y con minutos ínfimos explota (516 %): un porcentaje > 100 % se descarta como no
+    calculable (`invalido=True`) en lugar de mostrarse. Denominador 0 → `(None, False)`."""
+    v = _safe_div(num, den)
+    if v is not None and v > 1:
+        return None, True
+    return v, False
+
+
 def _parse_minutes(s) -> float:
     """Parse '28:34' → 28.567, '0' → 0.0, None → 0.0."""
     if not s:
@@ -317,9 +333,80 @@ def null_reason(key: str, *, played: bool = True) -> str:
     return "sin_intentos"
 
 
-def null_reasons(metrics: dict, *, played: bool = True) -> dict:
-    """`{clave: código}` para cada clave de `metrics` cuyo valor es None."""
-    return {k: null_reason(k, played=played) for k, v in metrics.items() if v is None}
+def null_reasons(metrics: dict, *, played: bool = True, overrides: dict | None = None) -> dict:
+    """`{clave: código}` para cada clave de `metrics` cuyo valor es None.
+
+    `overrides` fija la razón de claves que la ruta calculó aparte (p. ej. las tasas de temporada
+    de `season_player_rates`); `metrics["_invalid"]` marca los % de rebote individual > 100 %
+    (`estimacion_invalida`, C-01). Un jugador sin partidos jugados es siempre `dnp`.
+    """
+    invalid = metrics.get("_invalid") or ()
+    out = {}
+    for k, v in metrics.items():
+        if v is not None:
+            continue
+        if not played:
+            out[k] = "dnp"
+        elif overrides and k in overrides:
+            out[k] = overrides[k]
+        elif k in invalid:
+            out[k] = "estimacion_invalida"
+        else:
+            out[k] = null_reason(k, played=played)
+    return out
+
+
+def strip_private(d: dict) -> dict:
+    """Quita los términos privados (`_pool`, `_invalid`) antes de serializar un dict de jugador."""
+    return {k: v for k, v in d.items() if not k.startswith("_")}
+
+
+# ── Temporada de jugador como cociente de totales (C-01 / DA-02) ──────────────
+_SUM_KEYS = ("ast", "tov", "pts", "orb", "drb")
+_POOL_KEYS = ("pos", "min", "or_n", "or_d", "dr_n", "dr_d", "tr_n", "tr_d")
+
+
+def sum_pool(per_game: list) -> dict:
+    """Suma, sobre los dicts de `calc_player_stats` de los partidos JUGADOS de una selección, los
+    conteos y los términos privados. Lista vacía → `{}`. Un DNP no se pasa (RF-8)."""
+    if not per_game:
+        return {}
+    out = {k: 0 for k in _SUM_KEYS}
+    out.update({"pool_" + k: 0 for k in _POOL_KEYS})
+    for adv in per_game:
+        for k in _SUM_KEYS:
+            out[k] += adv.get(k, 0) or 0
+        for k, v in (adv.get("_pool") or {}).items():
+            out["pool_" + k] += v or 0
+    return out
+
+
+def season_player_rates(sums: dict) -> tuple:
+    """`(valores, razones)` de las 9 tasas de jugador de una selección, como cociente de totales.
+
+    AS/pos = ΣAS/ΣPOS · PER/pos = ΣPER/ΣPOS · PTS/pos = ΣPTS/ΣPOS (≡ OER de jugador) ·
+    RO/min = ΣRO/Σmin · RD/min = ΣRD/Σmin · OR% = Σ(RO·L)/Σ(min·(RO_eq+RD_riv)) y análogos.
+    ΣPOS ≤ 0 → `sin_intentos`; un % > 100 % → `estimacion_invalida`. Nunca devuelve negativos.
+    """
+    s = sums.get
+    pos, mn = s("pool_pos", 0), s("pool_min", 0)
+    vals = {
+        "as_pos":  _safe_pos_div(s("ast", 0), pos),
+        "tov_pos": _safe_pos_div(s("tov", 0), pos),
+        "pts_pos": _safe_pos_div(s("pts", 0), pos),
+        "orb_min": _safe_div(s("orb", 0), mn),
+        "drb_min": _safe_div(s("drb", 0), mn),
+    }
+    vals["oer"] = vals["pts_pos"]   # PTS/pos ≡ OER de jugador (RF-7)
+    invalid = set()
+    for key, num, den in (("or_pct", "pool_or_n", "pool_or_d"), ("dr_pct", "pool_dr_n", "pool_dr_d"),
+                          ("trb_pct", "pool_tr_n", "pool_tr_d")):
+        vals[key], bad = _pct_individual(s(num, 0), s(den, 0))
+        if bad:
+            invalid.add(key)
+    reasons = {k: ("estimacion_invalida" if k in invalid else "sin_intentos")
+               for k, v in vals.items() if v is None}
+    return vals, reasons
 
 
 def calc_player_stats(p: dict, team_pos: float, team: dict = None, game_minutes: int = 40,
@@ -370,11 +457,11 @@ def calc_player_stats(p: dict, team_pos: float, team: dict = None, game_minutes:
         uso_pct = None
 
     p_pos = possessions(p["fga2"], p["fga3"], fta, p["orb"], p["tov"])
-    oer   = _safe_div(pts, p_pos)
+    oer   = _safe_pos_div(pts, p_pos)   # posesión ≤ 0 → None, nunca negativo (C-01)
 
     # ── C-01: indicadores por posesión y por minuto (Feature 15 RF-1…RF-4) ──────
-    as_pos  = _safe_div(p["ast"], p_pos)
-    tov_pos = _safe_div(p["tov"], p_pos)      # "PER/pos": PER = pérdidas, no Player Efficiency Rating
+    as_pos  = _safe_pos_div(p["ast"], p_pos)
+    tov_pos = _safe_pos_div(p["tov"], p_pos)  # "PER/pos": PER = pérdidas, no Player Efficiency Rating
     pts_pos = oer                              # PTS/pos ≡ OER de jugador: misma fuente, dos etiquetas
     mp      = _parse_minutes(p.get("minutes"))
     orb_min = _safe_div(p["orb"], mp)
@@ -385,12 +472,22 @@ def calc_player_stats(p: dict, team_pos: float, team: dict = None, game_minutes:
     # diferencia de la de equipo (docs/metrics.md §Rebotes), que no aplica a un jugador.
     #   OR% = (RO_jug × duración_partido) / (min_jug × (RO_equipo + RD_rival))
     p_trb = p.get("trb", p["orb"] + p["drb"])
+    # Términos privados para agregar una temporada como cociente de totales (DA-02, C-01):
+    # nunca se serializan (`strip_private`).
+    pool = {"pos": p_pos, "min": mp}
+    invalid = set()
     if team and opp and mp:
         t_orb, t_drb = team.get("orb", 0) or 0, team.get("drb", 0) or 0
         o_orb, o_drb = opp.get("orb", 0) or 0,  opp.get("drb", 0) or 0
-        or_pct  = _safe_div(p["orb"] * game_minutes, mp * (t_orb + o_drb))
-        dr_pct  = _safe_div(p["drb"] * game_minutes, mp * (t_drb + o_orb))
-        trb_pct = _safe_div(p_trb    * game_minutes, mp * (t_orb + t_drb + o_orb + o_drb))
+        terms = {"or": (p["orb"] * game_minutes, mp * (t_orb + o_drb)),
+                 "dr": (p["drb"] * game_minutes, mp * (t_drb + o_orb)),
+                 "tr": (p_trb    * game_minutes, mp * (t_orb + t_drb + o_orb + o_drb))}
+        for k, (n, d) in terms.items():
+            pool[k + "_n"], pool[k + "_d"] = n, d
+        or_pct,  bad_or = _pct_individual(*terms["or"])
+        dr_pct,  bad_dr = _pct_individual(*terms["dr"])
+        trb_pct, bad_tr = _pct_individual(*terms["tr"])
+        invalid = {k for k, bad in (("or_pct", bad_or), ("dr_pct", bad_dr), ("trb_pct", bad_tr)) if bad}
     else:
         or_pct = dr_pct = trb_pct = None
 
@@ -406,6 +503,8 @@ def calc_player_stats(p: dict, team_pos: float, team: dict = None, game_minutes:
         "possessions":    round(p_pos, 2),
         "plays":          round(plays, 2),
         "oer":            oer,
+        "_pool":          pool,      # privados (C-01): ver sum_pool / strip_private
+        "_invalid":       invalid,
         "efg_pct":        efg,
         "ts_pct":         ts,
         "ft_rate":        ft_rate,
