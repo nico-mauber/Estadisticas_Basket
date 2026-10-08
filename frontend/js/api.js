@@ -67,4 +67,7 @@ export const api = {
   prefs:             scope        => apiFetch(`/api/prefs${qs({ scope })}`),
   savePref:          (scope, key, value) => send("/api/prefs", "PUT", { scope, key, value }),
   deletePref:        (scope, key) => apiFetch("/api/prefs", { method: "DELETE", headers: JSON_HEADERS, body: JSON.stringify({ scope, key }) }),
+  // Conjunto estándar de métricas (T-05)
+  metricsCatalog:    ()                  => apiFetch("/api/metrics-catalog"),
+  metrics:           (type, params = {}) => apiFetch(`/api/metrics/${encodeURIComponent(type)}${qs(params)}`),
 };

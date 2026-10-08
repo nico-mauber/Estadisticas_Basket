@@ -76,6 +76,8 @@ api.lineup(team, players[]) // GET /api/lineup/<team>?players=A|B|C (combinacion
 api.onoff(team, player)     // GET /api/onoff/<team>/<player>
 api.league(comp?) / api.teams() / api.games(comp?)  // comp = id de competencia
 api.deleteGames(ids)        // DELETE /api/games (admin)
+api.metricsCatalog()        // GET /api/metrics-catalog (T-05)
+api.metrics(type, params)   // GET /api/metrics/<type> (T-05: team|player|lineup|onoff|clutch)
 // Datos (F-11)
 api.competitions(includeHidden?)       // GET /api/competitions[?include_hidden=1]
 api.createCompetition({name, season})  // POST  (admin)
@@ -212,7 +214,7 @@ El mismo mapa se muestra en dos lugares: en la vista **Jugador** (`renderPlayer`
 
 ## Service Worker (`sw.js`)
 
-Cache name: `smart-basket-v19`
+Cache name: `smart-basket-v20`
 
 **Estrategia:**
 - `install`: pre-cachea los archivos estáticos listados en `STATIC[]`
@@ -225,8 +227,8 @@ Cache name: `smart-basket-v19`
 ```js
 "/", "/manifest.json", "/css/style.css",
 "/js/app.js", "/js/api.js", "/js/charts.js", "/js/core/format.js",
-"/js/core/prefs.js", "/js/components/identity-merge.js",
-"/js/components/settings-form.js", "/js/chart.umd.min.js"
+"/js/core/prefs.js", "/js/core/catalog.js", "/js/components/identity-merge.js",
+"/js/components/settings-form.js", "/js/components/standard-panel.js", "/js/chart.umd.min.js"
 ```
 
 Todo módulo ES nuevo que importe `app.js` debe agregarse a `STATIC` (y subir `CACHE`): el fetch
@@ -277,6 +279,27 @@ Ver `sdd/specs/16-tiro-completo-ppt/`.
 > en backend por retro-compat pero no se muestra en UI. `SEARCH_METRICS` usa `ppt`.
 > Tasas de tiro pooled (`season_shooting`) calculan `ppt`, `ppt_2`, `ppt_3`, `ppt_ft`, `fg2_pct`,
 > `fg3_pct`, `ft_pct`, `fg2_uso`, `fg3_uso` desde totales de temporada.
+
+### Conjunto estándar de métricas (T-05)
+
+`core/catalog.js`: `loadCatalog()` (memoizada, una sola petición de `api.metricsCatalog()` por carga de
+página, copia en `sessionStorage`), `metricDef(key)`, `metricLabel(key)`, `groupsFor(entityType)` (12 grupos
+filtrados por `entities`), `stdKeyFor(legacyKey)` (mapa inverso de `legacy_keys`).
+
+`core/format.js` (extensión C-11): `fmtMetric(key, value)` formatea según `fmt` del catálogo (`pct`→`PCT`,
+`dec1`/`dec2`→`DEC1`/`DEC2`, `int`→entero, `signed_int`/`signed_dec2`→signo explícito "+"/"−"); `fmtSigned`.
+`NULL_REASON_LABELS` suma `sin_pbp`, `no_aplica`, `no_disponible`.
+
+`components/standard-panel.js`: `renderStandardPanel(el, payload, {layout, base, onBaseChange})`. Layout
+`grid` (Equipo, Jugador, Combinación, Cierres): un `<details class="std-group">` por grupo (el grupo "Otras
+métricas" cerrado), celdas con etiqueta + valor + marcas "est."/"parcial". Layout `compare` (ON/OFF): tabla
+`Métrica | ON | OFF | Δ` (Δ solo en tasas). Estados: cargando ("Calculando métricas…"), vacío ("Sin partidos
+en la selección…"), error (mensaje del backend). Selector de base "Totales | Por partido".
+
+Montado en las cinco pantallas: Equipo y Jugador agregan una card nueva "Conjunto estándar" (no reemplaza las
+cards existentes); Combinación, ON/OFF y Cierres **reemplazan** sus grillas de métricas anteriores por el
+panel (conservan líderes, recuento de partidos y tabla por partido donde ya existían). Ver
+`sdd/specs/v2/fase-1-confiabilidad/13-T-05-conjunto-estandar-metricas/`.
 
 ### Configuración (F-13)
 

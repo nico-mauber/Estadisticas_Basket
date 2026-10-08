@@ -12,7 +12,7 @@ from flask import g, has_app_context
 
 import competitions
 from competitions import CompetitionError
-from database import db, Competition, Game, TeamGameStats, PlayerGameStats
+from database import db, Competition, Game, TeamGameStats, PlayerGameStats, PbpEvent
 
 ALL_LABEL = "Todas las competencias"
 
@@ -163,3 +163,55 @@ def opponent_row(rows: dict, row: dict) -> dict | None:
 def competition_labels() -> dict:
     """{id: etiqueta} de todas las competencias (para decorar partidos y selectores)."""
     return memo(("labels",), lambda: {cid: v["label"] for cid, v in competitions.labels().items()})
+
+
+# ── Partidos de una competencia / pbp de un equipo (T-05, envuelve app.py) ──
+
+def competition_games(comp_id: int | None) -> list:
+    """Partidos VISIBLES, opcionalmente de una sola competencia (orden cronológico)."""
+    q = competitions.visible(Game.query, Game)
+    if comp_id is not None:
+        q = q.filter(Game.competition_id == comp_id)
+    key = ("competition_games",) if comp_id is None else ("competition_games", comp_id)
+    return memo(key, lambda: q.order_by(Game.date, Game.game_id).all())
+
+
+def _team_game_ids(team_code: str, comp_id: int | None = None) -> set[str]:
+    """Partidos visibles del equipo, opcionalmente de una sola competencia."""
+    q = competitions.visible(TeamGameStats.query.filter_by(team_code=team_code), TeamGameStats)
+    if comp_id:
+        q = q.filter(TeamGameStats.game_id.in_(
+            db.session.query(Game.game_id).filter_by(competition_id=comp_id)))
+    return {tr.game_id for tr in q.all()}
+
+
+def team_pbp_games(team_code: str, comp_id: int | None = None) -> list[dict]:
+    """Partidos del equipo con pbp: [{game_id, events, player_rows, opp_code, info}, ...].
+
+    Misma lógica que `app._team_pbp_games` (Feature 03/04/05): base compartida por
+    quintetos, ON/OFF y cierres; ahora también por los cargadores de T-05 (`bundles.py`).
+    """
+    def build():
+        games = []
+        for gid in _team_game_ids(team_code, comp_id):
+            events = [
+                {c.name: getattr(e, c.name) for c in e.__table__.columns} for e in
+                PbpEvent.query.filter_by(game_id=gid).order_by(PbpEvent.action_number).all()
+            ]
+            if not events:
+                continue
+            g = Game.query.filter_by(game_id=gid).first()
+            if not g:
+                continue
+            opp_code = g.away_code if g.home_code == team_code else g.home_code
+            if not opp_code:
+                continue
+            games.append({
+                "game_id":     gid,
+                "events":      events,
+                "player_rows": PlayerGameStats.query.filter_by(game_id=gid).all(),
+                "opp_code":    opp_code,
+                "info":        {"date": g.date, "home_away": "L" if g.home_code == team_code else "V"},
+            })
+        return games
+    return memo(("team_pbp_games", team_code, comp_id), build)

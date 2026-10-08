@@ -95,8 +95,23 @@ Calcula métricas avanzadas on-the-fly en cada request (no se persisten en DB).
 - `aggregate_games(per_game, keys, entity_type)` — agrega partidos: promedios (pooled para tasas, DA-02), totales y razones de nulos.
 - `league_averages(member_values, keys)` — media y mejor valor de la liga para cada métrica (DA-08: media de entidades, no de partidos).
 - `metric_keys(entity_type)` — claves de métricas de equipo o jugador.
+- `StatBundle` / `compute_standard(bundle)` / `sum_bundles` / `apply_base` (T-05) — el conjunto estándar de 83
+  métricas: puro (no accede a la base ni a config), consumido por `metrics_catalog.build_payload`.
 
 Ver [metrics.md](metrics.md) para fórmulas completas.
+
+### `metrics_catalog.py`
+Catálogo único del conjunto estándar de métricas (T-05): `MetricDef`, `GROUPS` (12), `METRICS` (83 claves con
+label/grupo/formato/dirección/`base_mode`/entidades/`legacy_keys`), `register_entity`, `catalog_json`,
+`standard_payload`, `build_payload` (orquesta validación de parámetros, contexto C-02, carga del bundle,
+`stats_engine.compute_standard` + `apply_base`). Alimenta `GET /api/metrics-catalog` y
+`GET /api/metrics/<entity_type>`.
+
+### `bundles.py`
+Cargadores de `StatBundle` (T-05) para equipo y jugador: `team_game_bundles`, `player_game_bundles` arman los
+conteos crudos por partido desde `repository.*` y los registran en `metrics_catalog`. Quinteto/ON-OFF/cierre
+se cargan desde `lineups.lineup_bundle`/`onoff_bundles` y `clutch.clutch_bundle` respectivamente (mismos
+módulos que ya existían, extendidos).
 
 ### `config.py`
 Configuración global (F-13). `CONFIG_SPEC`: catálogo de 81 claves con tipo, default, rango, sección y status (`activa`/`reservada`). 6 claves activas: `clutch.margin`, `clutch.window_secs`, `standings.win_points`, `standings.loss_points`, `standings.tiebreak`, `ui.default_competition_id`. Las reservadas se habilitan al implementar su feature consumidora. `get(key)` lee override o default (overrides cacheados en `flask.g`). `set_values(values)` valida tipo/rango/coherencia y escribe atómicamente; borra la fila si el valor iguala al default (RF-2). `reset(keys)` / `reset_section(slug)` borran overrides. `spec_json()` / `payload()` generan la respuesta para el frontend.

@@ -3,7 +3,7 @@
 > **ID:** T-05 · **Prioridad:** P0 · **Fase y orden:** Fase 1 · 13
 > **Depende de:** C-01 ([../09-C-01-rebotes-distribucion-jugador/plan.md](../09-C-01-rebotes-distribucion-jugador/plan.md)) · C-04 ([../08-C-04-as-per/plan.md](../08-C-04-as-per/plan.md)) · C-07 ([../10-C-07-detalle-tiro-completo/plan.md](../10-C-07-detalle-tiro-completo/plan.md)) · C-11 ([../01-C-11-tratamiento-de-nulos/plan.md](../01-C-11-tratamiento-de-nulos/plan.md)) · F-11 ([../02-F-11-calidad-datos-competencias/plan.md](../02-F-11-calidad-datos-competencias/plan.md)) · C-08 ([../07-C-08-jugadores-duplicados/plan.md](../07-C-08-jugadores-duplicados/plan.md)) · C-02 ([../11-C-02-promedios-de-liga/plan.md](../11-C-02-promedios-de-liga/plan.md)) · F-13 ([../12-F-13-configuracion/plan.md](../12-F-13-configuracion/plan.md), solo `ui.metric_labels`)
 > **Habilita:** T-02, T-01, T-06, T-04, F-06, F-05, F-08, F-18, F-07, A-01, A-12
-> **Estado:** Borrador (agente) — pendiente de revisión humana (gate Paso 2)
+> **Estado:** ✅ Aprobado
 > **Fuente:** [spec.md](spec.md) · Especificación v2 §3 · T-05 · Arquitectura §2.1–§2.3, §3.5, §3.8, §4, §5, §6, §7.3, §7.4, §8
 > **Estimación:** XL · 28–38 h
 

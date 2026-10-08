@@ -7,17 +7,24 @@ en cancha de un equipo solo cambia con SUS PROPIOS eventos `substitution`
 atribuye al tramo vigente. Ver sdd/specs/03-lineups/spec.md RF-1/RF-2 y
 sdd/specs/04-on-off/spec.md RF-1. Semántica null de tasas: Feature 08.
 """
-from stats_engine import _safe_div
+from stats_engine import _safe_div, StatBundle
 
 # Segundos por período: 10' por cuarto, 5' por prórroga. FIBA manda la prórroga como
 # periodType "OVERTIME" (con `period` reiniciado en 1), no "OT" (F-11 RF-15).
 PERIOD_LEN = {"REGULAR": 600, "OVERTIME": 300}
 
+# `sub_type` de faltas que NO son personales de un jugador en cancha (faltas de banco o de
+# cuerpo técnico): no suman a `pf` (T-05 plan §4.6).
+_NON_PERSONAL_FOUL_SUBTYPES = frozenset({"benchtechnical", "coachtechnical"})
+
 
 def _agg(evs, team_code):
-    """Agrega stats crudas de un equipo sobre una lista de eventos pbp (mismo esquema que clutch._agg)."""
+    """Agrega stats crudas de un equipo sobre una lista de eventos pbp (mismo esquema que clutch._agg).
+
+    T-05: suma además `pf` (faltas personales propias, sin técnicas de banco/CT) y
+    `fouls_drawn` (faltas `foulon` del equipo = faltas que le cometieron, RF-13)."""
     b = dict(fgm2=0, fga2=0, fgm3=0, fga3=0, ftm=0, fta=0, orb=0, drb=0,
-             ast=0, tov=0, stl=0, blk=0)
+             ast=0, tov=0, stl=0, blk=0, pf=0, fouls_drawn=0)
     for ev in evs:
         if ev.get("team_code") != team_code:
             continue
@@ -37,6 +44,10 @@ def _agg(evs, team_code):
         elif at == "turnover": b["tov"] += 1
         elif at == "steal":    b["stl"] += 1
         elif at == "block":    b["blk"] += 1
+        elif at == "foul":
+            if st not in _NON_PERSONAL_FOUL_SUBTYPES:
+                b["pf"] += 1
+        elif at == "foulon":   b["fouls_drawn"] += 1
     b["pts"] = 2 * b["fgm2"] + 3 * b["fgm3"] + b["ftm"]
     b["fga"] = b["fga2"] + b["fga3"]
     b["fgm"] = b["fgm2"] + b["fgm3"]
@@ -44,7 +55,7 @@ def _agg(evs, team_code):
 
 
 _BOX_KEYS = ["fgm2", "fga2", "fgm3", "fga3", "ftm", "fta", "orb", "drb",
-             "ast", "tov", "stl", "blk", "pts", "fga", "fgm"]
+             "ast", "tov", "stl", "blk", "pts", "fga", "fgm", "pf", "fouls_drawn"]
 
 
 def _sum_boxes(boxes):
@@ -168,16 +179,20 @@ def _leaders(evs, players):
     return _top(pts, "pts"), _top(ast, "ast"), _top(treb, "trb")
 
 
-def lineup_stats(games, team_code, players):
-    """games: [{game_id, events, player_rows, opp_code}, ...] del equipo (Feature 02).
+def _lineup_boxes(games, team_code, players):
+    """Partidos/tramos coincidentes de una combinación de jugadores (plan §4.6, extraído de
+    `lineup_stats` para que `lineup_bundle` use la MISMA selección).
 
-    players: iterable de 3-5 nombres. Retorna sample/metrics/raw/leaders +
-    games_used/games_excluded (Feature 03 RF-1..RF-7).
+    games: [{game_id, events, player_rows, opp_code}, ...] del equipo (Feature 02).
+    players: iterable de 3-5 nombres. Devuelve `{team_boxes, opp_boxes, leader_evs, total_seconds,
+    games_used, games_excluded, games_matched}` — `games_matched` = partidos con ≥ 1 tramo
+    coincidente (para `lineup_bundle.games`); `games_used` (Feature 03) cuenta los partidos CON
+    titulares válidos, tengan o no tramo coincidente.
     """
     players = set(players)
     team_boxes, opp_boxes, leader_evs = [], [], []
     total_seconds = 0.0
-    games_used = games_excluded = 0
+    games_used = games_excluded = games_matched = 0
 
     for g in games:
         starters = game_starters(g["player_rows"], team_code)
@@ -189,22 +204,40 @@ def lineup_stats(games, team_code, players):
         matched = [s for s in segments if players <= s["on_court"]]
         if not matched:
             continue
+        games_matched += 1
         evs = [ev for s in matched for ev in s["events"]]
         team_boxes.append(_agg(evs, team_code))
         opp_boxes.append(_agg(evs, g["opp_code"]))
         total_seconds += sum(s["seconds"] for s in matched)
         leader_evs.extend(evs)
 
+    return {
+        "team_boxes": team_boxes, "opp_boxes": opp_boxes, "leader_evs": leader_evs,
+        "total_seconds": total_seconds, "games_used": games_used,
+        "games_excluded": games_excluded, "games_matched": games_matched,
+    }
+
+
+def lineup_stats(games, team_code, players):
+    """games: [{game_id, events, player_rows, opp_code}, ...] del equipo (Feature 02).
+
+    players: iterable de 3-5 nombres. Retorna sample/metrics/raw/leaders +
+    games_used/games_excluded (Feature 03 RF-1..RF-7).
+    """
+    players = set(players)
+    boxed = _lineup_boxes(games, team_code, players)
+    team_boxes, opp_boxes = boxed["team_boxes"], boxed["opp_boxes"]
+
     tb, ob = _sum_boxes(team_boxes), _sum_boxes(opp_boxes)
     t_pos, o_pos, metrics = _metrics(tb, ob)
-    scorer, assister, rebounder = _leaders(leader_evs, players)
+    scorer, assister, rebounder = _leaders(boxed["leader_evs"], players)
 
     return {
-        "games_used":     games_used,
-        "games_excluded": games_excluded,
+        "games_used":     boxed["games_used"],
+        "games_excluded": boxed["games_excluded"],
         "sample": {
             "possessions": round(t_pos, 2),
-            "seconds":     round(total_seconds, 1),
+            "seconds":     round(boxed["total_seconds"], 1),
         },
         "metrics": metrics,
         "raw": {
@@ -220,6 +253,32 @@ def lineup_stats(games, team_code, players):
             "rebounder": rebounder,
         },
     }
+
+
+def lineup_bundle(games, team_code, player_names, *, entity_id, name) -> "StatBundle | None":
+    """`StatBundle` de una combinación de 3-5 jugadores (plan §4.6/§4.1), misma selección de
+    partidos y tramos que `lineup_stats` (vía `_lineup_boxes`). `None` si ningún partido del
+    equipo tiene pbp (el endpoint responde 404 `sin_pbp`)."""
+    if not games:
+        return None
+    boxed = _lineup_boxes(games, team_code, player_names)
+    own = dict(_sum_boxes(boxed["team_boxes"]))
+    opp = dict(_sum_boxes(boxed["opp_boxes"]))
+    own["blk_received"] = opp.get("blk", 0)
+    opp["blk_received"] = own.get("blk", 0)
+    own["plus_minus"] = own.get("pts", 0) - opp.get("pts", 0)
+    opp["plus_minus"] = opp.get("pts", 0) - own.get("pts", 0)
+    seconds = boxed["total_seconds"]
+    minutes = seconds / 60 if seconds else 0.0
+    return StatBundle(
+        entity_type="lineup", entity_id=entity_id, name=name,
+        own=own, opp=opp, team=None,
+        games=boxed["games_matched"], minutes=minutes, team_minutes=None, seconds=seconds,
+        on_court=None, shots=None, possessions_counted=None,
+        null_reasons={},
+        meta={"team_code": team_code, "games_total": boxed["games_used"],
+              "games_excluded": {"sin_titulares": boxed["games_excluded"]}},
+    )
 
 
 def _side_metrics(boxes, opp_boxes, seconds):
@@ -287,3 +346,90 @@ def onoff_stats(games, team_code, player_name):
         "off":  off,
         "diff": diff,
     }
+
+
+def _onoff_bundle_side(boxes, opp_boxes, seconds, games, *, entity_id, name, games_total,
+                       games_excluded) -> "StatBundle":
+    own = dict(_sum_boxes(boxes))
+    opp = dict(_sum_boxes(opp_boxes))
+    own["blk_received"] = opp.get("blk", 0)
+    opp["blk_received"] = own.get("blk", 0)
+    own["plus_minus"] = own.get("pts", 0) - opp.get("pts", 0)
+    opp["plus_minus"] = opp.get("pts", 0) - own.get("pts", 0)
+    minutes = seconds / 60 if seconds else 0.0
+    return StatBundle(
+        entity_type="onoff", entity_id=entity_id, name=name,
+        own=own, opp=opp, team=None,
+        games=games, minutes=minutes, team_minutes=None, seconds=seconds,
+        on_court=None, shots=None, possessions_counted=None,
+        null_reasons={},
+        meta={"team_code": None, "games_total": games_total,
+              "games_excluded": {"sin_titulares": games_excluded}},
+    )
+
+
+def onoff_bundles(games, team_code, player_name, *, entity_id,
+                  name) -> "tuple[StatBundle, StatBundle] | None":
+    """`(on_bundle, off_bundle)` de un jugador (plan §4.6): misma partición ON/OFF que
+    `onoff_stats`. `None` si ningún partido del equipo tiene pbp."""
+    if not games:
+        return None
+    on_boxes, off_boxes, on_opp_boxes, off_opp_boxes = [], [], [], []
+    on_seconds = off_seconds = 0.0
+    on_games = off_games = games_used = games_excluded = 0
+
+    for g in games:
+        starters = game_starters(g["player_rows"], team_code)
+        if starters is None:
+            games_excluded += 1
+            continue
+        games_used += 1
+        segments = build_segments(g["events"], team_code, starters)
+        on_segs  = [s for s in segments if player_name in s["on_court"]]
+        off_segs = [s for s in segments if player_name not in s["on_court"]]
+        on_evs   = [ev for s in on_segs  for ev in s["events"]]
+        off_evs  = [ev for s in off_segs for ev in s["events"]]
+
+        on_boxes.append(_agg(on_evs, team_code))
+        off_boxes.append(_agg(off_evs, team_code))
+        on_opp_boxes.append(_agg(on_evs, g["opp_code"]))
+        off_opp_boxes.append(_agg(off_evs, g["opp_code"]))
+        secs_on = sum(s["seconds"] for s in on_segs)
+        secs_off = sum(s["seconds"] for s in off_segs)
+        on_seconds  += secs_on
+        off_seconds += secs_off
+        if secs_on > 0:
+            on_games += 1
+        if secs_off > 0:
+            off_games += 1
+
+    on_bundle = _onoff_bundle_side(on_boxes, on_opp_boxes, on_seconds, on_games,
+                                   entity_id=entity_id, name=name, games_total=games_used,
+                                   games_excluded=games_excluded)
+    off_bundle = _onoff_bundle_side(off_boxes, off_opp_boxes, off_seconds, off_games,
+                                    entity_id=entity_id, name=name, games_total=games_used,
+                                    games_excluded=games_excluded)
+    on_bundle.meta["team_code"] = team_code
+    off_bundle.meta["team_code"] = team_code
+    return on_bundle, off_bundle
+
+
+def player_on_court(pbp_game, team_code, player_name) -> dict | None:
+    """Conteos crudos propios/rivales de UN partido con `player_name` en cancha (plan §4.6).
+
+    `None` si el partido no tiene pbp o no tiene 5 titulares válidos (el llamador —
+    `bundles.player_game_bundles`— lo convierte en `games_estimated=1`). Devuelve
+    `{"own", "opp", "seconds"}` — `bundles.py` arma con esto el `on_court` del bundle del
+    jugador (plan §4.5 paso 3)."""
+    if not pbp_game or not pbp_game.get("events"):
+        return None
+    starters = game_starters(pbp_game["player_rows"], team_code)
+    if starters is None:
+        return None
+    segments = build_segments(pbp_game["events"], team_code, starters)
+    on_segs = [s for s in segments if player_name in s["on_court"]]
+    evs = [ev for s in on_segs for ev in s["events"]]
+    own = _agg(evs, team_code)
+    opp = _agg(evs, pbp_game["opp_code"])
+    seconds = sum(s["seconds"] for s in on_segs)
+    return {"own": own, "opp": opp, "seconds": seconds}

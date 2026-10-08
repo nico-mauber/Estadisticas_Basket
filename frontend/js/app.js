@@ -3,6 +3,8 @@ import { drawRadar, drawEvolution, drawPlayerEvolution, drawLeagueScatter, drawC
 import { PCT, PCT0, DEC1, DEC2, fmtNumber, isNull, nullDisplay, fmtOrNull } from "./core/format.js";
 import { renderDuplicateItems } from "./components/identity-merge.js";
 import { renderSettingsForm } from "./components/settings-form.js";
+import { renderStandardPanel } from "./components/standard-panel.js";
+import { loadCatalog } from "./core/catalog.js";
 
 // ── Toast ──────────────────────────────────────────────────────────────────
 function toast(msg, type = "ok") {
@@ -1028,29 +1030,35 @@ async function renderTeamClutch(teamCode) {
     box.innerHTML = `<div class="card">${title}<p class="empty">Sin cierres apretados: ${_clutchCount(d)}.</p></div>`;
     return;
   }
-  const a = d.aggregate;
   box.innerHTML = `
     <div class="card">
       ${title}
       <p class="td-muted">Agregado del equipo en cierres apretados — récord <strong>${d.clutch_record}</strong> · ${_clutchCount(d)}</p>
-      <div class="stat-grid">
-        ${statBox("Dif", a.point_diff, (a.point_diff > 0 ? "+" : "") + a.point_diff, null, null)}
-        ${statBox("Off", a.off_rating, DEC2(a.off_rating), null, null)}
-        ${statBox("Def", a.def_rating, DEC2(a.def_rating), null, null, false)}
-        ${statBox("eFG%", a.efg_pct, PCT(a.efg_pct), null, null)}
-        ${statBox("TS%", a.ts_pct, PCT(a.ts_pct), null, null)}
-      </div>
-      <div class="stat-grid" style="margin-top:8px">
-        <div class="stat-box"><div class="stat-label">Pts F / C</div><div class="stat-value neutral">${a.pts_for} / ${a.pts_against}</div></div>
-        <div class="stat-box"><div class="stat-label">REB</div><div class="stat-value neutral">${a.reb}</div></div>
-        <div class="stat-box"><div class="stat-label">AST</div><div class="stat-value neutral">${a.ast}</div></div>
-        <div class="stat-box"><div class="stat-label">TOV</div><div class="stat-value neutral">${a.tov}</div></div>
-        <div class="stat-box"><div class="stat-label">Robos / Tapones</div><div class="stat-value neutral">${a.stl} / ${a.blk}</div></div>
-      </div>
+      <div id="team-clutch-standard-panel"></div>
       <div class="card-title" style="margin-top:16px">Por partido <span style="color:var(--muted);font-size:10px;font-weight:400;margin-left:8px">Click en columna para ordenar</span></div>
       <div class="table-wrap"><table id="clutch-table" class="search-table"></table></div>
     </div>`;
   _drawClutchTable();
+  _loadClutchStandard(teamCode, d.margin, d.window_secs);
+}
+
+// ── Conjunto estándar de métricas — card "Cierres" (T-05, T-E5) ─────────────
+let _clutchStdReq = 0;
+
+async function _loadClutchStandard(teamCode, margin, windowSecs) {
+  const el = document.getElementById("team-clutch-standard-panel");
+  if (!el) return;
+  const req = ++_clutchStdReq;
+  renderStandardPanel(el, null, { layout: "grid" });
+  try {
+    await loadCatalog();
+    const payload = await api.metrics("clutch", { id: teamCode, competition: _teamComp, margin, window_secs: windowSecs });
+    if (req !== _clutchStdReq) return;
+    renderStandardPanel(el, payload, { layout: "grid" });
+  } catch (e) {
+    if (req !== _clutchStdReq) return;
+    renderStandardPanel(el, { error: e.message || "No se pudo cargar el conjunto estándar" }, { layout: "grid" });
+  }
 }
 
 function _drawClutchTable() {
@@ -1224,6 +1232,10 @@ function _renderTeamContent(main, data) {
       </div>
     </div>
     <div class="card">
+      <div class="card-title">Conjunto estándar</div>
+      <div id="team-standard-panel"></div>
+    </div>
+    <div class="card">
       <div class="card-title">Game log</div>
       <div class="table-wrap">
         <table>
@@ -1258,6 +1270,31 @@ function _renderTeamContent(main, data) {
   if (data.game_log.length) {
     if (radarOk) drawRadar("chart-radar", av, lg, data.team_name);
     drawEvolution("chart-evo", data.game_log, lg?.oer?.avg);
+  }
+  _loadTeamStandard(data.team_code);
+}
+
+// ── Conjunto estándar de métricas — card "Equipo" (T-05, T-E1) ──────────────
+let _teamStdReq = 0;
+let _teamStdBase = "partido";
+
+async function _loadTeamStandard(teamCode) {
+  const el = document.getElementById("team-standard-panel");
+  if (!el) return;
+  const req = ++_teamStdReq;
+  renderStandardPanel(el, null, { layout: "grid", base: _teamStdBase });
+  try {
+    await loadCatalog();
+    const payload = await api.metrics("team", { id: teamCode, competition: _teamComp, last: _teamLastN || null, base: _teamStdBase });
+    if (req !== _teamStdReq) return;
+    renderStandardPanel(el, payload, {
+      layout: "grid",
+      base: _teamStdBase,
+      onBaseChange: newBase => { _teamStdBase = newBase; _loadTeamStandard(teamCode); },
+    });
+  } catch (e) {
+    if (req !== _teamStdReq) return;
+    renderStandardPanel(el, { error: e.message || "No se pudo cargar el conjunto estándar" }, { layout: "grid", base: _teamStdBase });
   }
 }
 
@@ -1334,7 +1371,7 @@ async function renderTeam(teamCode) {
     const picker = document.getElementById("team-lineup-picker");
     if (players.length >= 3) {
       picker.innerHTML = players.map(p => `
-        <label class="lineup-check"><input type="checkbox" value="${p.name}">${p.name}</label>`).join("");
+        <label class="lineup-check"><input type="checkbox" value="${p.name}" data-player-id="${p.player_id ?? ""}">${p.name}</label>`).join("");
       lineupCard.style.display = "";
     } else {
       lineupCard.style.display = "none";
@@ -1383,34 +1420,14 @@ function renderTeamShotmap(teamCode, playerName) {
 }
 
 // ON/OFF: rendimiento del equipo con un jugador en cancha vs en el banco (Feature 04)
-async function renderTeamOnOff(teamCode, playerName) {
+// T-05/T-E4: las dos tablas (Eficiencia y Producción del equipo) se retiran; el conjunto
+// estándar completo lo monta `renderStandardPanel(..., {layout:"compare"})` con
+// `api.metrics("onoff", ...)`. Se conserva la línea de muestra y el USO% del título.
+async function renderTeamOnOff(teamCode, playerName, playerId = null) {
   const box = document.getElementById("team-onoff");
   box.innerHTML = '<div class="card"><p class="empty"><span class="spinner"></span>Calculando ON/OFF...</p></div>';
   try {
     const r = await api.onoff(teamCode, playerName);
-    // Fila de tasas: Δ viene del backend (comparable ON vs OFF)
-    const row = (label, key, lowerBetter = false, fmt = DEC2) => {
-      const on = r.on[key], off = r.off[key], d = r.diff[key];
-      const cls = d == null ? "neutral" : (lowerBetter ? d <= 0 : d >= 0) ? "above-avg" : "below-avg";
-      return `<tr>
-        <td>${on != null ? fmt(on) : "—"}</td>
-        <td class="lbl">${label}</td>
-        <td>${off != null ? fmt(off) : "—"}</td>
-        <td class="${cls}">${d != null ? (d >= 0 ? "+" : "") + fmt(d) : "—"}</td>
-      </tr>`;
-    };
-    // Fila de conteos crudos: Δ = ON − OFF calculado acá (escala con minutos, no comparable directo)
-    const rawRow = (label, key, lowerBetter = false) => {
-      const on = r.on[key], off = r.off[key];
-      const d = (on != null && off != null) ? on - off : null;
-      const cls = d == null ? "neutral" : (lowerBetter ? d <= 0 : d >= 0) ? "above-avg" : "below-avg";
-      return `<tr>
-        <td>${on != null ? on : "—"}</td>
-        <td class="lbl">${label}</td>
-        <td>${off != null ? off : "—"}</td>
-        <td class="${cls}">${d != null ? (d >= 0 ? "+" : "") + d : "—"}</td>
-      </tr>`;
-    };
     const sample = (side, data) => data.possessions
       ? `${side}: ${DEC1(data.possessions)} pos · ${Math.round(data.seconds / 60)}' en cancha`
       : `${side}: sin muestra`;
@@ -1418,35 +1435,22 @@ async function renderTeamOnOff(teamCode, playerName) {
     box.innerHTML = `
       <div class="card">
         <div class="card-title">ON / OFF <span style="color:var(--muted2);font-weight:400;text-transform:none;letter-spacing:0">— ${playerName} · Uso ${r.usg_pct != null ? PCT(r.usg_pct) : "—"}</span></div>
-        <div class="table-wrap">
-          <table class="onoff-table">
-            <thead><tr><th>ON</th><th>Eficiencia</th><th>OFF</th><th>Δ</th></tr></thead>
-            <tbody>
-              ${row("OER", "oer")}
-              ${row("DER", "der", true)}
-              ${row("Net Rating", "net_rating")}
-              ${row("eFG%", "efg_pct", false, PCT)}
-              ${row("TS%", "ts_pct", false, PCT)}
-            </tbody>
-          </table>
-        </div>
-        <div class="table-wrap" style="margin-top:12px">
-          <table class="onoff-table">
-            <thead><tr><th>ON</th><th>Producción del equipo</th><th>OFF</th><th>Δ</th></tr></thead>
-            <tbody>
-              ${rawRow("Pts a favor", "pts_for")}
-              ${rawRow("Pts en contra", "pts_against", true)}
-              ${rawRow("REB", "reb")}
-              ${rawRow("AST", "ast")}
-              ${rawRow("Pérdidas", "tov", true)}
-              ${rawRow("Robos", "stl")}
-              ${rawRow("Tapones", "blk")}
-            </tbody>
-          </table>
-        </div>
-        <p class="td-muted" style="margin-top:8px">${sample("ON", r.on)} &nbsp;|&nbsp; ${sample("OFF", r.off)}<br><span style="font-size:11px">Los conteos crudos escalan con los minutos de cada tramo; las tasas de arriba son comparables directas.</span></p>
+        <p class="td-muted">${sample("ON", r.on)} &nbsp;|&nbsp; ${sample("OFF", r.off)}</p>
+        <div id="team-onoff-standard-panel" style="margin-top:8px"></div>
       </div>`;
     box.scrollIntoView({ behavior: "smooth", block: "nearest" });
+
+    const panelEl = document.getElementById("team-onoff-standard-panel");
+    if (playerId != null) {
+      renderStandardPanel(panelEl, null, { layout: "compare" });
+      try {
+        await loadCatalog();
+        const payload = await api.metrics("onoff", { id: `${teamCode}:${playerId}`, competition: _teamComp, last: _teamLastN || null });
+        renderStandardPanel(panelEl, payload, { layout: "compare" });
+      } catch (e) {
+        renderStandardPanel(panelEl, { error: e.message || "No se pudo cargar el conjunto estándar" }, { layout: "compare" });
+      }
+    }
   } catch (e) {
     box.innerHTML = "";
     toast(e.message || "Sin datos ON/OFF para este jugador", "err");
@@ -1454,12 +1458,14 @@ async function renderTeamOnOff(teamCode, playerName) {
 }
 
 // Lineups: rendimiento del equipo con una combinación de 3-5 jugadores en cancha (Feature 03)
-async function renderTeamLineup(teamCode, players) {
+// T-05/T-E3: el resumen (statBox/tabla de 18 columnas) se retira; se conservan líderes y el
+// recuento de partidos usados/excluidos de `api.lineup`. El conjunto estándar lo monta
+// `renderStandardPanel` con `api.metrics("lineup", ...)`.
+async function renderTeamLineup(teamCode, players, playerIds = []) {
   const box = document.getElementById("team-lineup");
   box.innerHTML = '<div class="card"><p class="empty"><span class="spinner"></span>Calculando combinación...</p></div>';
   try {
     const r = await api.lineup(teamCode, players);
-    const m = r.metrics;
     const lead = (l, key) => l ? `${l.name} (${l[key]})` : "—";
     const smallSample = r.sample.possessions < 10
       ? `<p class="empty below-avg" style="margin-top:8px">Muestra chica (${DEC1(r.sample.possessions)} posesiones) — tomar con cuidado</p>`
@@ -1467,42 +1473,32 @@ async function renderTeamLineup(teamCode, players) {
     box.innerHTML = `
       <div class="card">
         <div class="card-title">Combinación <span style="color:var(--muted2);font-weight:400;text-transform:none;letter-spacing:0">— ${players.join(" · ")}</span></div>
-        <div class="stat-grid">
-          ${statBox("OER", m.oer, DEC2(m.oer), null, null)}
-          ${statBox("DER", m.der, DEC2(m.der), null, null, false)}
-          ${statBox("Net Rating", m.net_rating, DEC2(m.net_rating), null, null)}
-          ${statBox("eFG%", m.efg_pct, PCT(m.efg_pct), null, null)}
-          ${statBox("TS%", m.ts_pct, PCT(m.ts_pct), null, null)}
-        </div>
         <p class="td-muted" style="margin-top:8px">
           ${DEC1(r.sample.possessions)} posesiones · ${Math.round(r.sample.seconds / 60)}' en cancha ·
           ${r.games_used} partido(s) usado(s)${r.games_excluded ? ` (${r.games_excluded} excluido(s) por datos inconsistentes)` : ""}
         </p>
         ${smallSample}
-        <div class="table-wrap" style="margin-top:12px">
-          <table class="search-table">
-            <thead><tr>
-              <th>Off</th><th>Def</th><th>Net</th><th>eFG%</th><th>TS%</th><th>Pos</th>
-              <th>Pts</th><th>Pts-C</th><th>REB</th><th>OR</th><th>DR</th><th>AST</th>
-              <th>TOV</th><th>ROB</th><th>TAP</th><th>FGA</th><th>3PA</th><th>FTA</th>
-            </tr></thead>
-            <tbody><tr>
-              <td>${DEC2(m.oer)}</td><td>${DEC2(m.der)}</td><td>${DEC2(m.net_rating)}</td>
-              <td>${PCT(m.efg_pct)}</td><td>${PCT(m.ts_pct)}</td><td>${DEC1(r.sample.possessions)}</td>
-              <td>${r.raw.pts}</td><td>${r.raw.pts_against}</td><td>${r.raw.reb}</td>
-              <td>${r.raw.orb}</td><td>${r.raw.drb}</td><td>${r.raw.ast}</td>
-              <td>${r.raw.tov}</td><td>${r.raw.stl}</td><td>${r.raw.blk}</td>
-              <td>${r.raw.fga}</td><td>${r.raw.fga3}</td><td>${r.raw.fta}</td>
-            </tr></tbody>
-          </table>
-        </div>
         <div class="stat-grid" style="margin-top:8px">
           <div class="stat-box"><div class="stat-label">Anota más</div><div class="stat-value neutral">${lead(r.leaders.scorer, "pts")}</div></div>
           <div class="stat-box"><div class="stat-label">Asiste más</div><div class="stat-value neutral">${lead(r.leaders.assister, "ast")}</div></div>
           <div class="stat-box"><div class="stat-label">Rebota más</div><div class="stat-value neutral">${lead(r.leaders.rebounder, "trb")}</div></div>
         </div>
+        <div id="team-lineup-standard-panel" style="margin-top:12px"></div>
       </div>`;
     box.scrollIntoView({ behavior: "smooth", block: "nearest" });
+
+    const panelEl = document.getElementById("team-lineup-standard-panel");
+    if (playerIds.length >= 3) {
+      renderStandardPanel(panelEl, null, { layout: "grid" });
+      try {
+        await loadCatalog();
+        const id = `${teamCode}:${[...playerIds].sort((a, b) => a - b).join("-")}`;
+        const payload = await api.metrics("lineup", { id, competition: _teamComp, last: _teamLastN || null });
+        renderStandardPanel(panelEl, payload, { layout: "grid" });
+      } catch (e) {
+        renderStandardPanel(panelEl, { error: e.message || "No se pudo cargar el conjunto estándar" }, { layout: "grid" });
+      }
+    }
   } catch (e) {
     box.innerHTML = "";
     toast(e.message || "Sin datos para esta combinación", "err");
@@ -1848,6 +1844,31 @@ function _applyPlayerData(main, data) {
   _playerComp = String(data.context.competition.id ?? "all");
   _playerCtx  = { teamCode: data.team_code, playerName: data.player };   // grafía de la ficha
   _renderPlayerContent(main, data);
+  _loadPlayerStandard(data.player_id);
+}
+
+// ── Conjunto estándar de métricas — card "Jugador" (T-05, T-E2) ─────────────
+let _playerStdReq = 0;
+let _playerStdBase = "partido";
+
+async function _loadPlayerStandard(playerId) {
+  const el = document.getElementById("player-standard-panel");
+  if (!el) return;
+  const req = ++_playerStdReq;
+  renderStandardPanel(el, null, { layout: "grid", base: _playerStdBase });
+  try {
+    await loadCatalog();
+    const payload = await api.metrics("player", { id: playerId, competition: _playerComp, base: _playerStdBase });
+    if (req !== _playerStdReq) return;
+    renderStandardPanel(el, payload, {
+      layout: "grid",
+      base: _playerStdBase,
+      onBaseChange: newBase => { _playerStdBase = newBase; _loadPlayerStandard(playerId); },
+    });
+  } catch (e) {
+    if (req !== _playerStdReq) return;
+    renderStandardPanel(el, { error: e.message || "No se pudo cargar el conjunto estándar" }, { layout: "grid", base: _playerStdBase });
+  }
 }
 
 // Cambió la competencia: se pide el perfil de nuevo al servidor (no se recalcula en el navegador)
@@ -1958,6 +1979,10 @@ function _renderPlayerContent(main, data) {
           <div class="card-title">Evolución por partido</div>
           <canvas id="chart-player-evo" height="200"></canvas>
         </div>
+      </div>
+      <div class="card">
+        <div class="card-title">Conjunto estándar</div>
+        <div id="player-standard-panel"></div>
       </div>
       <div class="card">
         <div class="card-title">Game log — ${playerName}</div>
@@ -2318,18 +2343,18 @@ function renderApp() {
     const team   = document.getElementById("team-select").value;
     const player = _selectedPlayer();
     if (!team || !player) return toast("Selecciona equipo y jugador", "err");
-    renderTeamOnOff(team, player.name);
+    renderTeamOnOff(team, player.name, player.id);
   });
 
   // Lineup (combinación) button
   document.getElementById("btn-analyze-lineup").addEventListener("click", () => {
     const team = document.getElementById("team-select").value;
     if (!team) return toast("Selecciona un equipo", "err");
-    const checked = Array.from(
-      document.querySelectorAll("#team-lineup-picker input:checked")
-    ).map(el => el.value);
+    const checkedEls = Array.from(document.querySelectorAll("#team-lineup-picker input:checked"));
+    const checked = checkedEls.map(el => el.value);
+    const checkedIds = checkedEls.map(el => Number(el.dataset.playerId)).filter(id => Number.isFinite(id));
     if (checked.length < 3 || checked.length > 5) return toast("Elegí entre 3 y 5 jugadores", "err");
-    renderTeamLineup(team, checked);
+    renderTeamLineup(team, checked, checkedIds);
   });
 
   // Last-N filter pills

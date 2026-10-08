@@ -129,6 +129,10 @@ class TeamGameStats(db.Model):
     pts_from_tov      = db.Column(db.Integer, default=0)
     bench_pts         = db.Column(db.Integer, default=0)
     fast_break_pts    = db.Column(db.Integer, default=0)
+    # T-05: tapones y faltas recibidas. NULL = "no importado todavía" (regla de columnas
+    # nuevas, C-11); un 0 informado por FIBA se guarda como 0.
+    blk_received      = db.Column(db.Integer)
+    fouls_drawn       = db.Column(db.Integer)
 
 
 class PlayerGameStats(db.Model):
@@ -169,6 +173,10 @@ class PlayerGameStats(db.Model):
     stl  = db.Column(db.Integer, default=0)
     blk  = db.Column(db.Integer, default=0)
     pf   = db.Column(db.Integer, default=0)
+    # T-05: tapones y faltas recibidas. NULL = "no importado todavía" (regla de columnas
+    # nuevas, C-11); un 0 informado por FIBA se guarda como 0.
+    blk_received = db.Column(db.Integer)
+    fouls_drawn  = db.Column(db.Integer)
 
 
 class Shot(db.Model):
@@ -279,6 +287,11 @@ def upgrade_db(app):
         ("player_game_stats", "first_name",  "TEXT"),
         ("player_game_stats", "family_name", "TEXT"),
         ("player_game_stats", "photo_url",   "TEXT"),
+        # T-05 — tapones y faltas recibidas (sin DEFAULT: NULL = "no importado todavía")
+        ("team_game_stats",   "blk_received", "INTEGER"),
+        ("team_game_stats",   "fouls_drawn",  "INTEGER"),
+        ("player_game_stats", "blk_received", "INTEGER"),
+        ("player_game_stats", "fouls_drawn",  "INTEGER"),
     ]
     with app.app_context():
         conn = db.engine.raw_connection()

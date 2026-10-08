@@ -699,6 +699,78 @@ Importa el set fijo de partidos `SEED_URLS` (definido en `app.py`) en una sola o
 
 ---
 
+## Conjunto estándar de métricas (T-05)
+
+Catálogo único de 83 claves en 12 grupos, mismas claves para `team`, `player`, `lineup`, `onoff`, `clutch`.
+Ver `docs/metrics.md` §Conjunto estándar para fórmulas y conciliación.
+
+### `GET /api/metrics-catalog`
+
+**Auth:** `login_required`. Sin parámetros.
+
+Response 200:
+```json
+{
+  "version": 1,
+  "groups": [{"key": "volumen", "label": "Volumen", "metrics": ["games", "minutes", "possessions", "pace", "sec_per_poss"]}, ...],
+  "metrics": {
+    "ppt": {"label": "PPT", "group": "tiro_valor", "fmt": "dec2", "direction": "higher", "kind": "rate",
+            "base_mode": "fixed", "rel_dist": true, "entities": ["team","player","lineup","onoff","clutch"], "legacy_keys": ["pps"]}
+  },
+  "null_reasons": ["sin_intentos", "sin_perdidas", "sin_pbp", "no_registrado", "no_aplica", "sin_datos", "no_disponible", "dnp"]
+}
+```
+(Recorte: `groups` trae 12, `metrics` las 83 claves.) `label` ya aplica `ui.metric_labels` (F-13).
+
+### `GET /api/metrics/<entity_type>?id=<id>[&competition=&last=&base=]`
+
+**Auth:** `login_required`. `entity_type ∈ {team, player, lineup, onoff, clutch}`.
+
+| Param | Valor |
+|---|---|
+| `id` (obligatorio) | `team`: `team_code` · `player`: `player_id` · `lineup`: `<team_code>:<pid>-<pid>-…` (3–5 ids) · `onoff`: `<team_code>:<pid>` · `clutch`: `team_code` |
+| `competition` | id \| `all` \| texto legado (C-02) |
+| `last` | entero > 0 |
+| `base` | `total` \| `partido` (default `partido`); `por40`/`por100` → 400 (T-04) |
+| `margin`, `window_secs` | solo `clutch` |
+
+Response 200 (`GET /api/metrics/team?id=VER&competition=1&base=total`, recorte):
+```json
+{
+  "entity": {"type": "team", "id": "VER", "name": "VERDIRROJO", "team_code": "VER"},
+  "context": {"competition": {"id": 1, "label": "Liga de Ascenso 2026"}, "games_used": 2, "games_total": 2},
+  "base": "total", "sample": null,
+  "groups": [{"key": "volumen", "label": "Volumen", "metrics": ["games", "minutes", "possessions", "pace", "sec_per_poss"]}],
+  "metrics": {
+    "pts":          {"value": 149,    "reason": null},
+    "oer":          {"value": 0.966,  "reason": null},
+    "blk_received": {"value": null,   "reason": "no_registrado"},
+    "uso_pct":      {"value": null,   "reason": "no_aplica"}
+  },
+  "catalog_version": 1
+}
+```
+Jugador agrega `coverage`: `{"games": 2, "on_court_games_exact": 2, "on_court_games_estimated": 0}`; una métrica
+estimada/parcial lleva `"estimated": true` o `"partial": true`. ON/OFF agrega `states: {on: {...}, off: {...}}`
+y `diff` (ON − OFF, solo métricas `kind: "rate"`).
+
+**Errores:**
+| HTTP | `code` | Cuándo |
+|---|---|---|
+| 400 | `parametro_invalido` | Tipo de entidad desconocido / falta `id` / base no disponible (`por40`/`por100`) |
+| 400 | `competencia_inexistente` | La competencia no existe |
+| 400 | `contexto_invalido` | Parámetro de contexto inválido |
+| 404 | `no_encontrado` | Id inexistente |
+| 404 | `sin_pbp` | Quinteto/ON-OFF/cierre sin ningún partido con play-by-play |
+
+### `GET /api/team/<code>` y `GET /api/player/...` — modificados
+
+Agregan la clave `standard` con el mismo payload de arriba (`team` o `player`), calculado con los mismos
+`competition`/`last`/`base` de la petición. Las claves existentes no cambian (compatibilidad). Si el cálculo
+del bloque falla, la respuesta legado se devuelve igual con `"standard": null`.
+
+---
+
 ## `GET /api/settings` — Configuración vigente (F-13)
 
 **Auth:** `login_required`.

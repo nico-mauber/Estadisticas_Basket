@@ -24,9 +24,10 @@ from database import db, Game, GameSource, TeamGameStats, PlayerGameStats, Shot,
 #   NULL / 1 — previa a F-11 (sin minutos reales ni coordenadas de tiro)
 #   2        — F-11: minutos reales, coordenadas, archivo crudo
 #   3        — C-08: nombre completo y foto del jugador (identidad de ficha)
+#   4        — T-05: tapones y faltas recibidas (equipo y jugador)
 # Subirla cuando un cambio del parser deba llegar a los partidos ya importados: el panel de
 # calidad los marca "pendientes de reproceso".
-INGEST_VERSION = 3
+INGEST_VERSION = 4
 
 # Partidos por petición de reproceso. Peor caso sin archivo: 5 descargas × 20 s de timeout de
 # urllib = 100 s, por debajo de los 180 s de gunicorn (render.yaml).
@@ -109,10 +110,12 @@ def persist_game(game: dict) -> None:
     team_cols = ("team_code", "team_name", "is_home", "pts", "fgm", "fga", "fgm2", "fga2",
                  "fgm3", "fga3", "ftm", "fta", "orb", "drb", "trb", "ast", "tov", "stl", "blk", "pf",
                  "opp_pts", "opp_fga2", "opp_fga3", "opp_fta", "opp_orb", "opp_drb", "opp_tov", "opp_pf",
-                 "paint_pts", "second_chance_pts", "pts_from_tov", "bench_pts", "fast_break_pts")
+                 "paint_pts", "second_chance_pts", "pts_from_tov", "bench_pts", "fast_break_pts",
+                 "blk_received", "fouls_drawn")
     player_cols = ("team_code", "team_name", "player_name", "jersey", "minutes", "position",
                    "plus_minus", "starter", "first_name", "family_name", "photo_url", "pts", "fgm", "fga", "fgm2", "fga2", "fgm3", "fga3",
-                   "ftm", "fta", "orb", "drb", "trb", "ast", "tov", "stl", "blk", "pf")
+                   "ftm", "fta", "orb", "drb", "trb", "ast", "tov", "stl", "blk", "pf",
+                   "blk_received", "fouls_drawn")
     shot_cols = ("team_code", "player_name", "x", "y", "court_x", "court_y", "made",
                  "action_type", "sub_type", "period", "action_number")
     pbp_cols = ("team_code", "player_name", "period", "period_type", "clock_secs", "s1", "s2",

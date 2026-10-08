@@ -274,3 +274,40 @@ Los cuatro factores que determinan victorias/derrotas:
 | Ir a la línea | FT Rate | 15% |
 
 Smart-Basket muestra los Four Factors del equipo vs rival en la vista de equipo.
+
+---
+
+## Conjunto estándar (T-05)
+
+Catálogo único de **83 claves en 12 grupos** (volumen, producción, tiro — intentos/aciertos/porcentajes/
+valor/perfil, balón, rebote, defensa, faltas, uso, otras métricas), definido en `backend/metrics_catalog.py`
+(metadatos) y `backend/stats_engine.compute_standard(bundle)` (fórmulas, puras — no tocan la base). Se expone
+en `GET /api/metrics-catalog` y `GET /api/metrics/<entity_type>` (`team`, `player`, `lineup`, `onoff`,
+`clutch`), y como bloque `standard` en `GET /api/team`/`GET /api/player`. Las cinco entidades devuelven
+**exactamente las mismas 83 claves**, nunca un subconjunto: la que no aplica o no se puede calcular sale
+`{"value": null, "reason": "..."}`.
+
+La mayoría de las fórmulas son las ya documentadas arriba (pooled: cociente de totales, DA-02). Fórmulas
+**conciliadas** (cambian de valor respecto al legado, solo en el bloque `standard`; el legado conserva su
+cálculo anterior, R-04):
+- `ppt` (DA-03): `(2×FGM2 + 3×FGM3) / FGA` — ya vigente desde C-07; el legado `pps` sigue siendo `PTS/FGA`.
+- `to_pct` de equipo/quinteto/ON-OFF/cierre (DA-04): `TOV / posesiones` (antes: `TOV / plays`).
+- `uso_pct` de jugador (DA-05): calculado **con el jugador en cancha** (ponderado por minutos del segmento),
+  no sobre el partido completo.
+- `as_pct` de jugador (DA-06): `AST / (TCc_equipo·peso − TCc_jugador)` en vez de `AST/FGM` propio.
+- `der`/`net_rating` de jugador (DA-34): usan las posesiones del rival **mientras el jugador está en
+  cancha** (de `pbp_events`), no las del equipo en el partido completo.
+
+Nulos nuevos de T-05 (suman a los de C-11): `sin_datos` (la selección no tiene partidos), `sin_pbp` (ninguno
+de los partidos de la selección tiene play-by-play), `no_aplica` (la métrica no existe para esa entidad, ej.
+USO% en equipo), `no_disponible` (definida en el catálogo pero habilitada recién con un requisito posterior,
+ej. `paint_fga_share`/`mid_fga_share` hasta C-03).
+
+**Datos nuevos de FIBA** (antes descartados): `blk_received` (tapones recibidos) y `fouls_drawn` (faltas
+recibidas), por equipo-partido y jugador-partido (ver `docs/database.md`). En quinteto/ON-OFF/cierre se
+derivan del play-by-play (`block` del rival, `foulon` del equipo) sin columna nueva.
+
+**Bases:** `total` (todo lo jugado en la selección) o `partido` (conteos y volumen ÷ partidos jugados; las
+tasas nunca se escalan). Por 40 minutos y por 100 posesiones los agrega T-04.
+
+Ver `sdd/specs/v2/fase-1-confiabilidad/13-T-05-conjunto-estandar-metricas/` y `docs/api.md` §Conjunto estándar.

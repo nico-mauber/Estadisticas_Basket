@@ -96,6 +96,8 @@ Stats de box score por equipo por partido. Incluye stats del rival pre-calculada
 | `pts_from_tov` | INTEGER | Puntos tras pérdida rival (PtPer) |
 | `bench_pts` | INTEGER | Puntos del banco |
 | `fast_break_pts` | INTEGER | Puntos de contraataque (PCA) |
+| `blk_received` | INTEGER | Tapones recibidos por el equipo (`tot_sBlocksReceived`, T-05). `NULL` = no importado todavía |
+| `fouls_drawn` | INTEGER | Faltas recibidas por el equipo (`tot_sFoulsOn`, T-05). `NULL` = no importado todavía |
 
 **Restricción única:** `(game_id, team_code)`
 
@@ -148,6 +150,8 @@ Stats individuales por jugador por partido.
 | `ftm` / `fta` | INTEGER | |
 | `orb` / `drb` / `trb` | INTEGER | |
 | `ast` / `tov` / `stl` / `blk` / `pf` | INTEGER | |
+| `blk_received` | INTEGER | Tapones recibidos (`sBlocksReceived`, T-05). `NULL` = no importado todavía |
+| `fouls_drawn`  | INTEGER | Faltas recibidas (`sFoulsOn`, T-05). `NULL` = no importado todavía |
 
 **Restricción única:** `(game_id, team_code, player_name)` — sobre el nombre **crudo**, tal como llega de FIBA.
 

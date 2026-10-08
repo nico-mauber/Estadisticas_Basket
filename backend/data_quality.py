@@ -27,6 +27,10 @@ NULL_FIELDS = [
     ("team_game_stats",   "bench_pts",         "Puntos de la banca"),
     ("team_game_stats",   "fast_break_pts",    "Puntos de contraataque"),
     ("shots",             "court_x",           "Coordenadas de tiro"),
+    ("team_game_stats",   "blk_received",      "Tapones recibidos (equipo)"),
+    ("team_game_stats",   "fouls_drawn",       "Faltas recibidas (equipo)"),
+    ("player_game_stats", "blk_received",      "Tapones recibidos (jugador)"),
+    ("player_game_stats", "fouls_drawn",       "Faltas recibidas (jugador)"),
 ]
 
 

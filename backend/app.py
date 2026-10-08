@@ -21,6 +21,9 @@ import config
 import population
 import prefs
 import repository
+import metrics_catalog
+import bundles  # noqa: F401 — se importa para que registre los 5 tipos de entidad (T-05)
+from metrics_catalog import MetricsError
 from competitions import CompetitionError
 from context import ContextError
 from auth import (
@@ -294,6 +297,43 @@ def list_teams():
     return jsonify(sorted(teams.values(), key=lambda t: t["name"]))
 
 
+def _standard_block(entity_type: str, entity_id) -> dict | None:
+    """Bloque `standard` (T-05 plan §3.4/§4.10) para `/api/team` y `/api/player`: mismo
+    `build_payload` que `GET /api/metrics/<entity_type>`, con los query args de la petición en
+    curso. `None` si el cálculo falla — el legado se sirve igual, nunca se degrada (RF-18)."""
+    try:
+        args = dict(request.args)
+        args["id"] = entity_id
+        return metrics_catalog.build_payload(entity_type, args)
+    except MetricsError as e:
+        app.logger.warning("standard block (%s %s) falló: %s", entity_type, entity_id, e.message)
+        return None
+    except Exception:
+        app.logger.exception("standard block (%s %s) falló de forma inesperada", entity_type, entity_id)
+        return None
+
+
+@app.route("/api/metrics-catalog")
+@login_required
+def metrics_catalog_route():
+    """Catálogo de las 83 métricas estándar (T-05 plan §3.2): grupos, metadatos y razones de nulo."""
+    return jsonify(metrics_catalog.catalog_json())
+
+
+@app.route("/api/metrics/<entity_type>")
+@login_required
+def metrics_route(entity_type: str):
+    """Conjunto estándar de métricas de una entidad (T-05 plan §3.3): `?id=` obligatorio,
+    `competition`/`last`/`base` (y `margin`/`window_secs` para `clutch`)."""
+    try:
+        payload = metrics_catalog.build_payload(entity_type, request.args)
+    except MetricsError as e:
+        return jsonify({"error": e.message, "code": e.code}), e.status
+    except ValueError as e:
+        return jsonify({"error": str(e), "code": "parametro_invalido"}), 400
+    return jsonify(payload)
+
+
 @app.route("/api/team/<team_code>")
 @login_required
 def team_stats(team_code: str):
@@ -307,6 +347,7 @@ def team_stats(team_code: str):
     profile = population.team_profile(team_code, ctx)
     if profile is None:
         return jsonify({"error": "Equipo no encontrado"}), 404
+    profile["standard"] = _standard_block("team", team_code)
     return jsonify(profile)
 
 
@@ -383,6 +424,7 @@ def _player_response(pid: int | None):
     payload = population.player_profile(pid, ctx)
     if payload is None:
         return jsonify({"error": "Jugador no encontrado"}), 404
+    payload["standard"] = _standard_block("player", pid)
     return jsonify(payload)
 
 

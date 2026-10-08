@@ -36,6 +36,9 @@ export const NULL_REASON_LABELS = {
   no_registrado: "La competencia no registra este dato. Si cambió, reimportá sus partidos",
   sin_universo:  "Elegí una competencia para ver el promedio de liga",
   sin_datos:     "Sin datos en la selección",
+  sin_pbp:       "Sin play-by-play en los partidos de la selección",
+  no_aplica:     "La métrica no aplica a esta entidad",
+  no_disponible: "Todavía no disponible: se habilita con una versión posterior",
 };
 
 // "—" neutro con la razón en el title (se ve al pasar el cursor o con tap largo).
@@ -47,4 +50,31 @@ export function nullDisplay(reason) {
 // Valor formateado, o "—" con su razón si es nulo.
 export function fmtOrNull(v, fmt, reason) {
   return isNull(v) ? nullDisplay(reason) : fmt(v);
+}
+
+// ── Conjunto estándar de métricas (T-05) ────────────────────────────────────
+// Signo explícito "+"/"−" (carácter Unicode U+2212, no el guion "-", es-UY) + magnitud.
+export function fmtSigned(v, decimals = 2) {
+  if (isNull(v)) return "—";
+  const n = Number(v);
+  const sign = n < 0 ? "−" : "+";
+  return sign + fmtNumber(Math.abs(n), decimals);
+}
+
+// Importa `metricDef` de `catalog.js` (catalog.js solo importa api.js: sin ciclo).
+import { metricDef } from "./catalog.js";
+
+export function fmtMetric(key, value) {
+  if (isNull(value)) return "—";
+  const def = metricDef(key);
+  const fmt = def?.fmt;
+  switch (fmt) {
+    case "pct":         return PCT(value);
+    case "dec1":        return DEC1(value);
+    case "dec2":        return DEC2(value);
+    case "int":         return fmtNumber(value, 0);
+    case "signed_int":  return fmtSigned(value, 0);
+    case "signed_dec2": return fmtSigned(value, 2);
+    default:            return fmtNumber(value, 2);
+  }
 }
