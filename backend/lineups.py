@@ -7,6 +7,8 @@ en cancha de un equipo solo cambia con SUS PROPIOS eventos `substitution`
 atribuye al tramo vigente. Ver sdd/specs/03-lineups/spec.md RF-1/RF-2 y
 sdd/specs/04-on-off/spec.md RF-1. Semántica null de tasas: Feature 08.
 """
+import itertools
+
 from stats_engine import _safe_div, StatBundle
 
 # Segundos por período: 10' por cuarto, 5' por prórroga. FIBA manda la prórroga como
@@ -279,6 +281,108 @@ def lineup_bundle(games, team_code, player_names, *, entity_id, name) -> "StatBu
         meta={"team_code": team_code, "games_total": boxed["games_used"],
               "games_excluded": {"sin_titulares": boxed["games_excluded"]}},
     )
+
+
+def _lineup_bundles(games, team_code, size):
+    """Agrupador interno (T-02 plan §4.2 pasos 2–4 / §4.3): `StatBundle` de CADA combinación de
+    `size` jugadores que compartió cancha en `games` (no solo la que pide el usuario, a
+    diferencia de `_lineup_boxes`/`lineup_bundle`). `games`: lista de partidos del equipo con pbp
+    (mismo shape que `repository.team_pbp_games`, ya filtrados por contexto si corresponde).
+
+    IDs ordenados por `player_id` (C-08): requiere que `player_name` ya esté canonicalizado
+    (`identity.canonicalize_pbp_games`) para que las combinaciones de nombres distintos de un
+    mismo jugador no se traten como quintetos distintos; el llamador resuelve nombre → id con
+    `identity.resolve_player_id`/`Player.query` (igual que `bundles._names_for`, a la inversa).
+    """
+    from database import db, Player
+    import identity
+
+    acc: dict[tuple, dict] = {}   # combo (tuplas de ids ascendentes) -> {"evs": [...], "seconds": 0.0, "game_ids": set()}
+
+    for g in games:
+        starters = game_starters(g["player_rows"], team_code)
+        if starters is None:
+            continue
+        segments = build_segments(g["events"], team_code, starters)
+        for seg in segments:
+            on_court = seg["on_court"]
+            if len(on_court) < size:
+                continue
+            names = sorted(on_court)
+            for combo_names in itertools.combinations(names, size):
+                ids = []
+                ok = True
+                for name in combo_names:
+                    pid = identity.resolve_player_id(team_code, name, create=False)
+                    if pid is None:
+                        ok = False
+                        break
+                    ids.append(identity.canonical_id(pid) or pid)
+                if not ok:
+                    continue
+                ids_sorted = tuple(sorted(ids))
+                entry = acc.setdefault(ids_sorted, {
+                    "evs": [], "seconds": 0.0, "game_ids": set(), "names": {}
+                })
+                entry["evs"].extend(seg["events"])
+                entry["seconds"] += seg["seconds"]
+                entry["game_ids"].add(g["game_id"])
+                for pid, name in zip(ids, combo_names):
+                    canon_pid = identity.canonical_id(pid) or pid
+                    entry["names"][canon_pid] = name
+
+    out = []
+    for ids_sorted, entry in acc.items():
+        evs = entry["evs"]
+        own = _agg(evs, team_code)
+        opp_code = None
+        for g in games:
+            if g["game_id"] in entry["game_ids"]:
+                opp_code = g["opp_code"]
+                break
+        opp = _agg(evs, opp_code) if opp_code else {k: 0 for k in own}
+        own = dict(own)
+        opp = dict(opp)
+        own["blk_received"] = opp.get("blk", 0)
+        opp["blk_received"] = own.get("blk", 0)
+        own["plus_minus"] = own.get("pts", 0) - opp.get("pts", 0)
+        opp["plus_minus"] = opp.get("pts", 0) - own.get("pts", 0)
+        seconds = entry["seconds"]
+        minutes = seconds / 60 if seconds else 0.0
+        display_names = [entry["names"].get(pid, str(pid)) for pid in ids_sorted]
+        entity_id = f"{team_code}:{'-'.join(str(i) for i in ids_sorted)}"
+        out.append(StatBundle(
+            entity_type="lineup", entity_id=entity_id, name=" · ".join(display_names),
+            own=own, opp=opp, team=None,
+            games=len(entry["game_ids"]), minutes=minutes, team_minutes=None, seconds=seconds,
+            on_court=None, shots=None, possessions_counted=None,
+            null_reasons={},
+            meta={"team_code": team_code, "player_ids": list(ids_sorted)},
+        ))
+    return out
+
+
+def all_lineups(team_code: str, comp_id: int | None, ctx, *, size: int = 5) -> list:
+    """Todos los quintetos (o combinaciones de `size` jugadores) de un equipo en una competencia
+    y contexto (T-02 plan §3.10/§4.2; adelantado para T-02, dueño final F-06).
+
+    `ctx`: `context.Context` (fase 1: solo `last` aplica, vía `_filter_pbp_games`-equivalente).
+    Cachea por petición igual que `repository.py` (`repository.memo`).
+    """
+    import context as context_mod
+    import identity
+    import repository as repo
+
+    def build():
+        games = repo.team_pbp_games(team_code, comp_id)
+        out = sorted(games, key=lambda g: (g.get("info", {}).get("date") or "", g.get("game_id") or ""))
+        if ctx.last:
+            out = out[-ctx.last:]
+        out = identity.canonicalize_pbp_games(out, team_code)
+        return _lineup_bundles(out, team_code, size)
+
+    key = ("lineups:" + team_code, comp_id, context_mod.context_key(ctx), size)
+    return repo.memo(key, build)
 
 
 def _side_metrics(boxes, opp_boxes, seconds):

@@ -5,8 +5,23 @@
  */
 import { metricLabel, metricDef, groupsFor } from "../core/catalog.js";
 import { fmtMetric, fmtSigned, isNull, nullDisplay } from "../core/format.js";
+import { sampleBadge } from "./sample-badge.js";
 
 const COMPACT_GROUPS = ["volumen", "produccion", "tiro_pct", "balon"];
+
+// oer/der/net_rating: cuando el backend informa regresión hacia la media (T-02),
+// se muestra crudo + ajustado + banda en vez de solo el valor crudo.
+const REGRESSED_KEYS = ["oer", "der", "net_rating"];
+
+function _adjHTML(key, metricObj) {
+  const adj = metricObj?.adj;
+  if (!adj || isNull(adj.value)) return "";
+  const ajustado = fmtMetric(key, adj.value);
+  const banda = fmtMetric(key, adj.band);
+  const prior = adj.prior != null ? fmtMetric(key, adj.prior) : "—";
+  const title = `Ajustado hacia la media de la competencia (K = ${adj.k}, media ${prior})`;
+  return ` <span class="adj-value" title="${title}">aj. ${ajustado}</span><span class="adj-band" title="${title}">± ${banda}</span>`;
+}
 
 function _estBadge(metricObj) {
   if (!metricObj) return "";
@@ -22,10 +37,11 @@ function cellHTML(key, metricObj, ctx) {
   const value = metricObj?.value;
   const reason = metricObj?.reason;
   const display = isNull(value) ? nullDisplay(reason) : fmtMetric(key, value);
+  const adjHTML = REGRESSED_KEYS.includes(key) && !isNull(value) ? _adjHTML(key, metricObj) : "";
   return `
     <div class="stat-box std-cell">
       <div class="stat-label">${label}</div>
-      <div class="stat-value neutral">${display}${_estBadge(metricObj)}</div>
+      <div class="stat-value neutral">${display}${_estBadge(metricObj)}${adjHTML}</div>
     </div>`;
 }
 
@@ -45,13 +61,18 @@ function _headerHTML(payload, { base, onBaseChange }) {
       <button type="button" data-base="total" aria-pressed="${base === "total"}">Totales</button>
       <button type="button" data-base="partido" aria-pressed="${base === "partido"}">Por partido</button>
     </div>` : "";
+  const badge = payload.sample ? sampleBadge(payload.sample) : "";
+  const lowSampleWarning = payload.sample && !payload.sample.ranked
+    ? `<p class="empty below-avg std-low-sample-warning">Muestra baja: no entra en rankings ni recomendaciones</p>`
+    : "";
   return `
     <div class="std-head">
       ${toggle}
       <p class="td-muted std-context">${contextLine}</p>
-      <div class="std-head-extra"></div>
+      <div class="std-head-extra">${badge}</div>
     </div>
-    ${coverageNote}`;
+    ${coverageNote}
+    ${lowSampleWarning}`;
 }
 
 function _gridBody(payload, entityType, compact) {
@@ -78,8 +99,10 @@ function _compareBody(payload, entityType) {
     const rows = g.metrics.map(k => {
       const def = metricDef(k);
       const onObj = on[k], offObj = off[k];
-      const onDisp = isNull(onObj?.value) ? nullDisplay(onObj?.reason) : fmtMetric(k, onObj.value);
-      const offDisp = isNull(offObj?.value) ? nullDisplay(offObj?.reason) : fmtMetric(k, offObj.value);
+      const onAdj = REGRESSED_KEYS.includes(k) && !isNull(onObj?.value) ? _adjHTML(k, onObj) : "";
+      const offAdj = REGRESSED_KEYS.includes(k) && !isNull(offObj?.value) ? _adjHTML(k, offObj) : "";
+      const onDisp = (isNull(onObj?.value) ? nullDisplay(onObj?.reason) : fmtMetric(k, onObj.value)) + onAdj;
+      const offDisp = (isNull(offObj?.value) ? nullDisplay(offObj?.reason) : fmtMetric(k, offObj.value)) + offAdj;
       const showDiff = def?.kind === "rate" && diff[k] != null;
       const diffDisp = showDiff
         ? (def.fmt === "pct" ? fmtSigned(diff[k] * 100, 1) + "%" : fmtSigned(diff[k], def.fmt === "dec1" ? 1 : 2))
@@ -114,14 +137,17 @@ export function renderStandardPanel(el, payload, opts = {}) {
   const entityType = payload.entity?.type;
   const gamesUsed = payload.context?.games_used;
   const gamesZero = gamesUsed === 0 || (payload.sample && payload.sample.games === 0);
+  const lowSampleClass = payload.sample && !payload.sample.ranked ? " metric-low-sample" : "";
 
   el.innerHTML = `<div class="std-panel">
     ${_headerHTML(payload, { base, onBaseChange })}
-    ${gamesZero
-      ? `<p class="empty">Sin partidos en la selección. Cambiá el filtro de competencia o de períodos.</p>`
-      : layout === "compare"
-        ? _compareBody(payload, entityType)
-        : _gridBody(payload, entityType, compact)}
+    <div class="std-body${lowSampleClass}">
+      ${gamesZero
+        ? `<p class="empty">Sin partidos en la selección. Cambiá el filtro de competencia o de períodos.</p>`
+        : layout === "compare"
+          ? _compareBody(payload, entityType)
+          : _gridBody(payload, entityType, compact)}
+    </div>
   </div>`;
 
   if (onBaseChange) {

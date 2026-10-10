@@ -1185,6 +1185,42 @@ def reset_settings():
     return jsonify(result)
 
 
+@app.route("/api/settings/calibrate", methods=["POST"])
+@login_required
+def calibrate_settings():
+    """Calibración de K por correlación de mitades (T-02 plan §3): `{entity, competition}` →
+    shape de `sample.calibrate_k`. 401 sin sesión (`login_required`); 403 `requiere_admin` si el
+    usuario no es administrador (código estable para el frontend, a diferencia del 403 genérico
+    de `admin_required`)."""
+    if not is_admin():
+        return jsonify({"error": "Necesitás permisos de administrador", "code": "requiere_admin"}), 403
+
+    body = request.get_json(silent=True) or {}
+    entity = body.get("entity")
+    if entity not in ("lineup", "onoff"):
+        return jsonify({"error": "Calibración no disponible para esta entidad",
+                        "code": "parametro_invalido"}), 400
+
+    competition = body.get("competition")
+    if competition in (None, "", "all"):
+        return jsonify({"error": "Elegí una competencia", "code": "competencia_inexistente"}), 400
+    try:
+        comp_id = int(competition)
+    except (TypeError, ValueError):
+        return jsonify({"error": "Elegí una competencia", "code": "competencia_inexistente"}), 400
+    from database import Competition
+    if db.session.get(Competition, comp_id) is None:
+        return jsonify({"error": "Elegí una competencia", "code": "competencia_inexistente"}), 400
+
+    import sample
+    try:
+        result = sample.calibrate_k(entity, comp_id)
+    except ValueError:
+        return jsonify({"error": "Calibración no disponible para esta entidad",
+                        "code": "parametro_invalido"}), 400
+    return jsonify(result)
+
+
 @app.route("/api/prefs")
 @login_required
 def get_prefs():

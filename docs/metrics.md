@@ -311,3 +311,43 @@ derivan del play-by-play (`block` del rival, `foulon` del equipo) sin columna nu
 tasas nunca se escalan). Por 40 minutos y por 100 posesiones los agrega T-04.
 
 Ver `sdd/specs/v2/fase-1-confiabilidad/13-T-05-conjunto-estandar-metricas/` y `docs/api.md` §Conjunto estándar.
+
+---
+
+## Confiabilidad de muestra (T-02)
+
+Toda métrica derivada de posesiones (combinación de jugadores, ON/OFF, cierres) trae un **badge de
+muestra** (`sample`, en la raíz del payload de `GET /api/metrics/<entity_type>`): `level` (`baja`/`media`/
+`alta`), `unit`, `n`, `min`, `high`, `min_source` (`absoluto`/`relativo`), y `games`/`minutes`/`possessions`
+siempre informados. `ranked = false` si `level === "baja"`: esa entidad queda fuera de rankings, tarjetas de
+líderes y sugerencias automáticas — se sigue viendo, en gris, con la advertencia "Muestra baja: no entra en
+rankings ni recomendaciones" (nunca se oculta).
+
+**Umbrales por entidad** (`backend/sample.py`, configurables por F-13, ninguno fijo en el código):
+
+| Entidad | Mínimo | Alta | Config |
+|---|---|---|---|
+| Quinteto | 15 pos | 40 pos | `sample.lineup.min`/`.high` (+ relativo 1,5 % de posesiones del equipo, piso absoluto) |
+| ON/OFF de jugador | 40 pos en cada estado | 120 pos | `sample.onoff.min`/`.high` (n = menor de ON/OFF) |
+| Cierre (split) | 15 pos | 40 pos | `sample.split.min`/`.high` |
+| Jugador (población) | 60 min | 200 min | `sample.player.min`/`.high` |
+| Equipo (población) | 3 PJ | 10 PJ | `sample.team.min`/`.high` |
+
+**Regresión a la media** (OER/DER/Net Rating de quinteto, ON/OFF, cierre — nunca de equipo/jugador):
+```
+ajustado = (pos × crudo + K × prior) / (pos + K)
+```
+`prior` = puntos por posesión de la competencia (Σpts/Σposesiones de todos los equipo-partido). `K` por
+entidad (defaults: 25 quinteto, 50 ON/OFF, 20 cierre), configurable y calibrable (ver abajo). Net Rating
+ajustado = OER ajustado − DER ajustado (prior de Net = 0). El payload trae `adj: {value, k, prior, band}`
+junto al valor crudo en `oer`/`der`/`net_rating`; la UI muestra ambos, nunca solo el ajustado.
+
+**Banda de error (95 %):** `± z·σ/√(pos+K)` para OER/DER; para Net Rating, `± z·σ·√(1/(pos_of+K) +
+1/(pos_def+K))`. `z=1,96`, `σ=1,15` (`sample.band_z`, `sample.ppp_sd`), configurables.
+
+**Calibración de K** (`POST /api/settings/calibrate`, admin): divide los partidos de cada unidad (quinteto u
+ON/OFF) en dos mitades por paridad (partidos alternos), calcula la correlación `r` de OER entre mitades y
+sugiere `K = n̄_mitad·(1−r)/r`. No persiste: el admin confirma con "Aplicar" en Configuración. Con menos de
+10 unidades o `r ≤ 0`, no sugiere K (`warnings`).
+
+Ver `sdd/specs/v2/fase-1-confiabilidad/14-T-02-confiabilidad-muestra/` y `docs/api.md` §Confiabilidad de muestra.

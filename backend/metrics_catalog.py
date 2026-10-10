@@ -397,8 +397,14 @@ def build_payload(entity_type: str, args) -> dict:
     if not bundles:
         raise MetricsError("Entidad no encontrada", 404, "no_encontrado")
 
+    import sample as sample_mod
+
     def _values_for(bundle):
         values = compute_standard(bundle)
+        prior = None
+        if entity_type in sample_mod.REGRESSED_TYPES:
+            prior = sample_mod.league_prior(ctx.competition_id, ctx)
+        values = sample_mod.adjust_values(values, bundle, prior)
         try:
             values = apply_base(values, bundle, base)
         except ValueError as e:
@@ -416,11 +422,18 @@ def build_payload(entity_type: str, args) -> dict:
         games_excluded=meta0.get("games_excluded", {}), ignored=[],
         competition_label=comp_label)
 
-    sample = None
-    if b0.possessions_counted is not None:
-        sample = {"possessions": b0.possessions_counted}
+    team_poss = None
+    if entity_type in ("lineup", "pair", "onoff", "split", "clutch"):
+        team_code = meta0.get("team_code")
+        if team_code:
+            team_poss = sample_mod.team_offensive_possessions(team_code, ctx.competition_id, ctx)
 
-    payload = standard_payload(b0, values0, context_echo=echo, base=base, sample=sample, fichas=None)
+    if entity_type in sample_mod.ENTITY_SAMPLE:
+        badge = sample_mod.sample_for(entity_type, bundles, team_poss=team_poss)
+    else:
+        badge = None
+
+    payload = standard_payload(b0, values0, context_echo=echo, base=base, sample=badge, fichas=None)
 
     if entity_type == "onoff":
         if len(bundles) < 2:

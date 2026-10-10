@@ -70,4 +70,6 @@ export const api = {
   // Conjunto estándar de métricas (T-05)
   metricsCatalog:    ()                  => apiFetch("/api/metrics-catalog"),
   metrics:           (type, params = {}) => apiFetch(`/api/metrics/${encodeURIComponent(type)}${qs(params)}`),
+  // Confiabilidad de muestra (T-02)
+  calibrate:         (entity, competition) => send("/api/settings/calibrate", "POST", { entity, competition }),
 };

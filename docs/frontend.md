@@ -78,6 +78,7 @@ api.league(comp?) / api.teams() / api.games(comp?)  // comp = id de competencia
 api.deleteGames(ids)        // DELETE /api/games (admin)
 api.metricsCatalog()        // GET /api/metrics-catalog (T-05)
 api.metrics(type, params)   // GET /api/metrics/<type> (T-05: team|player|lineup|onoff|clutch)
+api.calibrate(entity, comp) // POST /api/settings/calibrate (T-02, admin)
 // Datos (F-11)
 api.competitions(includeHidden?)       // GET /api/competitions[?include_hidden=1]
 api.createCompetition({name, season})  // POST  (admin)
@@ -214,7 +215,7 @@ El mismo mapa se muestra en dos lugares: en la vista **Jugador** (`renderPlayer`
 
 ## Service Worker (`sw.js`)
 
-Cache name: `smart-basket-v20`
+Cache name: `smart-basket-v21`
 
 **Estrategia:**
 - `install`: pre-cachea los archivos estáticos listados en `STATIC[]`
@@ -228,7 +229,8 @@ Cache name: `smart-basket-v20`
 "/", "/manifest.json", "/css/style.css",
 "/js/app.js", "/js/api.js", "/js/charts.js", "/js/core/format.js",
 "/js/core/prefs.js", "/js/core/catalog.js", "/js/components/identity-merge.js",
-"/js/components/settings-form.js", "/js/components/standard-panel.js", "/js/chart.umd.min.js"
+"/js/components/settings-form.js", "/js/components/standard-panel.js", "/js/components/sample-badge.js",
+"/js/chart.umd.min.js"
 ```
 
 Todo módulo ES nuevo que importe `app.js` debe agregarse a `STATIC` (y subir `CACHE`): el fetch
@@ -300,6 +302,20 @@ Montado en las cinco pantallas: Equipo y Jugador agregan una card nueva "Conjunt
 cards existentes); Combinación, ON/OFF y Cierres **reemplazan** sus grillas de métricas anteriores por el
 panel (conservan líderes, recuento de partidos y tabla por partido donde ya existían). Ver
 `sdd/specs/v2/fase-1-confiabilidad/13-T-05-conjunto-estandar-metricas/`.
+
+### Confiabilidad de muestra (T-02)
+
+`components/sample-badge.js`: `sampleBadge(sample, {compact})` — badge "Muestra BAJA/MEDIA/ALTA · N pos · M
+PJ · S'" con tooltip de mínimo (absoluto o relativo). Integrado en `standard-panel.js`: cabecera del panel
+(badge), clase `.metric-low-sample` + aviso "Muestra baja: no entra en rankings ni recomendaciones" cuando
+`!sample.ranked`, y en las celdas `oer`/`der`/`net_rating` el valor crudo junto al ajustado (`.adj-value`) y
+la banda de error (`.adj-band`) cuando el payload trae `adj`. El aviso fijo de "Muestra chica" (umbral 10
+hardcodeado) se retiró: el umbral ahora es configurable (F-13) y por defecto 15 posesiones.
+
+Vista Configuración (`renderConfig`): card de calibración de K (solo admin) — selector de entidad
+(quinteto/ON-OFF) y competencia, botón que llama `api.calibrate(entity, competition)` y muestra "K sugerido:
+N (r = … · U unidades · P pos por mitad)" o la advertencia correspondiente; "Aplicar" guarda el K sugerido
+vía `api.saveSettings`.
 
 ### Configuración (F-13)
 

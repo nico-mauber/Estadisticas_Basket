@@ -100,6 +100,13 @@ Calcula métricas avanzadas on-the-fly en cada request (no se persisten en DB).
 
 Ver [metrics.md](metrics.md) para fórmulas completas.
 
+### `sample.py`
+Confiabilidad de muestra (T-02): niveles (`baja`/`media`/`alta`), umbral relativo con piso absoluto, prior de
+la competencia (`league_prior`), regresión a la media (`adjusted`, `adjust_values`), banda de error (`band`),
+rankeabilidad (`is_ranked`) y calibración de K por correlación de mitades (`calibrate_k`, partidos alternos).
+Puro — no persiste nada; lee todo de `config.get()`. Se engancha en `metrics_catalog.build_payload` (T-05),
+agregando `sample` y `adj` al payload estándar de quinteto/ON-OFF/cierre.
+
 ### `metrics_catalog.py`
 Catálogo único del conjunto estándar de métricas (T-05): `MetricDef`, `GROUPS` (12), `METRICS` (83 claves con
 label/grupo/formato/dirección/`base_mode`/entidades/`legacy_keys`), `register_entity`, `catalog_json`,

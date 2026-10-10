@@ -771,6 +771,36 @@ del bloque falla, la respuesta legado se devuelve igual con `"standard": null`.
 
 ---
 
+## Confiabilidad de muestra (T-02)
+
+`GET /api/metrics/<entity_type>` (ver arriba) agrega en la raíz del payload:
+```json
+"sample": {"level": "media", "unit": "posesiones", "n": 23.5, "min": 19.2, "high": 40,
+           "min_source": "relativo", "games": 4, "minutes": 31.5, "possessions": 23.5, "ranked": true}
+```
+Y en `lineup`/`onoff`/`clutch`, dentro de `metrics.oer`/`metrics.der`/`metrics.net_rating`:
+```json
+"adj": {"value": 1.1033, "k": 25, "prior": 1.0203, "band": 0.3237}
+```
+(`null` si no aplica). `team`/`player` traen `sample` pero sin `adj` (sin regresión).
+
+### `POST /api/settings/calibrate` — NUEVO
+
+**Auth:** `admin_required`. Body: `{"entity": "lineup"|"onoff", "competition": <id>}`.
+
+Response 200:
+```json
+{"entity": "lineup", "competition_id": 3, "method": "partidos_alternos", "units": 42, "units_excluded": 118,
+ "n_half_mean": 38.4, "r": 0.452, "k_suggested": 46.6, "k_current": 25, "config_key": "regression.lineup.k", "warnings": []}
+```
+`warnings` ⊆ `["muestra_insuficiente", "correlacion_no_positiva"]`; con cualquiera, `k_suggested: null`. No
+escribe nada — "Aplicar" en la UI llama `PUT /api/settings {values: {"regression.lineup.k": 47}}` (F-13).
+
+**Errores:** `400 parametro_invalido` (entidad fuera de lineup/onoff), `400 competencia_inexistente` (falta,
+`all` o inexistente), `401`, `403 requiere_admin`.
+
+---
+
 ## `GET /api/settings` — Configuración vigente (F-13)
 
 **Auth:** `login_required`.
