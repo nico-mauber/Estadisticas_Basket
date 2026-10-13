@@ -235,6 +235,17 @@ class AppConfig(db.Model):
     updated_by = db.Column(db.String)
 
 
+class AppMeta(db.Model):
+    """Metadatos de la app persistidos (T-01, Arq. §3.14/§5): versiones de datos y de
+    configuración que prefijan las claves de `cache.memo`. Una fila por clave
+    (`data_version`, `config_version`); `create_all` la crea idempotentemente y
+    `cache.get_versions` siembra las filas faltantes con `1`."""
+    __tablename__ = "app_meta"
+
+    key   = db.Column(db.String, primary_key=True)
+    value = db.Column(db.Text, nullable=False)
+
+
 class UserPref(db.Model):
     """Preferencias personales por usuario de sesión (F-13)."""
     __tablename__  = "user_prefs"

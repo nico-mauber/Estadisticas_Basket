@@ -47,7 +47,18 @@ def import_url(url: str) -> dict:
     persist_game(game)
     archive_raw(game_id, raw, page_info, source_url=url)
     db.session.commit()
+    _bump_data_version("import_url")
     return _summary(game)
+
+
+def _bump_data_version(reason: str) -> None:
+    """Sube `data_version` del caché entre peticiones (T-01/T-A2): una escritura de datos invalida
+    las poblaciones memorizadas. Tolerante a que `cache.py` no esté disponible."""
+    try:
+        import cache
+        cache.bump_data_version(reason)
+    except Exception:
+        pass
 
 
 def _summary(game: dict) -> dict:
@@ -170,4 +181,6 @@ def reprocess_games(game_ids: list[str]) -> dict:
         except Exception as e:   # FIBA caído, JSON inválido, etc.: se informa y se sigue
             db.session.rollback()
             failed.append({"game_id": gid, "error": str(e) or e.__class__.__name__})
+    if processed:
+        _bump_data_version("reprocess_games")
     return {"processed": processed, "failed": failed}

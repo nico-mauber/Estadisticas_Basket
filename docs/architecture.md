@@ -100,6 +100,21 @@ Calcula métricas avanzadas on-the-fly en cada request (no se persisten en DB).
 
 Ver [metrics.md](metrics.md) para fórmulas completas.
 
+### `population.py`
+Población de referencia y ficha de métrica (C-02 + T-01). `population(entity_type, comp_id, ctx, *,
+apply_thresholds=True, variant)` enumera las entidades de una competencia (vía los enumeradores de
+`metrics_catalog`), calcula sus valores con `compute_standard`+`apply_base("partido")`+ajuste de T-02, y marca
+`in_population` según los umbrales de muestra. `rank`/`percentile`/`_leader`/`league_reference`/`ficha`/
+`attach_fichas`/`full_ranking` arman los cinco elementos de la ficha (T-01, fórmulas en `docs/metrics.md`).
+Cacheada entre peticiones por `cache.memo`. El camino legado de C-02 (`league_summary`, perfiles) usa
+`_legacy_population` sin umbrales.
+
+### `cache.py`
+Caché entre peticiones versionada (T-01). `memo(namespace, key, build_fn)` con LRU por namespace, claves
+prefijadas por `(data_version, config_version)` leídas de la tabla `app_meta`. `bump_data_version` /
+`bump_config_version` invalidan todo lo cacheado al escribir datos (ingesta, borrado, competencias, identidad)
+o configuración (F-13). Tolerante a correr fuera de `app_context`.
+
 ### `sample.py`
 Confiabilidad de muestra (T-02): niveles (`baja`/`media`/`alta`), umbral relativo con piso absoluto, prior de
 la competencia (`league_prior`), regresión a la media (`adjusted`, `adjust_values`), banda de error (`band`),

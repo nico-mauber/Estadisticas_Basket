@@ -6,6 +6,7 @@
 import { metricLabel, metricDef, groupsFor } from "../core/catalog.js";
 import { fmtMetric, fmtSigned, isNull, nullDisplay } from "../core/format.js";
 import { sampleBadge } from "./sample-badge.js";
+import { metricCard } from "./metric-card.js";
 
 const COMPACT_GROUPS = ["volumen", "produccion", "tiro_pct", "balon"];
 
@@ -31,18 +32,31 @@ function _estBadge(metricObj) {
   return out;
 }
 
-// Punto de extensión: T-01 reemplaza `cellHTML` por `metricCard` (percentil/ranking/badge).
+// T-01: la celda del panel estándar usa la ficha en layout "row" (valor · puesto · percentil).
 function cellHTML(key, metricObj, ctx) {
   const label = metricLabel(key);
+  const entityType = ctx?.entity?.type;
+  const minSize = ctx?.population?.min_size;
   const value = metricObj?.value;
-  const reason = metricObj?.reason;
-  const display = isNull(value) ? nullDisplay(reason) : fmtMetric(key, value);
   const adjHTML = REGRESSED_KEYS.includes(key) && !isNull(value) ? _adjHTML(key, metricObj) : "";
+  const extra = _estBadge(metricObj) + adjHTML;
+  const card = metricCard(key, metricObj, { layout: "row", entityType, label, id: ctx?.entity?.id, minSize });
   return `
     <div class="stat-box std-cell">
       <div class="stat-label">${label}</div>
-      <div class="stat-value neutral">${display}${_estBadge(metricObj)}${adjHTML}</div>
+      <div class="stat-value neutral">${card}${extra}</div>
     </div>`;
+}
+
+// Línea "Referencia: {rank_total} {criterion} · {context_label}" desde payload.population.
+function _referenceLine(payload) {
+  const pop = payload.population;
+  if (!pop || pop.reason) return "";
+  const size = pop.size != null ? pop.size : "";
+  const parts = [pop.criterion ? `${size} ${pop.criterion}`.trim() : (size ? `${size}` : "")];
+  if (pop.context_label) parts.push(pop.context_label);
+  const text = parts.filter(Boolean).join(" · ");
+  return text ? `<p class="td-muted std-reference">Referencia: ${text}</p>` : "";
 }
 
 function _headerHTML(payload, { base, onBaseChange }) {
@@ -71,6 +85,7 @@ function _headerHTML(payload, { base, onBaseChange }) {
       <p class="td-muted std-context">${contextLine}</p>
       <div class="std-head-extra">${badge}</div>
     </div>
+    ${_referenceLine(payload)}
     ${coverageNote}
     ${lowSampleWarning}`;
 }

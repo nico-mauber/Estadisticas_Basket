@@ -49,7 +49,9 @@ export const api = {
   clutchTeam:    (team, comp) => apiFetch(`/api/clutch/${encodeURIComponent(team)}${qs({ competition: comp === "all" ? "" : comp })}`),
   lineup:        (code, players) => apiFetch(`/api/lineup/${encodeURIComponent(code)}?players=${players.map(encodeURIComponent).join("|")}`),
   onoff:         (code, name) => apiFetch(`/api/onoff/${encodeURIComponent(code)}/${encodeURIComponent(name)}`),
-  league:        (comp) => apiFetch(`/api/league${qs({ competition: comp })}`),
+  league:        (comp, { summary } = {}) => apiFetch(`/api/league${qs({ competition: comp, include: summary ? "summary" : "" })}`),
+  // Ficha de métrica: ranking completo de la población (T-01)
+  ranking:       (type, metric, params = {}) => apiFetch(`/api/rankings/${encodeURIComponent(type)}/${encodeURIComponent(metric)}${qs(params)}`),
   deleteGames:   (ids) => send("/api/games", "DELETE", { game_ids: ids }),
   seed:          ()   => apiFetch("/api/seed", { method: "POST" }),
   // Datos: competencias, calidad y reproceso (F-11)

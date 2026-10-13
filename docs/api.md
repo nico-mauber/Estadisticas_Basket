@@ -801,6 +801,49 @@ escribe nada — "Aplicar" en la UI llama `PUT /api/settings {values: {"regressi
 
 ---
 
+## Ficha de métrica (T-01)
+
+`GET /api/metrics/<entity_type>` y los bloques `standard` de `/api/team`/`/api/player` agregan, en cada objeto
+de `metrics[clave]` (junto a `value`/`reason`/`adj`/`sample`):
+```json
+"oer": {
+  "value": 0.966, "reason": null,
+  "rank": 9, "rank_total": 12, "tied": false, "in_population": true, "percentile": 27,
+  "avg": 1.0071, "dist_avg": -0.0411, "dist_avg_rel": -0.0408,
+  "leader": {"id": "ALB", "name": "ALBATROS", "value": 1.12}, "dist_leader": -0.154, "dist_leader_rel": -0.1375,
+  "pct_reason": null, "basis": null
+}
+```
+Sin población: `rank`/`percentile`/`avg`/`leader`/`dist_*` en `null` y `pct_reason ∈ {sin_universo,
+poblacion_insuficiente, contexto_no_comparable}`. `basis: "partido"` marca conteos/volumen mostrados en totales
+cuyo ranking y distancias están en por partido. El payload agrega `population: {size, criterion, context_label,
+reason}`.
+
+### `GET /api/rankings/<entity_type>/<metric_key>` — NUEVO
+
+**Auth:** `login_required`. `entity_type ∈ {team, player, lineup, onoff, clutch}`. Params: `id` (entidad a
+resaltar, opcional), `competition`, `last`, `base`.
+
+Response 200:
+```json
+{"entity_type": "team", "metric": "oer", "direction": "higher", "rank_basis": null,
+ "population": {"size": 12, "criterion": "equipos con ≥ 3 partidos", "competition_id": 1, "context_label": "...", "reason": null},
+ "rows": [{"rank": 1, "tied": false, "id": "ALB", "name": "ALBATROS", "value": 1.12, "in_population": true, "highlight": false}],
+ "outside_population": [{"id": "LBO", "name": "LBO", "value": 1.21, "hypothetical_rank": 1, "highlight": false, "sample": {...}}],
+ "avg": 1.0071}
+```
+Población vacía o `competition=all` → 200 con `rows: []` y `population.reason`. Errores: `400 parametro_invalido`
+(tipo/métrica desconocida o métrica que no aplica al tipo), `400 competencia_inexistente`, `400 contexto_invalido`, `401`.
+
+### `GET /api/league` — modificado
+
+Cada fila agrega `in_population`, `rank: {clave: {rank, total, tied}}` y `pct: {clave: p}` (11 claves). Los
+valores `oer…stl` pasan a cociente de totales (pooled) de la población; `to_pct` = PER/POS (DA-04). Con
+`include=summary`: `{teams: [...], avg: {clave: v}, leaders: {clave: {id,name,value}}, population: {...}}`. Sin
+`include`, la lista conserva su forma anterior más las claves nuevas por fila.
+
+---
+
 ## `GET /api/settings` — Configuración vigente (F-13)
 
 **Auth:** `login_required`.

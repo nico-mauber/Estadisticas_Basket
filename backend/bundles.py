@@ -321,6 +321,59 @@ def clutch_loader(req: "metrics_catalog.EntityRequest") -> list:
     return [bundle] if bundle is not None else []
 
 
+# ── Enumeradores de quinteto / ON-OFF / cierre (T-01 plan §4.2) ──────────────
+
+def _teams_with_pbp(comp_id):
+    """Equipos de la competencia con al menos un partido (orden alfabético)."""
+    rows = repository.team_game_rows(comp_id)
+    return sorted({r["team_code"] for r in rows.values()})
+
+
+def _pbp_games_for(team_code, comp_id, ctx):
+    """Partidos del equipo con pbp, filtrados por contexto (`last`) y canonicalizados (C-08)."""
+    games = repository.team_pbp_games(team_code, comp_id)
+    games = _filter_pbp_games(games, ctx)
+    return identity.canonicalize_pbp_games(games, team_code)
+
+
+def all_lineup_bundles(comp_id, ctx, size=5):
+    """Todos los quintetos (o combinaciones de `size` jugadores) de todos los equipos de la
+    competencia (T-01 plan §4.2): `chain(lineups.all_lineups(team, ...))`."""
+    size = size or 5
+    out = []
+    for team_code in _teams_with_pbp(comp_id):
+        out.extend(lineups.all_lineups(team_code, comp_id, ctx, size=size))
+    return out
+
+
+def all_onoff_bundles(comp_id, ctx, variant=None):
+    """Estados ON de todos los jugadores de todos los equipos (T-01 plan §4.2): por equipo,
+    `lineups.all_onoff_bundles(games, team_code)` (una pasada). Cada bundle ON lleva
+    `meta["off"]` con su estado OFF."""
+    out = []
+    for team_code in _teams_with_pbp(comp_id):
+        games = _pbp_games_for(team_code, comp_id, ctx)
+        out.extend(lineups.all_onoff_bundles(games, team_code))
+    return out
+
+
+def all_clutch_bundles(comp_id, ctx, variant=None):
+    """Un bundle de cierre por equipo con partidos calificados (T-01 plan §4.2)."""
+    rows = repository.team_game_rows(comp_id)
+    team_names = {}
+    for r in rows.values():
+        team_names[r["team_code"]] = r["team_name"]
+    out = []
+    for team_code in _teams_with_pbp(comp_id):
+        games = _pbp_games_for(team_code, comp_id, ctx)
+        if not games:
+            continue
+        bundle = clutch.clutch_bundle(games, team_code, team_names.get(team_code, team_code))
+        if bundle is not None:
+            out.append(bundle)
+    return out
+
+
 metrics_catalog.register_entity("team", team_loader, game_loader=team_game_bundles,
                                 enumerator=all_team_bundles)
 metrics_catalog.register_entity("player", player_loader, game_loader=player_game_bundles,
@@ -328,3 +381,8 @@ metrics_catalog.register_entity("player", player_loader, game_loader=player_game
 metrics_catalog.register_entity("lineup", lineup_loader)
 metrics_catalog.register_entity("onoff", onoff_loader)
 metrics_catalog.register_entity("clutch", clutch_loader)
+
+# Enumeradores de los tipos sin enumerador propio en T-05 (T-01 plan §4.2).
+metrics_catalog.set_enumerator("lineup", all_lineup_bundles)
+metrics_catalog.set_enumerator("onoff", all_onoff_bundles)
+metrics_catalog.set_enumerator("clutch", all_clutch_bundles)

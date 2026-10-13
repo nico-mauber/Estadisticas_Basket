@@ -351,3 +351,50 @@ sugiere `K = n̄_mitad·(1−r)/r`. No persiste: el admin confirma con "Aplicar"
 10 unidades o `r ≤ 0`, no sugiere K (`warnings`).
 
 Ver `sdd/specs/v2/fase-1-confiabilidad/14-T-02-confiabilidad-muestra/` y `docs/api.md` §Confiabilidad de muestra.
+
+---
+
+## Ficha de métrica (T-01)
+
+Toda métrica del conjunto estándar de equipo/jugador/quinteto/ON-OFF/cierre se muestra con **cinco
+elementos** (reemplazan el bloque viejo "Ø liga / ↑ x"): **valor** (siempre primero), **ranking** sobre el
+total de la población ("7.º de 12", con "=" en empates), **distancia al líder** (nombre + valor + distancia
+orientada), **distancia al promedio** (con signo) y **percentil** 0-100 con color continuo (rojo 0 · gris 50 ·
+verde 100). Los campos viajan en cada objeto de `metrics[clave]` de `GET /api/metrics/<entity_type>`:
+`rank`, `rank_total`, `tied`, `in_population`, `percentile`, `avg`, `dist_avg`, `dist_avg_rel`, `leader`,
+`dist_leader`, `dist_leader_rel`, `pct_reason`, `basis`. Cálculo en `backend/population.py` (puro, no
+persiste; Constitución 4).
+
+**Población de referencia** (umbrales configurables, F-13): equipos con ≥ `sample.team.min` partidos (3),
+jugadores con ≥ `sample.player.min` minutos (60), quintetos/ON-OFF/cierres con muestra ≥ el mínimo efectivo de
+T-02. Una entidad bajo el umbral recibe su ficha completa marcada "muestra baja" (ranking hipotético) pero NO
+entra en el conteo del total, el líder, el promedio ni los percentiles de las demás.
+
+**Fórmulas** (`s = +1` si más es mejor, `−1` si menos es mejor):
+- Ranking: competición estándar "1224" (empates comparten puesto, el siguiente salta).
+- Percentil: `round(100 × (B + 0,5·E) / N)`, `N` = entidades de la población distintas de la consultada con
+  valor, `B` = estrictamente peores, `E` = iguales (orientado por dirección). Mid-rank, excluye la propia.
+- Promedio: media aritmética de los valores de las entidades `in_population` (DA-08, mismo que la tabla de Liga).
+- Distancias orientadas (DA-09): `dist_líder = s·(valor − líder)` (≤ 0 para un miembro), `dist_promedio =
+  s·(valor − promedio)` — positivas cuando la entidad es mejor, en todas las métricas incluidas las de menos-
+  es-mejor. La diferencia aritmética sin orientar va en el tooltip.
+- Color: interpolación lineal RGB entre #ef4444 (p0) · #8b949e (p50) · #22c55e (p100); el texto "pNN" acompaña
+  siempre (el color no es el único portador). Métrica neutral o valor nulo: sin color.
+
+**Inversión completa** en métricas de menos-es-mejor (DER, PTS recibidos, pérdidas, TO%, faltas, tapones
+recibidos, Opp eFG%/TS%/FT Rate, TO ratio, PER/pos): líder = valor más bajo, ranking y percentil al revés,
+distancias orientadas igual.
+
+**Valor ajustado** (T-02): donde una métrica tiene `adj` (OER/DER/Net Rating de quinteto/ON-OFF/cierre), el
+ranking, el percentil, el líder y el promedio se calculan sobre el valor ajustado. **Conteos y volumen** se
+rankean por partido (equipos con distinta cantidad de partidos no son comparables en totales); la ficha lo
+rotula con `basis: "partido"`.
+
+**Población insuficiente / sin universo:** si la población tiene menos de `population.min_size` (3) entidades
+con valor, los campos de ficha son nulos con razón `poblacion_insuficiente`; `competition=all` → `sin_universo`;
+contexto no comparable → `contexto_no_comparable`. El valor siempre se ve.
+
+El promedio de la tabla de **Liga** pasa a ser el cociente de totales (pooled) por métrica, coherente con la
+ficha (ver tabla antes/después en el `progress.md` de T-01; cambia notablemente TO% = PER/POS, DA-04).
+
+Ver `sdd/specs/v2/fase-1-confiabilidad/15-T-01-ficha-de-metrica/` y `docs/api.md` §Ficha de métrica.

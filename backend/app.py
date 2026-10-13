@@ -23,6 +23,7 @@ import prefs
 import repository
 import metrics_catalog
 import bundles  # noqa: F401 — se importa para que registre los 5 tipos de entidad (T-05)
+import cache
 from metrics_catalog import MetricsError
 from competitions import CompetitionError
 from context import ContextError
@@ -332,6 +333,45 @@ def metrics_route(entity_type: str):
     except ValueError as e:
         return jsonify({"error": str(e), "code": "parametro_invalido"}), 400
     return jsonify(payload)
+
+
+@app.route("/api/rankings/<entity_type>/<metric_key>")
+@login_required
+def rankings_route(entity_type: str, metric_key: str):
+    """Ranking completo de una métrica en la población (T-01 plan §3.2/§4.6): `?id=` (resaltado,
+    opcional), `competition`/`last` (contrato de C-02), `base` (coherencia; el ranking de conteos
+    es siempre por partido)."""
+    from metrics_catalog import METRICS
+
+    valid_types = ("team", "player", "lineup", "onoff", "clutch")
+    if entity_type not in valid_types:
+        return jsonify({"error": "Tipo de entidad desconocido", "code": "parametro_invalido"}), 400
+    mdef = METRICS.get(metric_key)
+    if mdef is None:
+        return jsonify({"error": "Métrica desconocida", "code": "parametro_invalido"}), 400
+    if entity_type not in mdef.entities:
+        return jsonify({"error": "La métrica no aplica a este tipo de entidad",
+                        "code": "parametro_invalido"}), 400
+
+    raw_id = request.args.get("id")
+    kwargs = metrics_catalog._entity_id_kwargs(entity_type, str(raw_id)) if raw_id else {}
+    try:
+        ctx = context.parse_context(request.args, **kwargs)
+    except ContextError as e:
+        msg = str(e)
+        code = "competencia_inexistente" if "competencia" in msg.lower() else "contexto_invalido"
+        return jsonify({"error": msg, "code": code}), e.status
+    except CompetitionError as e:
+        return jsonify({"error": str(e), "code": "competencia_inexistente"}), e.status
+
+    variant = None
+    if entity_type == "lineup" and raw_id and ":" in str(raw_id):
+        pids = [p for p in str(raw_id).split(":", 1)[1].split("-") if p.strip()]
+        variant = len(pids) or None
+
+    result = population.full_ranking(entity_type, metric_key, ctx.competition_id, ctx,
+                                     highlight_id=raw_id, variant=variant)
+    return jsonify(result)
 
 
 @app.route("/api/team/<team_code>")
@@ -927,6 +967,7 @@ def identity_merge():
     except identity.IdentityError as e:
         db.session.rollback()
         return jsonify({"error": str(e)}), e.status
+    cache.bump_data_version("identity.merge_players")   # invalida poblaciones memorizadas (T-A2)
     return jsonify(result)
 
 
@@ -976,12 +1017,19 @@ def reprocess():
     return jsonify({**result, "total": len(all_ids), "next_offset": nxt if nxt < len(all_ids) else None})
 
 
+_LEAGUE_METRIC_KEYS = ("oer", "der", "net_rating", "efg_pct", "ts_pct",
+                       "or_pct", "dr_pct", "to_pct", "pace", "pts", "stl")
+
+
 @app.route("/api/league")
 @login_required
 def league_overview():
+    """Tabla de Liga (T-01 plan §3.3/§4.5): las filas conservan sus claves (C-09) pero los valores
+    `oer…stl` salen de la POBLACIÓN de equipos (cociente de totales, por partido en `pts`/`stl`),
+    y cada fila agrega `in_population`, `rank` y `pct`. `include=summary` agrega `avg`, `leaders`
+    y `population`. Sin `include`, lista (sin cambio de forma)."""
     codes    = db.session.query(TeamGameStats.team_code).distinct().all()
     games_by_id = {g.game_id: g for g in Game.query.all()}
-    minutes  = {gid: g.minutes or 40 for gid, g in games_by_id.items()}
     # orden cronológico: rows[-1] es el partido más reciente de cada equipo
     all_rows = sorted(_visible(TeamGameStats.query, TeamGameStats).all(),
                       key=lambda r: ((games_by_id[r.game_id].date or "") if r.game_id in games_by_id else "", r.game_id))
@@ -996,59 +1044,70 @@ def league_overview():
         comp_gids = {g.game_id for g in Game.query.filter_by(competition_id=comp_id).all()}
         all_rows = [r for r in all_rows if r.game_id in comp_gids]
 
+    ctx = context.Context(comp_id, comp_id is None, None)
+    pop = population.population("team", comp_id, ctx)
+    members_by_id = {m.id: m for m in pop.members}
+
     result = []
     for (code,) in codes:
         rows = [r for r in all_rows if r.team_code == code]
         if not rows:
             continue  # equipo sin partidos en la competencia filtrada
         name = rows[-1].team_name
+        member = members_by_id.get(code)
 
-        adv_list = []
-        for row in rows:
-            ao = _opp_for(row.game_id, code)
-            if not ao:
-                continue
-            t = _to_dict(row)
-            t["minutes"] = minutes.get(row.game_id, 40)   # PACE con prórrogas (F-11)
-            adv_list.append(calc_team_stats(t, _opp_dict(ao)))
-
-        if not adv_list:
-            continue
-
-        def _avg(key):
-            # Excluye None: un nulo no entra en el promedio ni cuenta como 0
-            # (Feature 14 RF-4). Sin el filtro, sum() con un None levanta TypeError.
-            vals = [a[key] for a in adv_list if a.get(key) is not None]
-            return round(sum(vals) / len(vals), 4) if vals else None
-
-        result.append({
+        row_out = {
             "team_code":  code,
             "team_name":  name,
             **standings_row([(r.pts, r.opp_pts) for r in rows],
                            win_points=config.get("standings.win_points"),
                            loss_points=config.get("standings.loss_points")),
-            "oer":        _avg("oer"),
-            "der":        _avg("der"),
-            "net_rating": _avg("net_rating"),
-            "efg_pct":    _avg("efg_pct"),
-            "ts_pct":     _avg("ts_pct"),
-            "or_pct":     _avg("or_pct"),
-            "dr_pct":     _avg("dr_pct"),
-            "to_pct":     _avg("to_pct"),
-            "pace":       _avg("pace"),
-            "pts":        _avg("pts"),
-            "stl":        _avg("stl"),
-        })
+            "in_population": bool(member and member.in_population),
+        }
+        rank_cell, pct_cell = {}, {}
+        for k in _LEAGUE_METRIC_KEYS:
+            v = member.values.get(k) if member else None
+            row_out[k] = v
+            mdef = metrics_catalog.METRICS[k]
+            in_members = [m for m in pop.members if m.in_population and m.values.get(k) is not None]
+            if v is None or len(in_members) < config.get("population.min_size"):
+                rank_cell[k] = None
+                pct_cell[k] = None
+                continue
+            others = [m.values[k] for m in in_members if m.id != code]
+            r_, tied = population.rank(v, others, mdef.direction)
+            rank_cell[k] = {"rank": r_, "total": len(in_members), "tied": tied}
+            pct_cell[k] = population.percentile(v, others, mdef.direction)
+        row_out["rank"] = rank_cell
+        row_out["pct"] = pct_cell
+        result.append(row_out)
 
     # Posición en la tabla general (C-09): el orden y el desempate se deciden acá.
     tiebreak = config.get("standings.tiebreak")
     for pos, row in enumerate(sorted(result, key=lambda r: standings_sort_key(r, tiebreak)), start=1):
         row["standings_pos"] = pos
 
-    # Orden null-safe: desde la Feature 14 `_avg` puede devolver None, y comparar
-    # None con float levanta TypeError. Los nulos van al final (Feature 12 RF-1).
+    # Orden null-safe (Feature 12 RF-1): por oer descendente con nulos al final.
     result.sort(key=lambda x: (x["oer"] is None, -(x["oer"] or 0)))
-    return jsonify(result)
+
+    if request.args.get("include") != "summary":
+        return jsonify(result)
+
+    avg = population.league_reference("team", comp_id, ctx)
+    avg = {k: avg.get(k) for k in _LEAGUE_METRIC_KEYS}
+    leaders = {}
+    in_members = [m for m in pop.members if m.in_population]
+    for k in _LEAGUE_METRIC_KEYS:
+        ldr = population._leader([m for m in in_members if m.values.get(k) is not None],
+                                 k, metrics_catalog.METRICS[k].direction)
+        leaders[k] = ({"id": ldr.id, "name": ldr.name, "value": ldr.values[k]} if ldr else None)
+    return jsonify({
+        "teams": result,
+        "avg": avg,
+        "leaders": leaders,
+        "population": {"size": pop.size, "criterion": pop.criterion,
+                       "context_label": pop.context_label, "reason": pop.reason},
+    })
 
 
 # ── Delete games ──────────────────────────────────────────────────────────
@@ -1065,6 +1124,8 @@ def delete_games():
     for g in games:
         db.session.delete(g)  # cascade: stats, tiros, pbp y JSON archivado
     db.session.commit()
+    if games:
+        cache.bump_data_version("delete_games")   # invalida poblaciones memorizadas (T-A2)
 
     return jsonify({"ok": True, "deleted": len(games)})
 

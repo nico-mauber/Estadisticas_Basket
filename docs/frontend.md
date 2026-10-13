@@ -79,6 +79,8 @@ api.deleteGames(ids)        // DELETE /api/games (admin)
 api.metricsCatalog()        // GET /api/metrics-catalog (T-05)
 api.metrics(type, params)   // GET /api/metrics/<type> (T-05: team|player|lineup|onoff|clutch)
 api.calibrate(entity, comp) // POST /api/settings/calibrate (T-02, admin)
+api.ranking(type, metric, p) // GET /api/rankings/<type>/<metric> (T-01)
+api.league(comp, {summary})  // GET /api/league[?include=summary] (T-01)
 // Datos (F-11)
 api.competitions(includeHidden?)       // GET /api/competitions[?include_hidden=1]
 api.createCompetition({name, season})  // POST  (admin)
@@ -215,7 +217,7 @@ El mismo mapa se muestra en dos lugares: en la vista **Jugador** (`renderPlayer`
 
 ## Service Worker (`sw.js`)
 
-Cache name: `smart-basket-v21`
+Cache name: `smart-basket-v22`
 
 **Estrategia:**
 - `install`: pre-cachea los archivos estáticos listados en `STATIC[]`
@@ -228,9 +230,9 @@ Cache name: `smart-basket-v21`
 ```js
 "/", "/manifest.json", "/css/style.css",
 "/js/app.js", "/js/api.js", "/js/charts.js", "/js/core/format.js",
-"/js/core/prefs.js", "/js/core/catalog.js", "/js/components/identity-merge.js",
+"/js/core/prefs.js", "/js/core/catalog.js", "/js/core/colors.js", "/js/components/identity-merge.js",
 "/js/components/settings-form.js", "/js/components/standard-panel.js", "/js/components/sample-badge.js",
-"/js/chart.umd.min.js"
+"/js/components/metric-card.js", "/js/chart.umd.min.js"
 ```
 
 Todo módulo ES nuevo que importe `app.js` debe agregarse a `STATIC` (y subir `CACHE`): el fetch
@@ -302,6 +304,27 @@ Montado en las cinco pantallas: Equipo y Jugador agregan una card nueva "Conjunt
 cards existentes); Combinación, ON/OFF y Cierres **reemplazan** sus grillas de métricas anteriores por el
 panel (conservan líderes, recuento de partidos y tabla por partido donde ya existían). Ver
 `sdd/specs/v2/fase-1-confiabilidad/13-T-05-conjunto-estandar-metricas/`.
+
+### Ficha de métrica (T-01)
+
+`core/colors.js`: `percentileColor(p)` y `percentileBg(p, alpha)` — escala continua rojo(#ef4444,p0) ·
+gris(#8b949e,p50) · verde(#22c55e,p100), interpolación lineal RGB.
+
+`components/metric-card.js`: `metricCard(key, metricObj, {entityType, label, layout})` — reemplaza `statBox` en
+Equipo/Jugador. Layout `card`: valor grande + cuatro líneas (ranking "N.º de M", líder con distancia, promedio
+con signo, chip percentil coloreado). Layout `row`: usado por `standard-panel.js` (`cellHTML`). `fmtDelta`
+formatea distancias (puntos porcentuales " pp" en porcentajes, signo U+2212). Casos: valor nulo → solo "—";
+`pct_reason` → línea tenue ("Sin referencia: la población tiene menos de N entidades" / "Elegí una competencia…"
+/ "Este filtro no tiene una población comparable"); `in_population: false` → `.fuera-poblacion` + chip "Muestra
+baja · fuera de la población"; `basis: "partido"` → "(por partido)"; métrica neutral → sin color.
+`bindMetricCards(el, {entityType, contextQuery})`: hover (escritorio) o tap (móvil) → popover/hoja inferior con
+el ranking completo de la métrica (`api.ranking`), entidad resaltada, "Fuera de la población" aparte, pie "Ø …".
+
+El bloque "Ø {promedio}" de `statBox` se retiró de Equipo y Jugador (ahora `statBox(label, value, display,
+reason)` solo para los pocos usos sin ficha). Vista Liga: columna `#` por puesto de la métrica ordenada, celdas
+coloreadas por percentil, filas fuera de población atenuadas con chip, `<tfoot>` con "Líder" y "Ø competencia"
+(de `api.league(comp, {summary:true})`). El `_colorCell(val, avg, invert)` que mencionaban docs/CLAUDE.md/
+Constitución regla 9 **nunca existió** (arquitectura §1.5 D-04); el color de percentil vive en `core/colors.js`.
 
 ### Confiabilidad de muestra (T-02)
 

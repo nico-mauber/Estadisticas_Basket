@@ -518,6 +518,93 @@ def onoff_bundles(games, team_code, player_name, *, entity_id,
     return on_bundle, off_bundle
 
 
+def all_onoff_bundles(games, team_code) -> list:
+    """ON+OFF de TODOS los jugadores de un equipo en una sola pasada (T-01 plan §4.2).
+
+    `games`: partidos del equipo con pbp (`repository.team_pbp_games`, canonicalizados). Para cada
+    partido con 5 titulares válidos recorre sus tramos; por tramo, cada jugador del plantel del
+    partido suma los eventos al ON si está en `on_court` y al OFF si no (misma partición exhaustiva
+    y disjunta que `onoff_stats`/`onoff_bundles`, pero resuelta jugador por jugador en una pasada).
+
+    Devuelve la lista de bundles ON (uno por jugador que estuvo ≥ 1 tramo en cancha); cada bundle
+    ON lleva `meta["off"]` = su bundle OFF y `meta["player_name"]`. `population` arma el id
+    `team:player_id` con `identity.name_index`."""
+    import identity
+
+    name_idx = identity.name_index(team_code)
+
+    # Universo de jugadores = unión de los planteles de todos los partidos con titulares válidos.
+    # Un jugador que no entró en un partido es OFF durante todo ese partido (misma partición que
+    # `onoff_stats`, que no mira el plantel: todo lo que no es ON es OFF).
+    valid_games = []
+    universe: set[str] = set()
+    games_used = games_excluded = 0
+    for g in games:
+        starters = game_starters(g["player_rows"], team_code)
+        if starters is None:
+            games_excluded += 1
+            continue
+        games_used += 1
+        segments = build_segments(g["events"], team_code, starters)
+        # Boxes del tramo (equipo y rival) y segundos, calculados una vez por tramo.
+        seg_data = [(s, _agg(s["events"], team_code), _agg(s["events"], g["opp_code"]), s["seconds"])
+                    for s in segments]
+        valid_games.append((g["game_id"], seg_data))
+        universe |= {r.player_name for r in g["player_rows"] if r.team_code == team_code}
+        for s in segments:
+            universe |= set(s["on_court"])
+
+    # acc[name] = {on:{boxes,opp,seconds,games_set}, off:{...}}
+    acc: dict[str, dict] = {}
+
+    def _slot(name):
+        return acc.setdefault(name, {
+            "on":  {"boxes": [], "opp": [], "seconds": 0.0, "games": set()},
+            "off": {"boxes": [], "opp": [], "seconds": 0.0, "games": set()},
+        })
+
+    for game_id, seg_data in valid_games:
+        for name in universe:
+            slot = _slot(name)
+            on_secs = off_secs = 0.0
+            for s, tb, ob, secs in seg_data:
+                side = "on" if name in s["on_court"] else "off"
+                slot[side]["boxes"].append(tb)
+                slot[side]["opp"].append(ob)
+                if side == "on":
+                    on_secs += secs
+                else:
+                    off_secs += secs
+            slot["on"]["seconds"] += on_secs
+            slot["off"]["seconds"] += off_secs
+            if on_secs > 0:
+                slot["on"]["games"].add(game_id)
+            if off_secs > 0:
+                slot["off"]["games"].add(game_id)
+
+    out = []
+    for name in sorted(acc):
+        pid = name_idx.get(name)
+        if pid is None:
+            continue
+        slot = acc[name]
+        entity_id = f"{team_code}:{pid}"
+        on_bundle = _onoff_bundle_side(
+            slot["on"]["boxes"], slot["on"]["opp"], slot["on"]["seconds"],
+            len(slot["on"]["games"]), entity_id=entity_id, name=name,
+            games_total=games_used, games_excluded=games_excluded)
+        off_bundle = _onoff_bundle_side(
+            slot["off"]["boxes"], slot["off"]["opp"], slot["off"]["seconds"],
+            len(slot["off"]["games"]), entity_id=entity_id, name=name,
+            games_total=games_used, games_excluded=games_excluded)
+        on_bundle.meta["team_code"] = team_code
+        off_bundle.meta["team_code"] = team_code
+        on_bundle.meta["player_name"] = name
+        on_bundle.meta["off"] = off_bundle
+        out.append(on_bundle)
+    return out
+
+
 def player_on_court(pbp_game, team_code, player_name) -> dict | None:
     """Conteos crudos propios/rivales de UN partido con `player_name` en cancha (plan §4.6).
 

@@ -4,7 +4,9 @@ import { PCT, PCT0, DEC1, DEC2, fmtNumber, isNull, nullDisplay, fmtOrNull } from
 import { renderDuplicateItems } from "./components/identity-merge.js";
 import { renderSettingsForm } from "./components/settings-form.js";
 import { renderStandardPanel } from "./components/standard-panel.js";
-import { loadCatalog } from "./core/catalog.js";
+import { metricCard, bindMetricCards } from "./components/metric-card.js";
+import { loadCatalog, stdKeyFor, loadPopulationMinSize } from "./core/catalog.js";
+import { percentileBg } from "./core/colors.js";
 
 // ── Toast ──────────────────────────────────────────────────────────────────
 function toast(msg, type = "ok") {
@@ -17,11 +19,6 @@ function toast(msg, type = "ok") {
 
 // ── Stat helpers ───────────────────────────────────────────────────────────
 // PCT/DEC1/DEC2 y la regla de nulos viven en core/format.js (C-11).
-
-function statClass(value, avg, higherIsBetter = true) {
-  if (value == null || avg == null) return "neutral";
-  return (higherIsBetter ? value >= avg : value <= avg) ? "above-avg" : "below-avg";
-}
 
 // Comparador único de tablas ordenables: el nulo se APARTA de la comparación en
 // vez de recibir un valor extremo, por eso su posición no depende de `dir` — queda
@@ -38,32 +35,30 @@ function _cmpNullsLast(av, bv, dir) {
 }
 
 // `reason`: código de `null_reasons` del backend; si `value` es nulo se muestra "—" con
-// esa razón en el title, sea cual sea `display` (C-11 RF-4).
-function statBox(label, value, display, leagueKey, league, higherIsBetter = true, reason = null) {
-  const lg    = leagueKey ? league?.[leagueKey] : null;
-  const avg   = lg?.avg;
-  const cls   = statClass(value, avg, higherIsBetter);
-  // `def_to_ratio` = (STL+BLK+DR)/TOV es un RATIO, no un porcentaje: sin excluirlo,
-  // el `includes("to_")` lo formatea como % y un 3.275 se muestra "327.5%" — la misma
-  // familia de valor imposible que reporta C-02 (Feature 14 RF-5).
-  // `as_pos` cae en el mismo heurístico por `includes("as_")` y es un ratio (Feature 15 D-6)
-  const NOT_PCT = ["def_to_ratio", "as_pos", "ast_to"];   // AS/PER es un cociente, no un %
-  const isPct = !!leagueKey && !NOT_PCT.includes(leagueKey) &&
-    (leagueKey.includes("pct") || leagueKey.includes("or_") || leagueKey.includes("dr_") || leagueKey.includes("to_") || leagueKey.includes("as_"));
-  const fmt   = v => v != null ? (isPct ? PCT(v) : DEC2(v)) : "—";
-  // El indicador "↑ mejor de la liga" se retiró: era el máximo de la población sin
-  // mínimo de muestra y producía valores imposibles (↑ 9900.0%). Su reemplazo es el
-  // percentil de T-01 (Feature 14 RF-5, decisión del cliente en ROADMAP §5).
-  const context = lg ? `
-      <div class="stat-context">
-        <span class="avg">Ø ${isNull(avg) ? nullDisplay(lg.reason) : fmt(avg)}</span>
-      </div>` : "";
+// esa razón en el title, sea cual sea `display` (C-11 RF-4). El bloque "Ø liga" se retiró
+// con T-01: Equipo y Jugador usan la ficha de métrica (metricCard); los pocos usos
+// restantes (detalle de tiro, AS/PER) muestran solo el valor.
+function statBox(label, value, display, reason = null) {
   return `
     <div class="stat-box">
       <div class="stat-label">${label}</div>
-      <div class="stat-value ${cls}">${isNull(value) ? nullDisplay(reason) : display}</div>
-      ${context}
+      <div class="stat-value neutral">${isNull(value) ? nullDisplay(reason) : display}</div>
     </div>`;
+}
+
+// ── Ficha de métrica en grillas de Equipo/Jugador (T-01) ─────────────────────
+// `metrics`: [[label, claveLegada|canónica, valorPromedio, displayRespaldo, reason?]].
+// Con `std` (respuesta de /api/metrics) se dibuja la ficha completa (metricCard);
+// sin `std` (o si la métrica no está en el conjunto estándar) se muestra solo el valor.
+function _fichaGridHTML(metrics, entityType, std, entityId) {
+  return metrics.map(([label, clave, value, display, reason]) => {
+    const stdKey = stdKeyFor(clave) || clave;
+    const mObj = std?.metrics?.[stdKey];
+    if (std && mObj) {
+      return metricCard(stdKey, mObj, { entityType, label, id: entityId, minSize: std.population?.min_size });
+    }
+    return statBox(label, value, display, reason);
+  }).join("");
 }
 
 // Etiqueta con su definición al pasar el cursor / tocar (C-01): `statBox` inserta el label como HTML.
@@ -75,11 +70,10 @@ const _ratioSub = (a, b) => a == null || b == null ? ""
   : `<span style="font-size:9px;color:var(--muted)"> (${a}/${b})</span>`;
 
 // Caja de AS/PER (asistencias sobre pérdidas acumuladas de la selección). PER = pérdidas.
-// Su `Ø` es el promedio de liga de AS/PER de la competencia (`league.ast_to`, C-02).
-function _astPerBox(av, totals, lg) {
+function _astPerBox(av, totals) {
   const label = '<span title="Asistencias sobre pérdidas, acumulado de la selección (PER = pérdidas)">AS/PER</span>';
   return statBox(label, av.ast_to, DEC2(av.ast_to) + _ratioSub(totals?.ast, totals?.tov),
-                 "ast_to", lg, true, av.null_reasons?.ast_to);
+                 av.null_reasons?.ast_to);
 }
 
 // ── Filtro por competencia (compartido: Liga/Equipo/Comparar/Jugador) ────────
@@ -731,10 +725,14 @@ async function _renderCompetitionsTab(el) {
 
 // ── League section — sortable table ───────────────────────────────────────
 let _leagueTeams    = [];
+let _leagueSummary  = null;  // {avg, leaders, population} de include=summary (T-01)
 let _leagueSortKey  = "oer";
 let _leagueSortDir  = -1; // -1 desc, 1 asc
 let _leagueMap      = "ef";
 let _leagueComp     = null; // null = la competencia por defecto (se resuelve al cargar); "all" = todas
+
+// Columnas con ficha (rank/pct) en la respuesta de /api/league.
+const LEAGUE_RANKABLE = new Set(["oer", "der", "net_rating", "efg_pct", "ts_pct", "or_pct", "dr_pct", "to_pct", "pace", "pts", "stl"]);
 
 // Scatter map presets — each defines the X/Y axes for el mapa de liga.
 // Cada eje declara la dirección de su métrica (`higher` | `lower` | `neutral`) y el título se arma
@@ -840,8 +838,25 @@ function _sortedLeague() {
     _cmpNullsLast(a[_leagueSortKey], b[_leagueSortKey], _leagueSortDir));
 }
 
+// Formato por columna de la tabla de Liga (coincide con LEAGUE_COLS y la ficha).
+const _LEAGUE_FMT = {
+  oer: DEC2, der: DEC2, net_rating: DEC2, pace: DEC2, pts: DEC2, stl: DEC2,
+  efg_pct: PCT, ts_pct: PCT, or_pct: PCT, dr_pct: PCT, to_pct: PCT,
+};
+
+function _leagueCell(t, key) {
+  const fmt = _LEAGUE_FMT[key] || DEC2;
+  const disp = fmt(t[key]);
+  const pct = t.pct?.[key];
+  const bg = pct != null ? percentileBg(pct) : null;
+  const style = bg ? ` style="background:${bg}"` : "";
+  const title = pct != null ? ` title="p${pct}"` : "";
+  return `<td${style}${title}>${disp}</td>`;
+}
+
 function _leagueTableHTML(teams) {
   const sorted = teams;
+  const sortRankable = LEAGUE_RANKABLE.has(_leagueSortKey);
   const headers = LEAGUE_COLS.map(c => {
     const cls = c.key === _leagueSortKey
       ? (_leagueSortDir === -1 ? "sort-desc" : "sort-asc")
@@ -850,24 +865,55 @@ function _leagueTableHTML(teams) {
     return `<th class="${cls}" ${attrs} title="${c.title || ""}">${c.label}</th>`;
   }).join("");
 
-  const rows = sorted.map((t, i) => `
-    <tr style="cursor:pointer" data-code="${t.team_code}">
-      <td class="td-muted">${i + 1}</td>
-      <td class="td-team">${t.team_name}</td>
+  const rows = sorted.map((t, i) => {
+    const fuera = t.in_population === false;
+    // # = puesto de la métrica ordenada si es rankeable; si no, el índice de la fila.
+    let numCell = `${i + 1}`;
+    if (sortRankable && t.rank?.[_leagueSortKey]) {
+      const r = t.rank[_leagueSortKey];
+      numCell = `${r.tied ? "=" : ""}${r.rank}`;
+    }
+    const chip = fuera ? ` <span class="mc-low-chip">Muestra baja</span>` : "";
+    return `
+    <tr style="cursor:pointer" class="${fuera ? "fuera-poblacion" : ""}" data-code="${t.team_code}">
+      <td class="td-muted">${numCell}</td>
+      <td class="td-team">${t.team_name}${chip}</td>
       <td>${t.games}</td>
-      <td>${DEC2(t.oer)}</td>
-      <td>${DEC2(t.der)}</td>
-      <td class="${t.net_rating == null ? '' : t.net_rating >= 0 ? 'above-avg' : 'below-avg'}">${DEC2(t.net_rating)}</td>
-      <td>${PCT(t.efg_pct)}</td>
-      <td>${PCT(t.ts_pct)}</td>
-      <td>${PCT(t.or_pct)}</td>
-      <td>${PCT(t.dr_pct)}</td>
-      <td>${PCT(t.to_pct)}</td>
-      <td>${DEC2(t.pace)}</td>
-      <td>${DEC2(t.pts)}</td>
-    </tr>`).join("");
+      ${_leagueCell(t, "oer")}
+      ${_leagueCell(t, "der")}
+      ${_leagueCell(t, "net_rating")}
+      ${_leagueCell(t, "efg_pct")}
+      ${_leagueCell(t, "ts_pct")}
+      ${_leagueCell(t, "or_pct")}
+      ${_leagueCell(t, "dr_pct")}
+      ${_leagueCell(t, "to_pct")}
+      ${_leagueCell(t, "pace")}
+      ${_leagueCell(t, "pts")}
+    </tr>`;
+  }).join("");
 
-  return `<thead><tr>${headers}</tr></thead><tbody>${rows}</tbody>`;
+  return `<thead><tr>${headers}</tr></thead><tbody>${rows}</tbody>${_leagueFootHTML()}`;
+}
+
+// Pie de tabla: "Líder" (nombre y valor de leaders[clave]) y "Ø competencia" (avg[clave]).
+function _leagueFootHTML() {
+  const s = _leagueSummary;
+  if (!s || (!s.leaders && !s.avg)) return "";
+  const cols = ["oer", "der", "net_rating", "efg_pct", "ts_pct", "or_pct", "dr_pct", "to_pct", "pace", "pts"];
+  const leaderCells = cols.map(k => {
+    const l = s.leaders?.[k];
+    const fmt = _LEAGUE_FMT[k] || DEC2;
+    return `<td title="${l ? esc(l.name) : ""}">${l ? fmt(l.value) : "—"}</td>`;
+  }).join("");
+  const avgCells = cols.map(k => {
+    const fmt = _LEAGUE_FMT[k] || DEC2;
+    return `<td>${s.avg?.[k] != null ? fmt(s.avg[k]) : "—"}</td>`;
+  }).join("");
+  return `
+    <tfoot>
+      <tr class="league-foot-leader"><td></td><td>Líder</td><td></td>${leaderCells}</tr>
+      <tr class="league-foot-avg"><td></td><td>Ø competencia</td><td></td>${avgCells}</tr>
+    </tfoot>`;
 }
 
 function _bindLeagueTableEvents(tableEl) {
@@ -905,7 +951,13 @@ function _drawLeagueMap() {
       &nbsp;&nbsp;·&nbsp;&nbsp;
       <span style="color:var(--muted)">🖱 rueda = zoom &nbsp;·&nbsp; arrastrar = mover &nbsp;·&nbsp; pellizcar = zoom táctil</span>`;
   }
-  drawLeagueScatter("chart-scatter", _leagueTeams, _mapAxis(map.axis));
+  const axis = _mapAxis(map.axis);
+  const avg = _leagueSummary?.avg;
+  if (avg) {
+    if (avg[axis.xKey] != null) axis.avgX = avg[axis.xKey];
+    if (avg[axis.yKey] != null) axis.avgY = avg[axis.yKey];
+  }
+  drawLeagueScatter("chart-scatter", _leagueTeams, axis);
 }
 
 async function renderLeague() {
@@ -918,7 +970,9 @@ async function renderLeague() {
       const def = comps.find(c => c.is_default);
       _leagueComp = def ? String(def.id) : null;
     }
-    _leagueTeams = await api.league(_leagueComp);
+    const res = await api.league(_leagueComp, { summary: true });
+    _leagueTeams = res.teams || [];
+    _leagueSummary = { avg: res.avg || {}, leaders: res.leaders || {}, population: res.population || null };
     if (!_leagueTeams.length) { sec.innerHTML = '<p class="empty">Sin datos. Importa partidos primero.</p>'; return; }
 
     const compSelHTML = comps.length > 1
@@ -1055,6 +1109,7 @@ async function _loadClutchStandard(teamCode, margin, windowSecs) {
     const payload = await api.metrics("clutch", { id: teamCode, competition: _teamComp, margin, window_secs: windowSecs });
     if (req !== _clutchStdReq) return;
     renderStandardPanel(el, payload, { layout: "grid" });
+    bindMetricCards(el, { entityType: "clutch", contextQuery: { competition: _teamComp, margin, window_secs: windowSecs, id: teamCode } });
   } catch (e) {
     if (req !== _clutchStdReq) return;
     renderStandardPanel(el, { error: e.message || "No se pudo cargar el conjunto estándar" }, { layout: "grid" });
@@ -1172,65 +1227,46 @@ function _renderTeamContent(main, data) {
         </div>
       </div>`;
 
+  // Definición de las cards con ficha (T-01): etiqueta, clave (legada o canónica),
+  // valor promedio y display de respaldo para cuando no hay conjunto estándar.
+  const TEAM_CARD_GROUPS = [
+    { title: "Eficiencia", metrics: [
+      ["OER", "oer", av.oer, DEC2(av.oer)], ["DER", "der", av.der, DEC2(av.der)],
+      ["Net Rating", "net_rating", av.net_rating, DEC2(av.net_rating)],
+      ["Pace", "pace", av.pace, DEC2(av.pace)], ["PPT", "ppt", av.ppt, DEC2(av.ppt)],
+      ["FT Rate", "ft_rate", av.ft_rate, DEC2(av.ft_rate)] ] },
+    { title: "Tiro", extra: _shotDetailGrid(av, data.totals), metrics: [
+      ["eFG%", "efg_pct", av.efg_pct, PCT(av.efg_pct)], ["TS%", "ts_pct", av.ts_pct, PCT(av.ts_pct)],
+      ["FG2%", "fg2_pct", av.fg2_pct, PCT(av.fg2_pct)], ["FG3%", "fg3_pct", av.fg3_pct, PCT(av.fg3_pct)],
+      ["FT%", "ft_pct", av.ft_pct, PCT(av.ft_pct)], ["Uso 3P", "fg3_uso", av.fg3_uso, PCT(av.fg3_uso)] ] },
+    { title: "Rebotes & Misc", trailing: _astPerBox(av, data.totals), metrics: [
+      ["OR%", "or_pct", av.or_pct, PCT(av.or_pct)], ["DR%", "dr_pct", av.dr_pct, PCT(av.dr_pct)],
+      ["Reb%", "trb_pct", av.trb_pct, PCT(av.trb_pct)], ["PER", "tov", av.tov, DEC2(av.tov)],
+      ["AS", "ast", av.ast, DEC2(av.ast)] ] },
+    { title: "Defensa avanzada", metrics: [
+      ["Robos", "stl", av.stl, DEC2(av.stl)], ["Tapones", "blk", av.blk, DEC2(av.blk)],
+      ["Stops", "stocks", av.stocks, DEC2(av.stocks)],
+      ["Def Playmaking", "def_playmaking", av.def_playmaking, DEC2(av.def_playmaking)],
+      ["DEF/TO Ratio", "def_to_ratio", av.def_to_ratio, DEC2(av.def_to_ratio)] ] },
+    { title: "Desglose ofensivo", metrics: [
+      ["PtsEnPint", "paint_pts", av.paint_pts, DEC2(av.paint_pts)],
+      ["Seg. Op.", "second_chance_pts", av.second_chance_pts, DEC2(av.second_chance_pts)],
+      ["Ptos/PER", "pts_from_tov", av.pts_from_tov, DEC2(av.pts_from_tov)],
+      ["Banca", "bench_pts", av.bench_pts, DEC2(av.bench_pts)],
+      ["PCA", "fast_break_pts", av.fast_break_pts, DEC2(av.fast_break_pts)] ] },
+  ];
+
   main.innerHTML = `
     ${_selectionNote(data, ["equipo", "equipos"])}
     ${charts}
     ${_recordCard(data.record, data.team_name)}
+    ${TEAM_CARD_GROUPS.map((g, i) => `
     <div class="card">
-      <div class="card-title">Eficiencia</div>
-      <div class="stat-grid">
-        ${statBox("OER", av.oer, DEC2(av.oer), "oer", lg, true, rs.oer)}
-        ${statBox("DER", av.der, DEC2(av.der), "der", lg, false, rs.der)}
-        ${statBox("Net Rating", av.net_rating, DEC2(av.net_rating), "net_rating", lg, true, rs.net_rating)}
-        ${statBox("Pace", av.pace, DEC2(av.pace), "pace", lg, true, rs.pace)}
-        ${statBox("PPT", av.ppt, DEC2(av.ppt), "ppt", lg, true, rs.ppt)}
-        ${statBox("FT Rate", av.ft_rate, DEC2(av.ft_rate), "ft_rate", lg, true, rs.ft_rate)}
-      </div>
-    </div>
-    ${_fourFactorsCard(av, data.team_name)}
-    <div class="card">
-      <div class="card-title">Tiro</div>
-      <div class="stat-grid">
-        ${statBox("eFG%", av.efg_pct, PCT(av.efg_pct), "efg_pct", lg, true, rs.efg_pct)}
-        ${statBox("TS%", av.ts_pct, PCT(av.ts_pct), "ts_pct", lg, true, rs.ts_pct)}
-        ${statBox("FG2%", av.fg2_pct, PCT(av.fg2_pct), "fg2_pct", lg, true, rs.fg2_pct)}
-        ${statBox("FG3%", av.fg3_pct, PCT(av.fg3_pct), "fg3_pct", lg, true, rs.fg3_pct)}
-        ${statBox("FT%", av.ft_pct, PCT(av.ft_pct), "ft_pct", lg, true, rs.ft_pct)}
-        ${statBox("Uso 3P", av.fg3_uso, PCT(av.fg3_uso), "fg3_uso", lg, true, rs.fg3_uso)}
-      </div>
-      ${_shotDetailGrid(av, data.totals, lg)}
-    </div>
-    <div class="card">
-      <div class="card-title">Rebotes & Misc</div>
-      <div class="stat-grid">
-        ${statBox("OR%", av.or_pct, PCT(av.or_pct), "or_pct", lg, true, rs.or_pct)}
-        ${statBox("DR%", av.dr_pct, PCT(av.dr_pct), "dr_pct", lg, true, rs.dr_pct)}
-        ${statBox("Reb%", av.trb_pct, PCT(av.trb_pct), "trb_pct", lg, true, rs.trb_pct)}
-        ${statBox("TO", av.tov, DEC2(av.tov), "tov", lg, false, rs.tov)}
-        ${statBox("AS", av.ast, DEC2(av.ast), "ast", lg, true, rs.ast)}
-        ${_astPerBox(av, data.totals, lg)}
-      </div>
-    </div>
-    <div class="card">
-      <div class="card-title">Defensa avanzada</div>
-      <div class="stat-grid">
-        ${statBox("Robos", av.stl, DEC2(av.stl), "stl", lg, true, rs.stl)}
-        ${statBox("Tapones", av.blk, DEC2(av.blk), "blk", lg, true, rs.blk)}
-        ${statBox("Stops", av.stocks, DEC2(av.stocks), "stocks", lg, true, rs.stocks)}
-        ${statBox("Def Playmaking", av.def_playmaking, DEC2(av.def_playmaking), "def_playmaking", lg, true, rs.def_playmaking)}
-        ${statBox("DEF/TO Ratio", av.def_to_ratio, DEC2(av.def_to_ratio), "def_to_ratio", lg, true, rs.def_to_ratio)}
-      </div>
-    </div>
-    <div class="card">
-      <div class="card-title">Desglose ofensivo</div>
-      <div class="stat-grid">
-        ${statBox("PtsEnPint",       av.paint_pts,         DEC2(av.paint_pts),         null, null, false, rs.paint_pts)}
-        ${statBox("Seg. Op.",  av.second_chance_pts,  DEC2(av.second_chance_pts), null, null, false, rs.second_chance_pts)}
-        ${statBox("Ptos/PER",  av.pts_from_tov,       DEC2(av.pts_from_tov),      null, null, false, rs.pts_from_tov)}
-        ${statBox("Banca",     av.bench_pts,          DEC2(av.bench_pts),         null, null, false, rs.bench_pts)}
-        ${statBox("PCA",       av.fast_break_pts,     DEC2(av.fast_break_pts),    null, null, false, rs.fast_break_pts)}
-      </div>
-    </div>
+      <div class="card-title">${g.title}</div>
+      <div class="stat-grid metric-card-grid" data-mc-group="${i}">${_fichaGridHTML(g.metrics, "team", null, data.team_code)}</div>
+      ${g.trailing ? `<div class="stat-grid">${g.trailing}</div>` : ""}
+      ${g.extra || ""}
+    </div>${i === 0 ? _fourFactorsCard(av, data.team_name) : ""}`).join("")}
     <div class="card">
       <div class="card-title">Conjunto estándar</div>
       <div id="team-standard-panel"></div>
@@ -1271,29 +1307,53 @@ function _renderTeamContent(main, data) {
     if (radarOk) drawRadar("chart-radar", av, lg, data.team_name);
     drawEvolution("chart-evo", data.game_log, lg?.oer?.avg);
   }
+  _teamCardGroups = TEAM_CARD_GROUPS;
   _loadTeamStandard(data.team_code);
+}
+
+// Re-dibuja las grillas de fichas de Equipo/Jugador con el conjunto estándar ya
+// cargado (`std`), y engancha el ranking al hover/tap. `sectionEl` acota el bind.
+function _fillFichaGrids(container, groups, entityType, std, entityId) {
+  if (!container || !groups) return;
+  groups.forEach((g, i) => {
+    const grid = container.querySelector(`.metric-card-grid[data-mc-group="${i}"]`);
+    if (grid) grid.innerHTML = _fichaGridHTML(g.metrics, entityType, std, entityId);
+  });
 }
 
 // ── Conjunto estándar de métricas — card "Equipo" (T-05, T-E1) ──────────────
 let _teamStdReq = 0;
 let _teamStdBase = "partido";
+let _teamCardGroups = null;
 
 async function _loadTeamStandard(teamCode) {
   const el = document.getElementById("team-standard-panel");
+  const main = document.getElementById("team-main");
   if (!el) return;
   const req = ++_teamStdReq;
   renderStandardPanel(el, null, { layout: "grid", base: _teamStdBase });
+  const ctxQuery = { competition: _teamComp, last: _teamLastN || null };
   try {
     await loadCatalog();
-    const payload = await api.metrics("team", { id: teamCode, competition: _teamComp, last: _teamLastN || null, base: _teamStdBase });
+    // El conjunto estándar que alimenta las cards de ficha va siempre por partido
+    // (base del ranking, RF-18); el panel usa la base elegida por el usuario.
+    const fichaStd = await api.metrics("team", { id: teamCode, ...ctxQuery, base: "partido" });
+    if (req !== _teamStdReq) return;
+    _fillFichaGrids(main, _teamCardGroups, "team", fichaStd, teamCode);
+    const payload = _teamStdBase === "partido"
+      ? fichaStd
+      : await api.metrics("team", { id: teamCode, ...ctxQuery, base: _teamStdBase });
     if (req !== _teamStdReq) return;
     renderStandardPanel(el, payload, {
       layout: "grid",
       base: _teamStdBase,
       onBaseChange: newBase => { _teamStdBase = newBase; _loadTeamStandard(teamCode); },
     });
+    if (main) bindMetricCards(main, { entityType: "team", contextQuery: { ...ctxQuery, id: teamCode } });
   } catch (e) {
     if (req !== _teamStdReq) return;
+    // Sin conjunto estándar las cards ya muestran el valor; aviso discreto en el panel.
+    _fillFichaGrids(main, _teamCardGroups, "team", null, teamCode);
     renderStandardPanel(el, { error: e.message || "No se pudo cargar el conjunto estándar" }, { layout: "grid", base: _teamStdBase });
   }
 }
@@ -1488,6 +1548,7 @@ async function renderTeamLineup(teamCode, players, playerIds = []) {
         const id = `${teamCode}:${[...playerIds].sort((a, b) => a - b).join("-")}`;
         const payload = await api.metrics("lineup", { id, competition: _teamComp, last: _teamLastN || null });
         renderStandardPanel(panelEl, payload, { layout: "grid" });
+        bindMetricCards(panelEl, { entityType: "lineup", contextQuery: { competition: _teamComp, last: _teamLastN || null, id } });
       } catch (e) {
         renderStandardPanel(panelEl, { error: e.message || "No se pudo cargar el conjunto estándar" }, { layout: "grid" });
       }
@@ -1675,7 +1736,7 @@ function _scSpoke(deg) {
 
 // C-07 — detalle de tiro: intentos/convertidos de las 3 categorías (promedio por
 // partido + total de temporada) y los 4 PPT. Compartido por Equipo y Jugador.
-function _shotDetailGrid(av, totals, lg) {
+function _shotDetailGrid(av, totals) {
   const t = totals || {};
   const rs = av?.null_reasons || {};
   // "promedio (total)" — el promedio ya viene del backend; el total también, para no
@@ -1684,7 +1745,7 @@ function _shotDetailGrid(av, totals, lg) {
     const a = av?.[avgKey], n = t[totKey];
     // Total ausente → "—", nunca "(0)" (C-11 RF-4)
     const disp = `${DEC2(a)}<span style="font-size:9px;color:var(--muted)"> (${n ?? "—"})</span>`;
-    return statBox(label, a, disp, null, null, true, rs[avgKey]);
+    return statBox(label, a, disp, rs[avgKey]);
   };
   return `
     <div class="card-title" style="margin-top:14px;font-size:11px;color:var(--muted)">Detalle de tiro — promedio (total temporada)</div>
@@ -1698,10 +1759,10 @@ function _shotDetailGrid(av, totals, lg) {
     </div>
     <div class="card-title" style="margin-top:14px;font-size:11px;color:var(--muted)">Puntos por tiro</div>
     <div class="stat-grid">
-      ${statBox("PPT",    av.ppt,    DEC2(av.ppt),    "ppt",    lg, true, rs.ppt)}
-      ${statBox("PPT 2",  av.ppt_2,  DEC2(av.ppt_2),  "ppt_2",  lg, true, rs.ppt_2)}
-      ${statBox("PPT 3",  av.ppt_3,  DEC2(av.ppt_3),  "ppt_3",  lg, true, rs.ppt_3)}
-      ${statBox("PPT TL", av.ppt_ft, DEC2(av.ppt_ft), "ppt_ft", lg, true, rs.ppt_ft)}
+      ${statBox("PPT",    av.ppt,    DEC2(av.ppt),    rs.ppt)}
+      ${statBox("PPT 2",  av.ppt_2,  DEC2(av.ppt_2),  rs.ppt_2)}
+      ${statBox("PPT 3",  av.ppt_3,  DEC2(av.ppt_3),  rs.ppt_3)}
+      ${statBox("PPT TL", av.ppt_ft, DEC2(av.ppt_ft), rs.ppt_ft)}
     </div>`;
 }
 
@@ -1843,23 +1904,33 @@ function _applyPlayerData(main, data) {
 // ── Conjunto estándar de métricas — card "Jugador" (T-05, T-E2) ─────────────
 let _playerStdReq = 0;
 let _playerStdBase = "partido";
+let _playerCardGroups = null;
 
 async function _loadPlayerStandard(playerId) {
   const el = document.getElementById("player-standard-panel");
+  const main = document.getElementById("player-main");
   if (!el) return;
   const req = ++_playerStdReq;
   renderStandardPanel(el, null, { layout: "grid", base: _playerStdBase });
+  const ctxQuery = { competition: _playerComp };
   try {
     await loadCatalog();
-    const payload = await api.metrics("player", { id: playerId, competition: _playerComp, base: _playerStdBase });
+    const fichaStd = await api.metrics("player", { id: playerId, ...ctxQuery, base: "partido" });
+    if (req !== _playerStdReq) return;
+    _fillFichaGrids(main, _playerCardGroups, "player", fichaStd, playerId);
+    const payload = _playerStdBase === "partido"
+      ? fichaStd
+      : await api.metrics("player", { id: playerId, ...ctxQuery, base: _playerStdBase });
     if (req !== _playerStdReq) return;
     renderStandardPanel(el, payload, {
       layout: "grid",
       base: _playerStdBase,
       onBaseChange: newBase => { _playerStdBase = newBase; _loadPlayerStandard(playerId); },
     });
+    if (main) bindMetricCards(main, { entityType: "player", contextQuery: { ...ctxQuery, id: playerId } });
   } catch (e) {
     if (req !== _playerStdReq) return;
+    _fillFichaGrids(main, _playerCardGroups, "player", null, playerId);
     renderStandardPanel(el, { error: e.message || "No se pudo cargar el conjunto estándar" }, { layout: "grid", base: _playerStdBase });
   }
 }
@@ -1899,69 +1970,50 @@ function _renderPlayerContent(main, data) {
   const radarOk = lg?.oer?.avg != null;
 
   {
+    const PLAYER_CARD_GROUPS = [
+      { title: "Producción ofensiva", metrics: [
+        ["OER", "oer", av.oer, DEC2(av.oer)], ["USO%", "uso_pct", av.uso_pct, PCT(av.uso_pct)],
+        ["PPP", "ppp", av.ppp, DEC2(av.ppp)], ["PPT", "ppt", av.ppt, DEC2(av.ppt)],
+        ["eFG%", "efg_pct", av.efg_pct, PCT(av.efg_pct)], ["TS%", "ts_pct", av.ts_pct, PCT(av.ts_pct)],
+        ["FT Rate", "ft_rate", av.ft_rate, DEC2(av.ft_rate)] ] },
+      { title: "Por posesión y por minuto", metrics: [
+        [_hint("AS/pos", "Asistencias por posesión propia (posesión = T2i + T3i + 0,44 × TLi + PER − RO)"), "as_pos", av.as_pos, DEC2(av.as_pos)],
+        [_hint("PER/pos", "Pérdidas por posesión propia (PER = pérdidas)"), "tov_pos", av.tov_pos, DEC2(av.tov_pos)],
+        [_hint("PTS/pos", "Puntos por posesión propia (igual al OER del jugador)"), "pts_pos", av.pts_pos, DEC2(av.pts_pos)],
+        [_hint("RO/min", "Rebotes ofensivos por minuto disputado"), "orb_min", av.orb_min, DEC2(av.orb_min)],
+        [_hint("RD/min", "Rebotes defensivos por minuto disputado"), "drb_min", av.drb_min, DEC2(av.drb_min)] ] },
+      { title: "Tiro", extra: _shotDetailGrid(av, data.totals), metrics: [
+        ["FG2%", "fg2_pct", av.fg2_pct, PCT(av.fg2_pct)], ["FG3%", "fg3_pct", av.fg3_pct, PCT(av.fg3_pct)],
+        ["FT%", "ft_pct", av.ft_pct, PCT(av.ft_pct)], ["Uso 2P", "fg2_uso", av.fg2_uso, PCT(av.fg2_uso)],
+        ["Uso 3P", "fg3_uso", av.fg3_uso, PCT(av.fg3_uso)] ] },
+      { title: "Rebotes & distribución", trailing: _astPerBox(av, data.totals), metrics: [
+        [_hint("OR%", "Porción de los rebotes ofensivos disponibles que capturó mientras estuvo en cancha, " + _PCT_REB_HINT.replace("%s", "OR%")), "or_pct", av.or_pct, PCT(av.or_pct)],
+        [_hint("DR%", "Porción de los rebotes defensivos disponibles que capturó mientras estuvo en cancha, " + _PCT_REB_HINT.replace("%s", "DR%")), "dr_pct", av.dr_pct, PCT(av.dr_pct)],
+        ["TO", "tov", av.tov, DEC2(av.tov)], ["AS", "ast", av.ast, DEC2(av.ast)],
+        ["% Reb Equipo", "reb_share", av.reb_share, PCT(av.reb_share)],
+        ["% RebOf Equipo", "oreb_share", av.oreb_share, PCT(av.oreb_share)],
+        ["% RebDef Equipo", "dreb_share", av.dreb_share, PCT(av.dreb_share)] ] },
+      { title: "Defensa avanzada", metrics: [
+        ["Robos", "stl", av.stl, DEC2(av.stl)], ["Tapones", "blk", av.blk, DEC2(av.blk)],
+        ["Stops", "stocks", av.stocks, DEC2(av.stocks)],
+        ["Def Playmaking", "def_playmaking", av.def_playmaking, DEC2(av.def_playmaking)],
+        ["DEF/TO Ratio", "def_to_ratio", av.def_to_ratio, DEC2(av.def_to_ratio)],
+        ["Impacto Físico", "physical_impact", av.physical_impact, DEC2(av.physical_impact)] ] },
+    ];
+    _playerCardGroups = PLAYER_CARD_GROUPS;
     main.innerHTML = `
       ${comps.length > 1 ? `
       <div class="card">
         <select id="player-comp" class="map-select">${_compOptions(comps, _playerComp, "Todas las competencias", "all")}</select>
       </div>` : ""}
       ${_selectionNote(data, ["jugador", "jugadores"])}
+      ${PLAYER_CARD_GROUPS.map((g, i) => `
       <div class="card">
-        <div class="card-title">Producción ofensiva</div>
-        <div class="stat-grid">
-          ${statBox("OER", av.oer, DEC2(av.oer), "oer", lg, true, rs.oer)}
-          ${statBox("USO%", av.uso_pct, PCT(av.uso_pct), "uso_pct", lg, true, rs.uso_pct)}
-          ${statBox("PPP", av.ppp, DEC2(av.ppp), "ppp", lg, true, rs.ppp)}
-          ${statBox("PPT", av.ppt, DEC2(av.ppt), "ppt", lg, true, rs.ppt)}
-          ${statBox("eFG%", av.efg_pct, PCT(av.efg_pct), "efg_pct", lg, true, rs.efg_pct)}
-          ${statBox("TS%", av.ts_pct, PCT(av.ts_pct), "ts_pct", lg, true, rs.ts_pct)}
-          ${statBox("FT Rate", av.ft_rate, DEC2(av.ft_rate), "ft_rate", lg, true, rs.ft_rate)}
-        </div>
-      </div>
-      <div class="card">
-        <div class="card-title">Por posesión y por minuto</div>
-        <div class="stat-grid">
-          ${statBox(_hint("AS/pos", "Asistencias por posesión propia (posesión = T2i + T3i + 0,44 × TLi + PER − RO)"), av.as_pos, DEC2(av.as_pos), "as_pos", lg, true, rs.as_pos)}
-          ${statBox(_hint("PER/pos", "Pérdidas por posesión propia (PER = pérdidas)"), av.tov_pos, DEC2(av.tov_pos), "tov_pos", lg, false, rs.tov_pos)}
-          ${statBox(_hint("PTS/pos", "Puntos por posesión propia (igual al OER del jugador)"), av.pts_pos, DEC2(av.pts_pos), "pts_pos", lg, true, rs.pts_pos)}
-          ${statBox(_hint("RO/min", "Rebotes ofensivos por minuto disputado"), av.orb_min, DEC2(av.orb_min), "orb_min", lg, true, rs.orb_min)}
-          ${statBox(_hint("RD/min", "Rebotes defensivos por minuto disputado"), av.drb_min, DEC2(av.drb_min), "drb_min", lg, true, rs.drb_min)}
-        </div>
-      </div>
-      <div class="card">
-        <div class="card-title">Tiro</div>
-        <div class="stat-grid">
-          ${statBox("FG2%", av.fg2_pct, PCT(av.fg2_pct), "fg2_pct", lg, true, rs.fg2_pct)}
-          ${statBox("FG3%", av.fg3_pct, PCT(av.fg3_pct), "fg3_pct", lg, true, rs.fg3_pct)}
-          ${statBox("FT%", av.ft_pct, PCT(av.ft_pct), "ft_pct", lg, true, rs.ft_pct)}
-          ${statBox("Uso 2P", av.fg2_uso, PCT(av.fg2_uso), "fg2_uso", lg, true, rs.fg2_uso)}
-          ${statBox("Uso 3P", av.fg3_uso, PCT(av.fg3_uso), "fg3_uso", lg, true, rs.fg3_uso)}
-        </div>
-        ${_shotDetailGrid(av, data.totals, lg)}
-      </div>
-      <div class="card">
-        <div class="card-title">Rebotes & distribución</div>
-        <div class="stat-grid">
-          ${statBox(_hint("OR%", "Porción de los rebotes ofensivos disponibles que capturó mientras estuvo en cancha, " + _PCT_REB_HINT.replace("%s", "OR%")), av.or_pct, PCT(av.or_pct), "or_pct", lg, true, rs.or_pct)}
-          ${statBox(_hint("DR%", "Porción de los rebotes defensivos disponibles que capturó mientras estuvo en cancha, " + _PCT_REB_HINT.replace("%s", "DR%")), av.dr_pct, PCT(av.dr_pct), "dr_pct", lg, true, rs.dr_pct)}
-          ${statBox("TO", av.tov, DEC2(av.tov), "tov", lg, false, rs.tov)}
-          ${statBox("AS", av.ast, DEC2(av.ast), "ast", lg, true, rs.ast)}
-          ${_astPerBox(av, data.totals, lg)}
-          ${statBox("% Reb Equipo", av.reb_share, PCT(av.reb_share), "reb_share", lg, true, rs.reb_share)}
-          ${statBox("% RebOf Equipo", av.oreb_share, PCT(av.oreb_share), "oreb_share", lg, true, rs.oreb_share)}
-          ${statBox("% RebDef Equipo", av.dreb_share, PCT(av.dreb_share), "dreb_share", lg, true, rs.dreb_share)}
-        </div>
-      </div>
-      <div class="card">
-        <div class="card-title">Defensa avanzada</div>
-        <div class="stat-grid">
-          ${statBox("Robos", av.stl, DEC2(av.stl), "stl", lg, true, rs.stl)}
-          ${statBox("Tapones", av.blk, DEC2(av.blk), "blk", lg, true, rs.blk)}
-          ${statBox("Stops", av.stocks, DEC2(av.stocks), "stocks", lg, true, rs.stocks)}
-          ${statBox("Def Playmaking", av.def_playmaking, DEC2(av.def_playmaking), "def_playmaking", lg, true, rs.def_playmaking)}
-          ${statBox("DEF/TO Ratio", av.def_to_ratio, DEC2(av.def_to_ratio), "def_to_ratio", lg, true, rs.def_to_ratio)}
-          ${statBox("Impacto Físico", av.physical_impact, DEC2(av.physical_impact), "physical_impact", lg, true, rs.physical_impact)}
-        </div>
-      </div>
+        <div class="card-title">${g.title}</div>
+        <div class="stat-grid metric-card-grid" data-mc-group="${i}">${_fichaGridHTML(g.metrics, "player", null, data.player_id)}</div>
+        ${g.trailing ? `<div class="stat-grid">${g.trailing}</div>` : ""}
+        ${g.extra || ""}
+      </div>`).join("")}
       <div class="chart-grid">
         <div class="card">
           <div class="card-title">Perfil de jugador</div>
@@ -2210,6 +2262,7 @@ const NAV_ITEMS = {
 };
 
 function renderApp() {
+  loadPopulationMinSize();   // para el copy "la población tiene menos de N entidades" (T-01)
   document.getElementById("app").innerHTML = `
     <header>
       <span class="header-logo">🏀 Smart-Basket</span>

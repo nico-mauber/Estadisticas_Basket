@@ -9,6 +9,20 @@ const SESSION_KEY = "sb.metrics-catalog";
 let catalog = null;
 let _promise = null;
 let _legacyMap = null;
+let _populationMinSize = null;   // config population.min_size (para el copy "menos de N")
+
+// Mínimo de población (config) para el texto "la población tiene menos de N entidades".
+// Se carga una vez de forma perezosa; si falla, el componente usa el texto genérico.
+export function populationMinSize() { return _populationMinSize; }
+export function loadPopulationMinSize() {
+  if (_populationMinSize != null) return Promise.resolve(_populationMinSize);
+  return api.settings().then(s => {
+    const v = s?.values?.["population.min_size"];
+    const n = typeof v === "object" ? v?.value : v;
+    if (n != null) _populationMinSize = Number(n);
+    return _populationMinSize;
+  }).catch(() => _populationMinSize);
+}
 
 function _buildLegacyMap(cat) {
   const map = {};

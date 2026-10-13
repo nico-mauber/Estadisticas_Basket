@@ -157,6 +157,12 @@ def backfill_player_ids() -> int:
         total += len(valid)
         if len(valid) < len(rows):
             break
+    if total:
+        try:
+            import cache
+            cache.bump_data_version("identity.backfill_player_ids")
+        except Exception:
+            pass
     return total
 
 

@@ -364,8 +364,10 @@ export function drawLeagueScatter(canvasId, teams, axis) {
   const valid = teams.filter(t => t[xKey] != null && t[yKey] != null);
   if (!valid.length) return;
 
-  const avgX = valid.reduce((s, t) => s + t[xKey], 0) / valid.length;
-  const avgY = valid.reduce((s, t) => s + t[yKey], 0) / valid.length;
+  // T-01: el promedio de la población (summary.avg) tiene prioridad sobre la media
+  // de las filas en pantalla, para que coincida con el "Ø" del pie de la tabla.
+  const avgX = axis.avgX != null ? axis.avgX : valid.reduce((s, t) => s + t[xKey], 0) / valid.length;
+  const avgY = axis.avgY != null ? axis.avgY : valid.reduce((s, t) => s + t[yKey], 0) / valid.length;
 
   const points = valid.map(t => ({
     x: t[xKey],

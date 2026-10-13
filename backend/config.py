@@ -165,7 +165,8 @@ _register(
        label="K de regresión de quinteto en cierre", section="umbrales", consumer="T-02",
        status="activa"),
     _k("population.min_size", type="int", default=3, min=2, max=20,
-       unit="entidades", label="Tamaño mínimo de población", section="umbrales", consumer="T-01"),
+       unit="entidades", label="Tamaño mínimo de población", section="umbrales", consumer="T-01",
+       status="activa"),
 
     # ── Contexto (reservadas) ──
     _k("context.close_margin", type="int", default=10, min=1, max=40,
@@ -457,7 +458,18 @@ def set_values(values: dict) -> dict:
                 ), {"k": k, "v": json.dumps(v), "t": now, "u": user})
     db.session.commit()
     _invalidate_cache()
+    _bump_config_version("set_values")
     return payload()
+
+
+def _bump_config_version(reason: str) -> None:
+    """Sube `config_version` del caché entre peticiones (T-01/T-A2): un cambio de configuración
+    invalida las poblaciones memorizadas. Tolerante a que `cache.py` no esté disponible."""
+    try:
+        import cache
+        cache.bump_config_version(reason)
+    except Exception:
+        log.exception("No se pudo subir config_version del caché")
 
 
 def reset(keys: list[str]) -> dict:
@@ -477,6 +489,7 @@ def reset(keys: list[str]) -> dict:
         db.session.execute(db.text(f"DELETE FROM app_config WHERE key IN ({placeholders})"), params)
         db.session.commit()
     _invalidate_cache()
+    _bump_config_version("reset")
     return payload()
 
 

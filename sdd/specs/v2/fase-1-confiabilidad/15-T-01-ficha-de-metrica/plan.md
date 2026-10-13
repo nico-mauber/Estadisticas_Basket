@@ -3,7 +3,7 @@
 > **ID:** T-01 · **Prioridad:** P0 · **Fase y orden:** Fase 1 · 15
 > **Depende de:** C-02 ([../11-C-02-promedios-de-liga/plan.md](../11-C-02-promedios-de-liga/plan.md)) · C-08 ([../07-C-08-jugadores-duplicados/plan.md](../07-C-08-jugadores-duplicados/plan.md)) · F-11 ([../02-F-11-calidad-datos-competencias/plan.md](../02-F-11-calidad-datos-competencias/plan.md)) · T-05 ([../13-T-05-conjunto-estandar-metricas/plan.md](../13-T-05-conjunto-estandar-metricas/plan.md)) · T-02 ([../14-T-02-confiabilidad-muestra/plan.md](../14-T-02-confiabilidad-muestra/plan.md)) · F-13 ([../12-F-13-configuracion/plan.md](../12-F-13-configuracion/plan.md))
 > **Habilita:** T-06, C-03, A-12, F-05, F-08, F-06, F-17, F-03, F-14, A-09, A-10
-> **Estado:** Borrador (agente) — pendiente de revisión humana (gate Paso 2)
+> **Estado:** ✅ Aprobado
 > **Fuente:** [spec.md](spec.md) · Especificación v2 §3 · T-01 · Arquitectura §2.1, §3.6, §3.8, §3.14, §7.1, §7.1b, §8, §9.2 I-08/I-12
 > **Estimación:** XL · 24–34 h
 

@@ -2,7 +2,7 @@
 
 > **ID:** T-01 · **Prioridad:** P0 · **Fase y orden:** Fase 1 · 15
 > **Depende de:** C-02, C-08, F-11, T-05, T-02, F-13 (ver [plan.md](plan.md) §10) · **Habilita:** T-06, C-03, A-12, F-05, F-08, F-06, F-17, F-03, F-14, A-09, A-10
-> **Estado:** Borrador (agente) — pendiente de revisión humana (gate Paso 3)
+> **Estado:** ✅ Aprobado
 > **Fuente:** [spec.md](spec.md) · [plan.md](plan.md) · Especificación v2 §3 · T-01
 > **Estimación:** XL · 24–34 h
 

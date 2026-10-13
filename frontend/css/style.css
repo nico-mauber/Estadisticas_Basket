@@ -291,9 +291,6 @@ main {
 }
 .stat-label  { font-size: 10px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .3px; }
 .stat-value  { font-size: 20px; font-weight: 700; line-height: 1.2; }
-.stat-context { font-size: 10px; color: var(--muted); margin-top: 2px; }
-.stat-context .avg  { color: var(--blue); }
-.stat-context .best { color: var(--green); }
 
 @media (min-width: 480px) {
   .stat-value { font-size: 22px; }
@@ -985,4 +982,107 @@ thead th[data-key]:hover  { color: var(--text); }
 @media (min-width: 768px) {
   .sample-badge { font-size: 12px; }
 }
+
+/* ── metric-card (T-01) ────────────────────────────────── */
+.metric-card { position: relative; }
+.metric-card .mc-value { font-size: 20px; font-weight: 700; line-height: 1.2; color: var(--text); }
+.mc-line { font-size: 11px; color: var(--muted); line-height: 1.35; word-break: break-word; }
+.mc-rank-line { color: var(--text); font-weight: 600; }
+.mc-basis { color: var(--muted2); font-weight: 400; }
+.mc-no-ref { color: var(--muted2); font-style: italic; }
+.mc-pct-line { margin-top: 2px; }
+
+/* Chip de percentil: el texto "pNN" acompaña siempre al color (accesibilidad). */
+.mc-chip {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text);
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--surface2);
+}
+
+/* Fuera de la población: atenuado. */
+.fuera-poblacion { opacity: .72; }
+.mc-low-sample { margin-top: 2px; }
+.mc-low-chip {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--muted);
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 6px;
+}
+
+/* Celda de ficha en layout "row" (panel estándar / tablas). */
+.metric-cell { display: inline-flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+.metric-cell .mc-val { font-weight: 700; color: var(--text); }
+.metric-cell .mc-rank { font-size: 11px; color: var(--muted); }
+.metric-card[data-metric], .metric-cell[data-metric] { cursor: help; }
+
+.std-reference { font-size: 11px; color: var(--muted); margin: 2px 0 0; }
+
+/* Popover de ranking (escritorio). */
+.mc-popover {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 40;
+  min-width: 220px;
+  max-width: 320px;
+  max-height: 50vh;
+  overflow: auto;
+  margin-top: 4px;
+  background: var(--surface, var(--bg));
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(0,0,0,.4);
+  padding: 8px;
+}
+.mc-popover-head { font-size: 12px; font-weight: 700; color: var(--text); margin-bottom: 6px; }
+.mc-rank-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.mc-rank-table td { padding: 2px 6px; border-bottom: 1px solid var(--border); }
+.mc-rank-table tr.mc-row-hi { font-weight: 700; background: var(--surface2); }
+.mc-rank-sep td { color: var(--muted); font-size: 11px; padding-top: 6px; border-bottom: none; }
+.mc-rank-out td { color: var(--muted); }
+.mc-rank-table tfoot td { color: var(--muted); font-size: 11px; border-bottom: none; padding-top: 6px; }
+
+/* Hoja inferior (táctil). */
+.mc-sheet-backdrop {
+  position: fixed; inset: 0; z-index: 90;
+  background: rgba(0,0,0,.45);
+}
+.mc-sheet {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 91;
+  max-height: 70vh; overflow: auto;
+  background: var(--surface, var(--bg));
+  border-top: 1px solid var(--border);
+  border-radius: var(--radius) var(--radius) 0 0;
+  box-shadow: 0 -8px 24px rgba(0,0,0,.5);
+  padding: 14px 14px calc(14px + env(safe-area-inset-bottom));
+}
+.mc-sheet-close {
+  width: 100%;
+  margin-top: 10px;
+  padding: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+/* Liga: filas fuera de la población atenuadas, pie de líder/promedio. */
+tbody tr.fuera-poblacion { opacity: .6; }
+.league-foot-leader td, .league-foot-avg td {
+  font-size: 11px;
+  color: var(--muted);
+  border-top: 1px solid var(--border);
+  background: var(--surface2);
+}
+.league-foot-leader td:nth-child(2), .league-foot-avg td:nth-child(2) { font-weight: 600; color: var(--text); }
 

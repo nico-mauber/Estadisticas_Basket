@@ -263,6 +263,49 @@ def register_entity(entity_type: str, loader: Callable, *, game_loader: Callable
     _REGISTRY[entity_type] = _Registration(loader=loader, game_loader=game_loader, enumerator=enumerator)
 
 
+def set_enumerator(entity_type: str, fn: Callable) -> None:
+    """Registra (o reemplaza) el enumerador de un tipo de entidad (T-01, PROPUESTA — plan §4.2 D-7).
+
+    `fn(comp_id, ctx, variant) -> list[StatBundle]`: todos los bundles del universo de la
+    competencia para ese tipo (equipos, jugadores, quintetos de `variant` jugadores, estados ON
+    de ON/OFF, cierres…). `bundles.py` lo llama al importarse para los tipos nuevos
+    (lineup/onoff/clutch); team/player ya lo traen de `register_entity`. Crea el registro si el
+    tipo todavía no tiene cargador (el enumerador puede registrarse antes que el loader)."""
+    reg = _REGISTRY.get(entity_type)
+    if reg is None:
+        _REGISTRY[entity_type] = _Registration(loader=_missing_loader, enumerator=fn)
+    else:
+        reg.enumerator = fn
+
+
+def _missing_loader(req):
+    raise MetricsError("Tipo de entidad sin cargador", 400, "parametro_invalido")
+
+
+def enumerate(entity_type: str, comp_id: int | None, ctx, variant=None) -> list:
+    """Todos los `StatBundle` del universo de una competencia para un tipo de entidad (T-01,
+    plan §4.2). Lo usa `population.population` para construir la población de referencia.
+
+    `variant`: para `lineup`, el tamaño de la combinación (3/4/5); `None` en los demás tipos.
+    `comp_id is None` (vista "todas") → `[]` (sin universo). Tipo desconocido o sin enumerador
+    registrado → `MetricsError(400)`."""
+    reg = _REGISTRY.get(entity_type)
+    if reg is None:
+        raise MetricsError("Tipo de entidad desconocido", 400, "parametro_invalido")
+    if reg.enumerator is None:
+        raise MetricsError("Este tipo de entidad no tiene población", 400, "parametro_invalido")
+    if comp_id is None:
+        return []
+    import inspect
+    fn = reg.enumerator
+    # team/player (T-05) registran `fn(comp_id, ctx)`; lineup/onoff/clutch, `fn(comp_id, ctx, variant)`.
+    try:
+        n = len(inspect.signature(fn).parameters)
+    except (ValueError, TypeError):
+        n = 3
+    return fn(comp_id, ctx, variant) if n >= 3 else fn(comp_id, ctx)
+
+
 def _ui_metric_labels() -> dict:
     try:
         import config
@@ -463,7 +506,69 @@ def build_payload(entity_type: str, args) -> dict:
             "on_court_games_estimated": oc.get("games_estimated", 0),
         }
 
+    # ── Ficha de métrica (T-01 plan §4.4) ────────────────────────────────────
+    _attach_fichas(payload, entity_type, b0, ctx, base, prior_fn=sample_mod)
+
     return payload
+
+
+def _ranking_values(bundle, ctx, *, sample_mod) -> dict:
+    """Valor de ranking por clave (plan §4.4): `compute_standard` + `apply_base("partido")` y, donde
+    hay ajuste de T-02 (quinteto/ON-OFF/cierre), `adj.value` (RF-16, RF-18)."""
+    values = compute_standard(bundle)
+    prior = None
+    if bundle.entity_type in sample_mod.REGRESSED_TYPES:
+        prior = sample_mod.league_prior(ctx.competition_id, ctx)
+    values = sample_mod.adjust_values(values, bundle, prior)
+    try:
+        values = apply_base(values, bundle, "partido")
+    except ValueError:
+        pass
+    out = {}
+    for k in METRICS:
+        obj = values.get(k) or {}
+        adj = obj.get("adj")
+        if adj is not None and adj.get("value") is not None:
+            out[k] = adj["value"]
+        else:
+            out[k] = obj.get("value")
+    return out
+
+
+def _attach_fichas(payload, entity_type, b0, ctx, base, *, prior_fn) -> None:
+    """Calcula la población y fusiona la ficha en `payload["metrics"]` (para ON/OFF, en el estado
+    ON); agrega el bloque `payload["population"]`. Nunca degrada el payload: si el cálculo falla,
+    el payload legado se sirve igual (RF-18 de T-05)."""
+    import population
+    try:
+        variant = _population_variant(entity_type, b0)
+        pop = population.population(entity_type, ctx.competition_id, ctx, variant=variant)
+        rank_values = _ranking_values(b0, ctx, sample_mod=prior_fn)
+        population.attach_fichas(payload["metrics"], entity_type, b0.entity_id, pop,
+                                 rank_values=rank_values, base=base)
+        payload["population"] = {
+            "size": pop.size,
+            "criterion": pop.criterion,
+            "context_label": pop.context_label,
+            "reason": pop.reason,
+        }
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception("attach_fichas falló (%s %s)", entity_type, b0.entity_id)
+        payload.setdefault("population", {"size": 0, "criterion": "", "context_label": "",
+                                          "reason": None})
+
+
+def _population_variant(entity_type, bundle):
+    """`variant` de la población: para `lineup`, el nº de jugadores de la combinación; si no, None."""
+    if entity_type == "lineup":
+        pids = (bundle.meta or {}).get("player_ids")
+        if pids:
+            return len(pids)
+        ent = str(bundle.entity_id)
+        if ":" in ent:
+            return len([p for p in ent.split(":", 1)[1].split("-") if p.strip()])
+    return None
 
 
 def _competition_label(ctx) -> str | None:
