@@ -108,7 +108,12 @@ def all_team_bundles(comp_id, ctx):
 # ── Jugador ──────────────────────────────────────────────────────────────────
 
 def player_game_bundles(player_id: int, comp_id: int | None, ctx: "context.Context"):
-    """`[(dict, StatBundle), ...]` por partido JUGADO de la ficha (DNP afuera, plan §4.5)."""
+    """`[(dict, StatBundle | None), ...]` por partido de la ficha (plan §4.5 / T-06).
+
+    Un partido JUGADO trae su `StatBundle`; un DNP (sin minutos) trae `bundle = None` e
+    `info["played"] == False` (el game log de jugador lo muestra como fila con métricas
+    nulas razón `dnp`; `_player_bundle_from_games` los excluye del total). Los consumidores
+    que solo quieren partidos jugados filtran por `bundle is not None`."""
     card = identity.player_card(player_id)
     if card is None:
         return []
@@ -133,9 +138,21 @@ def player_game_bundles(player_id: int, comp_id: int | None, ctx: "context.Conte
 
     out = []
     for row in sel:
-        if not played(row.get("minutes")):
-            continue
         team_row = team_rows.get((row["game_id"], team_code))
+        if not played(row.get("minutes")):
+            # DNP: fila sin bundle (el game log la muestra con razón `dnp`).
+            opp_row_dnp = repository.opponent_row(team_rows, team_row) if team_row else None
+            info_dnp = {
+                "game_id": row["game_id"], "date": row.get("date"),
+                "opponent_code": opp_row_dnp["team_code"] if opp_row_dnp else None,
+                "opponent": opp_row_dnp["team_name"] if opp_row_dnp else "",
+                "home_away": ("L" if team_row.get("is_home") else "V") if team_row else "",
+                "team_pts": team_row.get("pts") if team_row else None,
+                "opp_pts": opp_row_dnp.get("pts") if opp_row_dnp else None,
+                "played": False,
+            }
+            out.append((info_dnp, None))
+            continue
         opp_row = repository.opponent_row(team_rows, team_row) if team_row else None
         if team_row is None or opp_row is None:
             continue
@@ -202,7 +219,7 @@ def player_game_bundles(player_id: int, comp_id: int | None, ctx: "context.Conte
 
 
 def _player_bundle_from_games(player_id, comp_id, ctx):
-    per_game = player_game_bundles(player_id, comp_id, ctx)
+    per_game = [(info, b) for info, b in player_game_bundles(player_id, comp_id, ctx) if b is not None]
     if not per_game:
         return None
     card = identity.player_card(player_id)
@@ -380,7 +397,7 @@ metrics_catalog.register_entity("player", player_loader, game_loader=player_game
                                 enumerator=all_player_bundles)
 metrics_catalog.register_entity("lineup", lineup_loader)
 metrics_catalog.register_entity("onoff", onoff_loader)
-metrics_catalog.register_entity("clutch", clutch_loader)
+metrics_catalog.register_entity("clutch", clutch_loader, game_loader=clutch.clutch_game_bundles)
 
 # Enumeradores de los tipos sin enumerador propio en T-05 (T-01 plan §4.2).
 metrics_catalog.set_enumerator("lineup", all_lineup_bundles)

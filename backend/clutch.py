@@ -236,6 +236,85 @@ def team_clutch(games, team_code, team_name, margin=None, window_secs=None, game
     }
 
 
+def _clutch_box_to_bundle(tb, ob, team_code, team_name, window_secs, overtimes, game_id):
+    """`StatBundle` de UN partido de cierre (mismo armado de conteos que `clutch_bundle`)."""
+    own = {k: tb.get(k, 0) for k in _SUM_KEYS}
+    opp = {k: ob.get(k, 0) for k in _SUM_KEYS}
+    own["pf"] = own.pop("foul", 0)
+    own["fouls_drawn"] = own.pop("foulon", 0)
+    opp["pf"] = opp.pop("foul", 0)
+    opp["fouls_drawn"] = opp.pop("foulon", 0)
+    own["blk_received"] = opp.get("blk", 0)
+    opp["blk_received"] = own.get("blk", 0)
+    own["plus_minus"] = own.get("pts", 0) - opp.get("pts", 0)
+    opp["plus_minus"] = opp.get("pts", 0) - own.get("pts", 0)
+    seconds = window_secs + 300 * overtimes
+    minutes = seconds / 60 if seconds else 0.0
+    return StatBundle(
+        entity_type="clutch", entity_id=team_code, name=team_name,
+        own=own, opp=opp, team=None,
+        games=1, minutes=minutes, team_minutes=None, seconds=seconds,
+        on_court=None, shots=None, possessions_counted=None,
+        null_reasons={},
+        meta={"team_code": team_code, "window_secs": window_secs, "game_ids": [game_id]},
+    )
+
+
+def clutch_game_bundles(req) -> list:
+    """`[(dict_partido, StatBundle), ...]` por cierre calificado de un equipo (T-06, loader de
+    partido del tipo `clutch`). `req` es un `metrics_catalog.EntityRequest`."""
+    import identity
+    import repository
+    team_code = str(req.entity_id).upper()
+    comp_id = req.comp_id
+    margin = (req.params or {}).get("margin")
+    window_secs = (req.params or {}).get("window_secs")
+    margin = config.get("clutch.margin") if margin is None else margin
+    window_secs = config.get("clutch.window_secs") if window_secs is None else window_secs
+
+    games = repository.team_pbp_games(team_code, comp_id)
+    games = _filter_pbp_games(games, req.ctx)
+    games = identity.canonicalize_pbp_games(games, team_code)
+    if not games:
+        return []
+
+    row = None
+    for r in repository.team_game_rows(comp_id).values():
+        if r["team_code"] == team_code:
+            row = r
+    team_name = row["team_name"] if row else team_code
+
+    opp_names = {}
+    for r in repository.team_game_rows(comp_id).values():
+        opp_names[r["team_code"]] = r["team_name"]
+
+    sel = _qualified_games(games, team_code, margin, window_secs)
+    out = []
+    for q in sel["qualified"]:
+        bundle = _clutch_box_to_bundle(q["tb"], q["ob"], team_code, team_name,
+                                       window_secs, q["overtimes"], q["game_id"])
+        info = {
+            "game_id": q["game_id"], "date": q["date"],
+            "opponent_code": q["opp"], "opponent": opp_names.get(q["opp"], q["opp"]),
+            "home_away": q["home_away"],
+            "team_pts": q["tb"]["pts"], "opp_pts": q["ob"]["pts"], "played": True,
+            "entry_margin": q["entry_margin"], "overtimes": q["overtimes"],
+        }
+        out.append((info, bundle))
+    # orden cronológico descendente (como team_clutch.per_game)
+    out.sort(key=lambda t: (t[0].get("date") or "", t[0]["game_id"]), reverse=True)
+    return out
+
+
+def _filter_pbp_games(games, ctx):
+    """Últimos N partidos del contexto sobre `repository.team_pbp_games` (idéntico a
+    `bundles._filter_pbp_games`; se duplica para evitar el import cruzado)."""
+    out = sorted(games, key=lambda g: (g.get("info", {}).get("date") or "", g.get("game_id") or ""))
+    if ctx and getattr(ctx, "last", None):
+        out = out[-ctx.last:]
+    return out
+
+
 def clutch_bundle(games, team_code, team_name, margin=None, window_secs=None) -> "StatBundle | None":
     """`StatBundle` del cierre agregado de un equipo (plan §4.7): reusa `_qualified_games` (misma
     selección que `team_clutch`). `None` si ningún partido del equipo tiene pbp."""

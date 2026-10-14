@@ -15,7 +15,20 @@ frontend/
 │   ├── app.js          # Lógica SPA: vistas, routing, renders
 │   ├── api.js          # Capa de fetching (wrappers sobre fetch())
 │   ├── charts.js       # Chart.js: scatter, radar, helpers
-│   └── chart.umd.min.js  # Chart.js v4 (bundled localmente)
+│   ├── chart.umd.min.js  # Chart.js v4 (bundled localmente)
+│   ├── core/
+│   │   ├── format.js     # Formato numérico, nulos, cmpNullsLast (C-11, T-06)
+│   │   ├── prefs.js      # Preferencias usuario (F-13)
+│   │   ├── catalog.js    # Catálogo de métricas (T-05)
+│   │   └── colors.js     # Colores por percentil (T-01)
+│   └── components/
+│       ├── data-table.js    # Tabla completa con estado (T-06)
+│       ├── export-menu.js   # Menú exportar CSV/XLSX/PNG/PDF (T-06)
+│       ├── exporters.js     # toCSV, toPNG, printNode, helpers (T-06)
+│       ├── standard-panel.js # Panel estándar de métricas (T-05)
+│       ├── metric-card.js   # Card de ficha con ranking (T-01)
+│       ├── sample-badge.js  # Badge de muestra (T-02)
+│       └── settings-form.js # Formulario de configuración (F-13)
 └── icons/
     ├── icon-192.png    # Ícono PWA 192×192 (basketball)
     └── icon-512.png    # Ícono PWA 512×512 (basketball)
@@ -350,11 +363,10 @@ Controles por tipo: `int`/`float` → number, `bool` → checkbox, `enum` → se
 
 ### Vista Liga — tabla general y ejes del mapa (C-09 / C-10)
 
-**Tabla general** (`_standingsCardHTML(teams, compSelHTML, pickComp)`): tabla de posiciones clásica
-arriba del ranking — Equipo, PJ, PG, PP, Pts, PF, PC. Puntos = 2 por ganado + 1 por perdido; ordena por
-puntos y desempata por diferencia (PF − PC). **Puntos, orden y desempate los decide el backend**
-(`table_points`, `standings_pos`; DA-31, configurables desde F-13): el frontend solo ordena por
-`standings_pos`. Se alimenta del mismo `_leagueTeams` que el ranking: **sin fetch adicional**.
+**Tabla general** (T-06: migrada a `mountTable` con `league_standings`): tabla de posiciones clásica
+arriba del ranking. Puntos = 2 por ganado + 1 por perdido; ordena por `_pos`. **Puntos, orden y desempate
+los decide el backend** (`table_points`, `standings_pos`; DA-31, configurables desde F-13). El ranking
+usa `mountTable` con `league_teams`; clic en fila abre el equipo.
 
 - Bajo el título: "Solo partidos importados, no el fixture completo." (la tabla no conoce el fixture).
 - Con más de una competencia y "Todas" elegido, la card no muestra la tabla (sumaría torneos distintos)
@@ -372,3 +384,42 @@ el título con `_axisTitle` — "OER (→ mejor ataque)", "DER (↓ mejor defens
 "DR% (↑ mejor)". Una métrica `neutral` lleva el título sin flecha. Las líneas de promedio de liga se
 rotulan "Prom. <métrica>", sin flecha. Si algún día se invierte un eje, `AXIS_ARROWS` debe invertir
 su flecha. Ver `sdd/specs/v2/fase-1-confiabilidad/04-C-10-mapa-liga-eje-rebote/`.
+
+### Tablas completas y exportación (T-06)
+
+**`components/data-table.js`**: `createDataTable(el, opts)` — tabla completa con estado,
+ordenamiento (via `cmpNullsLast`), paginación (`page_size` desde prefs/config), selector de columnas
+por grupo, celdas coloreadas por percentil (`percentileBg`), badge de muestra baja, filas de totales
+y promedio, columna fija. `mountTable(el, loader, opts)` — wrapper que muestra spinner, fetcha el
+payload via loader, monta `createDataTable` y maneja errores/reintentos/vacío.
+
+**`components/exporters.js`**: `toCSV(data)` — CSV con BOM, cabecera `# clave: valor`, separador `;`,
+decimal coma, nulos vacíos, protección de fórmulas (`'` prefix). `toPNG(node, {width})` — SVG
+`foreignObject` con estilos inline, `devicePixelRatio` máx 2. `printNode(node, {pageSize})` — inyecta
+`#print-root`, clase `body.printing`, escucha `afterprint`. `downloadBlob(blob, name)`, `tableToData(el, meta)`
+serializa un `<table>` DOM a datos exportables. `buildExportNode(data)` — nodo HTML con cabecera
+(título, entidad, competencia, filtros, base, orden, `pageInfo`, "Generado el … por …").
+
+**`components/export-menu.js`**: `exportMenu(el, {getData, getNode, formats})` — botón + menú
+CSV/XLSX/PNG/PDF (hoja inferior en móvil ≤ 768 px). Estados: "Generando archivo…", toast éxito/error,
+aviso sin conexión para XLSX (servidor), fallback a PDF si PNG falla.
+
+**Tablas migradas a `createDataTable`** (6): `league_teams`, `league_standings` (Liga),
+`team_game_log`, `player_game_log`, `clutch_games`, `search_players`. Las funciones legacy eliminadas:
+`_leagueTableHTML`, `_sortedLeague`, `_bindLeagueTableEvents`, `_standingsCardHTML`,
+`_drawClutchTable`, `_renderSearchResults`, `SEARCH_COLS`, `CLUTCH_COLS`.
+
+**Tablas legacy con exportMenu** (7+1): catálogo de partidos, ranking de uso, four factors, detalle
+de tiro, ON/OFF, combinación, comparar (×2). Wrappers `_mountTableExport` (para `<table>`) y
+`_mountPanelExport` (para paneles de stat-boxes/tablas múltiples).
+
+**Bloque "Exportar todo"** en Importar: alcance Equipo/Competencia, selects dinámicos, botón
+"Exportar XLSX" con estados (spinner/error/descarga) via `api.exportBulk`.
+
+**`core/format.js`**: `cmpNullsLast(av, bv, dir)` — comparador con nulos al final en ambos sentidos,
+strings con locale `es`. Migrado desde `app.js` (`_cmpNullsLast`).
+
+**`@media print`**: solo `#print-root` visible, `print-color-adjust: exact`, `thead` repetido en
+saltos de página. Clase `body.printing` oculta nav, header y footer.
+
+**`sw.js`**: CACHE v23, 3 módulos nuevos en STATIC (`data-table.js`, `export-menu.js`, `exporters.js`).

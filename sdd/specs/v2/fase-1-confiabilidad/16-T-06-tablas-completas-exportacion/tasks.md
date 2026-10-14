@@ -2,7 +2,7 @@
 
 > **ID:** T-06 · **Prioridad:** P0 · **Fase y orden:** 1·16
 > **Depende de:** T-05, T-01, T-02, C-11, F-13 (y C-02, C-06, C-09, C-08, F-11 vía ellos) · **Habilita:** F-08, F-06, F-07, F-03, F-10, F-18, F-21
-> **Estado:** Borrador (agente) — pendiente de revisión humana (gate Paso 3)
+> **Estado:** ✅ Aprobado
 > **Fuente:** Especificación v2 §3 · T-06 · Arquitectura §3.11 · [plan.md](plan.md) · [spec.md](spec.md)
 
 ## Orden de ejecución

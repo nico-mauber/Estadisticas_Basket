@@ -24,7 +24,10 @@ import repository
 import metrics_catalog
 import bundles  # noqa: F401 — se importa para que registre los 5 tipos de entidad (T-05)
 import cache
+import tables  # noqa: F401 — se importa para que registre las tablas de T-06 al arrancar
+import export_xlsx
 from metrics_catalog import MetricsError
+from tables import TableError
 from competitions import CompetitionError
 from context import ContextError
 from auth import (
@@ -333,6 +336,111 @@ def metrics_route(entity_type: str):
     except ValueError as e:
         return jsonify({"error": str(e), "code": "parametro_invalido"}), 400
     return jsonify(payload)
+
+
+@app.route("/api/table/<table_id>")
+@login_required
+def table_route(table_id: str):
+    """Tabla completa de un apartado (T-06 plan §3.1/§4.6). Errores con `code`/`details`."""
+    try:
+        return jsonify(tables.build_table(table_id, request.args))
+    except TableError as e:
+        return jsonify(e.body), e.status
+
+
+# Límite de cuerpo de exportación (plan §3.2 / D-10): 10 MB y 50.000 filas por hoja.
+_XLSX_MAX_BYTES = 10 * 1024 * 1024
+_XLSX_MAX_ROWS = 50000
+
+
+@app.route("/api/export/xlsx", methods=["POST"])
+@login_required
+def export_xlsx_route():
+    """Genera un XLSX con lo que el cliente envía ya ordenado (T-06 plan §3.2/§4.6).
+
+    413 si el cuerpo supera 10 MB (`content_length`) o una hoja supera 50.000 filas;
+    400 si el cuerpo es inválido (JSON malformado, fila con celdas de más, `fmt` desconocido,
+    más de 20 hojas, nombre de hoja vacío)."""
+    if request.content_length is not None and request.content_length > _XLSX_MAX_BYTES:
+        return jsonify({"error": "La tabla es demasiado grande para exportar en XLSX; exportá en CSV.",
+                        "code": "parametro_invalido"}), 413
+
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict) or "sheets" not in data:
+        return jsonify({"error": "Cuerpo de exportación inválido", "code": "parametro_invalido"}), 400
+
+    sheets = data.get("sheets")
+    if isinstance(sheets, list):
+        for si, sheet in enumerate(sheets):
+            if isinstance(sheet, dict) and len(sheet.get("rows") or []) > _XLSX_MAX_ROWS:
+                return jsonify({"error": "La tabla es demasiado grande para exportar en XLSX; exportá en CSV.",
+                                "code": "parametro_invalido"}), 413
+
+    meta = data.get("meta") or {}
+    try:
+        content = export_xlsx.workbook_bytes(sheets, meta)
+    except ValueError as e:
+        return jsonify({"error": "Cuerpo de exportación inválido", "code": "parametro_invalido",
+                        "details": {"reason": str(e)}}), 400
+
+    file_name = (meta.get("file_name") or "export") + ".xlsx"
+    from urllib.parse import quote
+    disposition = (f'attachment; filename="{_ascii_fallback(file_name)}"; '
+                   f"filename*=UTF-8''{quote(file_name)}")
+    from flask import Response
+    return Response(content, mimetype=export_xlsx.XLSX_MIME,
+                    headers={"Content-Disposition": disposition})
+
+
+@app.route("/api/export/bulk")
+@login_required
+def export_bulk_route():
+    """Exportación masiva de un equipo o una competencia (T-06 plan §3.3/§4.5/§4.6)."""
+    scope = request.args.get("scope")
+    if scope not in ("team", "competition"):
+        return jsonify({"error": "Alcance inválido: usá team o competition",
+                        "code": "parametro_invalido"}), 400
+
+    raw_comp = request.args.get("competition")
+    if str(raw_comp or "").strip().lower() == "all":
+        return jsonify({"error": "La exportación masiva requiere una competencia concreta",
+                        "code": "parametro_invalido"}), 400
+    try:
+        comp_id = repository.resolve_competition(raw_comp)["id"]
+    except CompetitionError as e:
+        return jsonify({"error": str(e), "code": "competencia_inexistente"}), e.status
+    if comp_id is None:
+        return jsonify({"error": "La exportación masiva requiere una competencia concreta",
+                        "code": "parametro_invalido"}), 400
+
+    scope_id = (request.args.get("team") or "").upper() if scope == "team" else ""
+    if scope == "team" and not scope_id:
+        return jsonify({"error": "Parámetro inválido: falta team", "code": "parametro_invalido",
+                        "details": {"param": "team"}}), 400
+
+    try:
+        content = tables.bulk_workbook(scope, scope_id, comp_id)
+    except TableError as e:
+        return jsonify(e.body), e.status
+
+    import datetime as _dt
+    comp_label = repository.competition_labels().get(comp_id)
+    entity = scope_id if scope == "team" else "competencia"
+    today = _dt.date.today().isoformat()
+    file_name = f"exportacion_{entity}_{tables._slug(comp_label or 'todas')}_{today}.xlsx"
+    from urllib.parse import quote
+    disposition = (f'attachment; filename="{_ascii_fallback(file_name)}"; '
+                   f"filename*=UTF-8''{quote(file_name)}")
+    from flask import Response
+    return Response(content, mimetype=export_xlsx.XLSX_MIME,
+                    headers={"Content-Disposition": disposition})
+
+
+def _ascii_fallback(name: str) -> str:
+    """Nombre de archivo ASCII para el `filename=` clásico (el `filename*` lleva el UTF-8)."""
+    import unicodedata
+    s = unicodedata.normalize("NFKD", name)
+    return "".join(c for c in s if ord(c) < 128).replace('"', "") or "export.xlsx"
 
 
 @app.route("/api/rankings/<entity_type>/<metric_key>")

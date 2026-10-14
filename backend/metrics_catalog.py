@@ -579,9 +579,30 @@ def _competition_label(ctx) -> str | None:
 
 
 def load_game_bundles(req: "EntityRequest") -> list:
-    """`[(dict, StatBundle), ...]` por partido (T-06). `MetricsError(400)` si el tipo de entidad
-    no tiene `game_loader` registrado."""
+    """`[(dict_partido, StatBundle), ...]` por partido de la entidad de `req` (T-06).
+
+    El dict de partido lleva `{game_id, date, opponent_code, opponent, home_away, team_pts,
+    opp_pts, played}` (shape común a team/player/clutch; un jugador DNP llega con
+    `played == False`). Despacha según el tipo de entidad porque los `game_loader`
+    registrados (`bundles.team_game_bundles`, `bundles.player_game_bundles`,
+    `clutch.clutch_game_bundles`) tienen firmas posicionales propias y además son usados
+    internamente por `bundles.py`; aquí se traduce `req` a esos argumentos sin cambiarlos.
+    `MetricsError(400)` si el tipo de entidad no tiene `game_loader` registrado."""
     reg = _REGISTRY.get(req.entity_type)
     if reg is None or reg.game_loader is None:
         raise MetricsError("Sin detalle por partido para este tipo de entidad", 400, "parametro_invalido")
-    return reg.game_loader(req)
+
+    gl = reg.game_loader
+    et = req.entity_type
+    if et == "team":
+        return gl(str(req.entity_id).upper(), req.comp_id, req.ctx)
+    if et == "player":
+        try:
+            pid = int(req.entity_id)
+        except (TypeError, ValueError):
+            return []
+        return gl(pid, req.comp_id, req.ctx)
+    if et == "clutch":
+        return gl(req)
+    # Fallback: cargador que ya acepta `req`.
+    return gl(req)

@@ -25,6 +25,8 @@ Smart-Basket es un monolito full-stack: Flask sirve tanto la API REST como los a
 │  │   lineups.py       (quintetos: lineups + on/off)  │   │
 │  │   config.py        (configuración global, F-13)   │   │
 │  │   prefs.py         (preferencias usuario, F-13)   │   │
+│  │   tables.py        (tablas completas, T-06)       │   │
+│  │   export_xlsx.py   (XLSX SpreadsheetML, T-06)     │   │
 │  │   database.py      (SQLite vía /data/basketball.db)│  │
 │  └──────────────────────────────────────────────────┘   │
 │                                                         │
@@ -134,6 +136,22 @@ Cargadores de `StatBundle` (T-05) para equipo y jugador: `team_game_bundles`, `p
 conteos crudos por partido desde `repository.*` y los registran en `metrics_catalog`. Quinteto/ON-OFF/cierre
 se cargan desde `lineups.lineup_bundle`/`onoff_bundles` y `clutch.clutch_bundle` respectivamente (mismos
 módulos que ya existían, extendidos).
+
+### `tables.py`
+Motor de tablas completas (T-06). `TableDef`, `TableRequest`, `_REGISTRY`, `register_table` con kwargs
+(`row_kind`, `required_params`, `extra_columns`, `default_sort`, `totals_mode`, `avg_mode`, `title_fn`).
+`build_table` (pipeline 16 pasos): validación, contexto, `compute_standard` + `apply_base` por fila,
+armado de columnas (texto + métricas del catálogo), percentiles (entidad vía `population`, partido vía
+`_game_population`), muestra, ajustado, totales, promedio de competencia, `meta` con `generated_by` y
+`default_sort`. `bulk_workbook(scope, scope_id, comp_id)` genera bytes XLSX multi-hoja. 6 builders:
+`league_teams`, `league_standings`, `team_game_log`, `player_game_log`, `search_players`, `clutch_games`.
+Alimenta `GET /api/table/<table_id>` y `GET /api/export/bulk`.
+
+### `export_xlsx.py`
+Generador SpreadsheetML/OOXML (T-06). `workbook_bytes(sheets, meta)` arma un `.xlsx` válido con `zipfile`
+(sin openpyxl): Portada con metadatos, hojas de datos con números nativos (`<c>` sin `t`), texto inline
+(`inlineStr`), estilos de formato (porcentaje, decimal), fila de títulos y primera columna fijas (pane
+freeze), footer. Límites: 1–20 hojas, nombres ≤ 31 chars, ≤ 50 000 filas.
 
 ### `config.py`
 Configuración global (F-13). `CONFIG_SPEC`: catálogo de 81 claves con tipo, default, rango, sección y status (`activa`/`reservada`). 6 claves activas: `clutch.margin`, `clutch.window_secs`, `standings.win_points`, `standings.loss_points`, `standings.tiebreak`, `ui.default_competition_id`. Las reservadas se habilitan al implementar su feature consumidora. `get(key)` lee override o default (overrides cacheados en `flask.g`). `set_values(values)` valida tipo/rango/coherencia y escribe atómicamente; borra la fila si el valor iguala al default (RF-2). `reset(keys)` / `reset_section(slug)` borran overrides. `spec_json()` / `payload()` generan la respuesta para el frontend.

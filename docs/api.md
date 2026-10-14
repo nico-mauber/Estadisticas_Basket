@@ -908,3 +908,88 @@ Response 200: `{"scope": "...", "key": "...", "value": ...}`.
 **Auth:** `login_required`. Body: `{"scope": "panel.collapsed", "key": "tiro"}`.
 
 Response 200: `{"scope": "...", "key": "...", "deleted": true}`.
+
+---
+
+## `GET /api/table/<table_id>` — Tabla completa (T-06)
+
+**Auth:** `login_required`. Query params según la tabla:
+
+| `table_id` | Params requeridos | Params opcionales |
+|---|---|---|
+| `league_teams` | `competition` | `last`, `base` |
+| `league_standings` | `competition` | — |
+| `team_game_log` | `team`, `competition` | `last`, `base` |
+| `player_game_log` | `player_id`, `competition` | `base` |
+| `search_players` | `competition` | — |
+| `clutch_games` | `team`, `competition` | — |
+
+Response 200:
+```json
+{
+  "table_id": "league_teams",
+  "title": "Ranking — Liga Uruguaya 2025/2026",
+  "columns": [
+    {"key": "oer", "label": "OER", "fmt": "decimal3", "group": "eficiencia", "direction": "higher"}
+  ],
+  "rows": [
+    {
+      "entity": "TRO",
+      "label": "TROUVILLE",
+      "values": [1.057, ...],
+      "reasons": [null, ...],
+      "pct": [85, ...],
+      "sample": {"level": "alta", "ranked": true, "possessions": 640}
+    }
+  ],
+  "totals": {"values": [...], "reasons": [...]},
+  "competition_avg": {"values": [...], "reasons": [...]},
+  "row_count": 14,
+  "context": {"competition": 1, "last": null, "base": "partido"},
+  "meta": {
+    "generated_at": "2026-10-14T...",
+    "generated_by": "admin",
+    "app_version": "2.0.0",
+    "default_sort": {"key": "net_rating", "dir": "desc"},
+    "filters": [{"key": "competition", "label": "Liga Uruguaya 2025/2026"}]
+  }
+}
+```
+
+Errores: 404 `no_encontrado` (tabla inexistente), 400 `parametro_invalido` (param faltante o `base` inválida).
+
+---
+
+## `POST /api/export/xlsx` — Exportar hojas XLSX (T-06)
+
+**Auth:** `login_required`. Body JSON:
+```json
+{
+  "sheets": [
+    {
+      "title": "Ranking Liga",
+      "columns": [{"key": "oer", "label": "OER"}],
+      "rows": [[1.057, ...]]
+    }
+  ],
+  "meta": {"title": "Ranking", "generated_at": "...", "generated_by": "admin"}
+}
+```
+
+Response 200: `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet` con `Content-Disposition: attachment; filename="..."`.
+
+Errores: 400 (body inválido), 413 (> 10 MB o > 50 000 filas en una hoja).
+
+---
+
+## `GET /api/export/bulk` — Exportación masiva XLSX (T-06)
+
+**Auth:** `login_required`. Query params:
+
+| Param | Requerido | Descripción |
+|---|---|---|
+| `scope` | sí | `"team"` o `"competition"` |
+| `team` | si scope=team | Código del equipo |
+| `competition` | sí | ID de competencia (no acepta `"all"`) |
+
+Response 200: XLSX con Portada + una hoja por tabla aplicable al scope. Errores: 400 (scope/competition inválido), 404 (sin datos).

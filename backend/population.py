@@ -142,16 +142,32 @@ def _legacy_population(entity_type: str, comp_id: int) -> Population:
 
 
 def league_reference(entity_type: str, comp_id: int | None, ctx: Context, *,
-                     variant=None, apply_thresholds: bool = True) -> dict:
+                     variant=None, apply_thresholds: bool = True, base: str = "partido") -> dict:
     """`{métrica: promedio}` de la población (Arq. §3.6): por clave, la media de los valores no
-    nulos de los miembros `in_population`. Sin universo → todos `None`."""
+    nulos de los miembros `in_population`. Sin universo → todos `None`.
+
+    Los valores de cada miembro están en base `partido` (`population()` aplica `apply_base`
+    partido). Para `base == "total"` (T-06, R-5) las métricas `count`/`volume` se re-escalan a
+    total por miembro multiplicando por sus partidos antes de promediar; las tasas (`fixed`) no
+    dependen de la base. Fase 1 solo soporta `total`/`partido`."""
     if comp_id is None:
         return {k: None for k in stats_engine.metrics_catalog_keys()}
     pop = population(entity_type, comp_id, ctx, apply_thresholds=apply_thresholds, variant=variant)
     members = [m for m in pop.members if m.in_population]
+
+    count_keys = set()
+    if base == "total":
+        import metrics_catalog
+        count_keys = {k for k, d in metrics_catalog.METRICS.items()
+                      if d.base_mode in ("count", "volume")}
+
     out = {}
     for k in stats_engine.metrics_catalog_keys():
-        vals = [m.values.get(k) for m in members if m.values.get(k) is not None]
+        if base == "total" and k in count_keys:
+            vals = [m.values.get(k) * (m.games or 0) for m in members
+                    if m.values.get(k) is not None]
+        else:
+            vals = [m.values.get(k) for m in members if m.values.get(k) is not None]
         out[k] = round(sum(vals) / len(vals), 4) if vals else None
     return out
 

@@ -28,6 +28,34 @@ async function apiFetch(path, opts = {}) {
   return res.json();
 }
 
+// Nombre del archivo desde Content-Disposition: soporta `filename*=UTF-8''…` (prioritario) y `filename="…"`.
+function _fileNameFromDisposition(cd, fallback = "descarga") {
+  if (!cd) return fallback;
+  const star = /filename\*\s*=\s*(?:UTF-8|utf-8)''([^;]+)/i.exec(cd);
+  if (star) { try { return decodeURIComponent(star[1].trim()); } catch { /* usa el crudo */ return star[1].trim(); } }
+  const plain = /filename\s*=\s*"?([^";]+)"?/i.exec(cd);
+  return plain ? plain[1].trim() : fallback;
+}
+
+// Igual manejo de 401/error JSON que apiFetch, pero devuelve {blob, fileName} (T-06).
+async function apiFetchBlob(path, opts = {}) {
+  const res = await fetch(BASE + path, { credentials: "same-origin", ...opts });
+  if (res.status === 401 && _onUnauthorized && path !== "/api/login") {
+    _onUnauthorized();
+  }
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }));
+    const e = new Error(err.error || res.statusText);
+    e.code = err.code || null;
+    e.details = err.details || null;
+    e.status = res.status;
+    throw e;
+  }
+  const blob = await res.blob();
+  const fileName = _fileNameFromDisposition(res.headers.get("Content-Disposition"));
+  return { blob, fileName };
+}
+
 export const api = {
   // Auth
   login:         (user, password) => apiFetch("/api/login",  { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ user, password }) }),
@@ -74,4 +102,8 @@ export const api = {
   metrics:           (type, params = {}) => apiFetch(`/api/metrics/${encodeURIComponent(type)}${qs(params)}`),
   // Confiabilidad de muestra (T-02)
   calibrate:         (entity, competition) => send("/api/settings/calibrate", "POST", { entity, competition }),
+  // Tablas completas y exportación (T-06)
+  table:             (tableId, params = {}) => apiFetch(`/api/table/${encodeURIComponent(tableId)}${qs(params)}`),
+  exportXlsx:        body        => apiFetchBlob("/api/export/xlsx", { method: "POST", headers: JSON_HEADERS, body: JSON.stringify(body) }),
+  exportBulk:        (params = {}) => apiFetchBlob(`/api/export/bulk${qs(params)}`),
 };

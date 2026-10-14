@@ -1086,3 +1086,106 @@ tbody tr.fuera-poblacion { opacity: .6; }
 }
 .league-foot-leader td:nth-child(2), .league-foot-avg td:nth-child(2) { font-weight: 600; color: var(--text); }
 
+/* ── data-table (T-06) ── */
+.dt-toolbar {
+  display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap;
+  margin-bottom: var(--sp-3);
+}
+.dt-color-toggle { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--muted); cursor: pointer; }
+.dt-color-toggle input { cursor: pointer; }
+.dt-count { font-size: 12px; margin-left: auto; }
+.dt-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.dt-table { width: 100%; }
+.dt-table th { white-space: nowrap; cursor: pointer; }
+.dt-table th:hover { color: var(--accent); }
+.dt-sticky {
+  position: sticky; left: 0; z-index: 2;
+  background: var(--surface);
+}
+.dt-table thead th.dt-sticky { z-index: 3; background: var(--surface); }
+.dt-table tbody td.dt-sticky { background: var(--surface); }
+.dt-row-low td { color: var(--muted); }
+.dt-row-low td.dt-sticky { color: var(--muted); }
+.dt-adj { font-size: 9px; color: var(--muted); line-height: 1.2; margin-top: 1px; }
+.dt-sort-asc, .dt-sort-desc { color: var(--accent); }
+.dt-foot td {
+  font-size: 11px; color: var(--muted);
+  border-top: 1px solid var(--border); background: var(--surface2);
+  font-weight: 600;
+}
+.dt-pager {
+  display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap;
+  margin-top: var(--sp-3); justify-content: center;
+}
+.dt-error { text-align: center; }
+
+/* Selector de columnas — popover en escritorio */
+.dt-colpanel {
+  position: absolute; z-index: 50;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: var(--sp-3);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+  max-height: 60vh; overflow-y: auto; min-width: 220px; margin-top: 4px;
+}
+.dt-colpanel-head { display: flex; align-items: center; gap: var(--sp-2); margin-bottom: var(--sp-2); }
+.dt-colpanel-head strong { margin-right: auto; }
+.dt-colgroup { margin-bottom: var(--sp-3); }
+.dt-colgroup-title { font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--muted); letter-spacing: .04em; margin-bottom: 4px; }
+.dt-colcheck { display: block; font-size: 13px; padding: 3px 0; cursor: pointer; }
+.dt-colcheck input { margin-right: 6px; }
+
+/* Hoja inferior (<768px): columnas y menú de exportación */
+.dt-sheet {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 60;
+  max-height: 70vh; overflow-y: auto;
+  background: var(--surface); border-top: 1px solid var(--border);
+  border-radius: 12px 12px 0 0; padding: var(--sp-4);
+  box-shadow: 0 -8px 24px rgba(0,0,0,0.5);
+  padding-bottom: calc(var(--sp-4) + env(safe-area-inset-bottom, 0px));
+}
+
+/* ── export-menu (T-06) ── */
+.xm-wrap { position: relative; display: inline-block; }
+.xm-menu {
+  position: absolute; z-index: 50; top: 100%; left: 0; margin-top: 4px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+  min-width: 120px; display: flex; flex-direction: column; padding: 4px;
+}
+.xm-item {
+  background: none; border: none; color: var(--text); text-align: left;
+  padding: 8px 12px; font-size: 13px; cursor: pointer; border-radius: 4px;
+}
+.xm-item:hover { background: var(--surface2); color: var(--accent); }
+@media (max-width: 767px) {
+  .xm-menu {
+    position: fixed; left: 0; right: 0; bottom: 0; top: auto; margin: 0;
+    z-index: 60; border-radius: 12px 12px 0 0; padding: var(--sp-4);
+    padding-bottom: calc(var(--sp-4) + env(safe-area-inset-bottom, 0px));
+  }
+  .xm-item { padding: 14px 12px; font-size: 15px; }
+}
+
+/* Bloque "Exportar todo" (T-D11) */
+.bulk-export { display: flex; flex-wrap: wrap; gap: var(--sp-3); align-items: flex-end; margin-top: var(--sp-2); }
+.bulk-export .bulk-field { display: flex; flex-direction: column; gap: 4px; }
+.bulk-export label { font-size: 11px; color: var(--muted); font-weight: 600; }
+
+/* ── @media print (T-06) ── */
+#print-root { display: none; }
+@media print {
+  @page { size: A4; margin: 12mm; }
+  body.printing > *:not(#print-root) { display: none !important; }
+  body.printing #print-root { display: block !important; }
+  #print-root {
+    display: block; color: #000; background: #fff;
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
+  }
+  #print-root table { width: 100%; border-collapse: collapse; }
+  #print-root thead { display: table-header-group; }
+  #print-root tr { break-inside: avoid; }
+  #print-root th, #print-root td {
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
+  }
+}
+

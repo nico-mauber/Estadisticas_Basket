@@ -1,12 +1,15 @@
 import { api, setUnauthorizedHandler } from "./api.js";
 import { drawRadar, drawEvolution, drawPlayerEvolution, drawLeagueScatter, drawCompareRadar, resetZoom } from "./charts.js";
-import { PCT, PCT0, DEC1, DEC2, fmtNumber, isNull, nullDisplay, fmtOrNull } from "./core/format.js";
+import { PCT, PCT0, DEC1, DEC2, fmtNumber, isNull, nullDisplay, fmtOrNull, cmpNullsLast } from "./core/format.js";
 import { renderDuplicateItems } from "./components/identity-merge.js";
 import { renderSettingsForm } from "./components/settings-form.js";
 import { renderStandardPanel } from "./components/standard-panel.js";
 import { metricCard, bindMetricCards } from "./components/metric-card.js";
 import { loadCatalog, stdKeyFor, loadPopulationMinSize } from "./core/catalog.js";
 import { percentileBg } from "./core/colors.js";
+import { createDataTable, mountTable } from "./components/data-table.js";
+import { exportMenu } from "./components/export-menu.js";
+import { tableToData, downloadBlob } from "./components/exporters.js";
 
 // ── Toast ──────────────────────────────────────────────────────────────────
 function toast(msg, type = "ok") {
@@ -20,19 +23,7 @@ function toast(msg, type = "ok") {
 // ── Stat helpers ───────────────────────────────────────────────────────────
 // PCT/DEC1/DEC2 y la regla de nulos viven en core/format.js (C-11).
 
-// Comparador único de tablas ordenables: el nulo se APARTA de la comparación en
-// vez de recibir un valor extremo, por eso su posición no depende de `dir` — queda
-// al final tanto ascendente como descendente (Feature 12 RF-1/RF-2).
-function _cmpNullsLast(av, bv, dir) {
-  const isNull = v => v == null || (typeof v === "number" && isNaN(v));
-  const an = isNull(av), bn = isNull(bv);
-  if (an && bn) return 0;
-  if (an) return 1;
-  if (bn) return -1;
-  if (typeof av === "string" || typeof bv === "string")
-    return dir * String(av).localeCompare(String(bv));
-  return dir * (av - bv);
-}
+// Comparador null-safe `cmpNullsLast` vive ahora en core/format.js (T-06 T-D1).
 
 // `reason`: código de `null_reasons` del backend; si `value` es nulo se muestra "—" con
 // esa razón en el title, sea cual sea `display` (C-11 RF-4). El bloque "Ø liga" se retiró
@@ -110,6 +101,75 @@ function esc(v) {
   return String(v ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
+// ── Exportación de tablas no migradas (T-D10) ────────────────────────────────
+// Lee el <table> ya renderizado con tableToData y monta el menú de exportación.
+// `meta` mínima: título, entidad, competencia del filtro activo, fecha.
+function _baseMeta({ title, section, entity, competitionLabel, entitySlug }) {
+  const slug = s => String(s || "").normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+  const today = new Date().toISOString().slice(0, 10);
+  const compLabel = competitionLabel || "todas";
+  const ent = entitySlug || (entity ? slug(entity) : "liga");
+  return {
+    title,
+    section: section || slug(title),
+    entity: { type: "team", id: "", name: entity || "" },
+    competition: { id: null, label: competitionLabel || "", season: "" },
+    filters: [],
+    base: null,
+    sort: null,
+    columns_visible: null,
+    generated_at: new Date().toISOString(),
+    generated_by: _authUser || "_open",
+    app_version: "smart-basket-v23",
+    file_name: `${slug(section || title)}_${ent}_${slug(compLabel)}_${today}`,
+  };
+}
+
+// Exportación de un panel estándar (ON/OFF compare, combinación grid): no hay un único
+// <table>. Serializa la primera tabla con encabezado si existe, o las parejas de stat-box.
+function _mountPanelExport(hostEl, panelFn, meta) {
+  if (!hostEl) return;
+  exportMenu(hostEl, {
+    getData: () => {
+      const panel = typeof panelFn === "function" ? panelFn() : panelFn;
+      if (panel) {
+        const tables = [...panel.querySelectorAll("table")];
+        if (tables.length) {
+          // ON/OFF: una tabla por grupo con el mismo encabezado; se unifican las filas.
+          const first = tableToData(tables[0], meta);
+          const rows = [];
+          for (const t of tables) rows.push(...tableToData(t, meta).rows);
+          return { meta, columns: first.columns, rows, footer: [], pageInfo: `${rows.length} filas` };
+        }
+        const boxes = [...panel.querySelectorAll(".stat-box")];
+        if (boxes.length) {
+          const columns = [{ key: "metrica", label: "Métrica", fmt: "text" }, { key: "valor", label: "Valor", fmt: "text" }];
+          const rows = boxes.map(b => [b.querySelector(".stat-label")?.textContent.trim() || "", b.querySelector(".stat-value, .mc-value")?.textContent.trim() || ""]);
+          return { meta, columns, rows, footer: [], pageInfo: `${rows.length} filas` };
+        }
+      }
+      return { meta, columns: [], rows: [], footer: [], pageInfo: "Sin filas" };
+    },
+    getNode: () => (typeof panelFn === "function" ? panelFn() : panelFn) || hostEl,
+  });
+}
+
+// Monta un botón "Exportar" en `hostEl` que serializa el <table> dentro de `tableElOrFn`.
+function _mountTableExport(hostEl, tableElOrFn, meta) {
+  if (!hostEl) return;
+  exportMenu(hostEl, {
+    getData: () => {
+      const tableEl = typeof tableElOrFn === "function" ? tableElOrFn() : tableElOrFn;
+      const d = tableEl ? tableToData(tableEl, meta) : { meta, columns: [], rows: [], footer: [] };
+      return { ...d, meta, pageInfo: `${d.rows.length} fila${d.rows.length === 1 ? "" : "s"}` };
+    },
+    getNode: () => {
+      const tableEl = typeof tableElOrFn === "function" ? tableElOrFn() : tableElOrFn;
+      return tableEl ? (tableEl.closest(".table-wrap") || tableEl) : hostEl;
+    },
+  });
+}
+
 // ── Four Factors card ──────────────────────────────────────────────────────
 function _fourFactorsCard(av, teamName) {
   const factors = [
@@ -134,9 +194,12 @@ function _fourFactorsCard(av, teamName) {
 
   return `
     <div class="card">
-      <div class="card-title">Four Factors <span style="color:var(--muted2);font-weight:400;text-transform:none;letter-spacing:0">— ${teamName} vs Rival</span></div>
+      <div class="map-header">
+        <div class="card-title" style="margin:0">Four Factors <span style="color:var(--muted2);font-weight:400;text-transform:none;letter-spacing:0">— ${teamName} vs Rival</span></div>
+        <span class="xm-host" data-xm="four-factors"></span>
+      </div>
       <div class="table-wrap">
-        <table style="font-size:13px">
+        <table id="four-factors-table" style="font-size:13px">
           <thead><tr>
             <th>Factor</th>
             <th style="text-align:right;color:var(--accent)">${teamName}</th>
@@ -294,10 +357,61 @@ function _gamesTable(games, page, emptyMsg = "Sin partidos aún.") {
     ${pagination}`;
 }
 
+// ── Exportación masiva (T-D11) ────────────────────────────────────────────────
+async function _wireBulkExport(el, comps) {
+  const scopeSel = el.querySelector("#bulk-scope");
+  const compSel  = el.querySelector("#bulk-comp");
+  const teamSel  = el.querySelector("#bulk-team");
+  const teamField = el.querySelector("#bulk-team-field");
+  const btn = el.querySelector("#btn-bulk-export");
+  const status = el.querySelector("#bulk-status");
+  if (!scopeSel || !compSel || !btn) return;
+
+  // Competencias concretas (sin "Todas": la masiva requiere una competencia, plan §3.3).
+  const realComps = (comps || []).filter(c => c.status !== "borrador");
+  compSel.innerHTML = realComps.map(c => `<option value="${c.id}">${esc(c.label || c.name)}</option>`).join("");
+  if (!realComps.length) { btn.disabled = true; status.textContent = "No hay competencias para exportar."; return; }
+
+  const teams = await api.teams().catch(() => []);
+  teamSel.innerHTML = teams.map(t => `<option value="${esc(t.code)}">${esc(t.name || t.code)} (${t.code})</option>`).join("");
+
+  const syncScope = () => { teamField.style.display = scopeSel.value === "team" ? "" : "none"; };
+  scopeSel.addEventListener("change", syncScope);
+  syncScope();
+
+  btn.addEventListener("click", async () => {
+    const scope = scopeSel.value;
+    const competition = compSel.value;
+    const team = scope === "team" ? teamSel.value : null;
+    if (!competition) { status.textContent = "Elegí una competencia."; return; }
+    if (scope === "team" && !team) { status.textContent = "Elegí un equipo."; return; }
+    if (navigator.onLine === false) { status.textContent = "Sin conexión: la exportación masiva requiere conexión."; return; }
+
+    btn.disabled = true;
+    const prev = btn.textContent;
+    btn.innerHTML = '<span class="spinner"></span>Preparando…';
+    status.textContent = "Preparando exportación… puede tardar hasta un minuto.";
+    try {
+      const { blob, fileName } = await api.exportBulk({ scope, team, competition });
+      downloadBlob(blob, fileName || "exportacion.xlsx");
+      status.textContent = `Archivo generado: ${fileName || "exportacion.xlsx"}`;
+      toast(`Archivo generado: ${fileName || "exportacion.xlsx"}`);
+    } catch (e) {
+      if (navigator.onLine === false || e instanceof TypeError) status.textContent = "Sin conexión: la exportación masiva requiere conexión.";
+      else if (e.status === 404) status.textContent = "No hay datos para exportar en esta selección.";
+      else status.textContent = e.message || "No se pudo exportar.";
+      toast(status.textContent, "err");
+    } finally {
+      btn.disabled = false;
+      btn.textContent = prev;
+    }
+  });
+}
+
 // Tras un cambio de datos (importar, borrar, reprocesar, editar competencias) los
 // selectores y el buscador cacheado quedan viejos.
 function _afterDataChange() {
-  _searchData = null;
+  _searchPayload = null;
   refreshTeamSelector();
   refreshCompareSelectors();
 }
@@ -430,6 +544,7 @@ async function _renderImportTab(el) {
         <div class="games-header-actions">
           ${comps.length > 1 ? `<select id="catalog-comp" class="map-select">${_compOptions(
             comps.map(c => ({ id: c.id, label: _compLabel(c) })), _catalogComp)}</select>` : ""}
+          ${games && games.length ? '<span class="xm-host" data-xm="games"></span>' : ""}
           ${_isAdmin ? `<button class="btn btn-ghost btn-sm" id="btn-select-mode">${selectMode ? "Cancelar" : "Seleccionar partidos"}</button>` : ""}
         </div>
       </div>
@@ -442,9 +557,42 @@ async function _renderImportTab(el) {
       <div id="games-table">${games
         ? _gamesTable(games, importPage, _catalogComp ? "No hay partidos en esta competencia." : "Sin partidos aún.")
         : '<p class="empty below-avg">No se pudo cargar el catálogo de partidos.</p>'}</div>
+    </div>
+    <div class="card" id="bulk-export-card">
+      <div class="card-title">Exportar todo</div>
+      <p class="td-muted">Descargá todas las tablas de un equipo o de una competencia en un único XLSX (una hoja por apartado).</p>
+      <div class="bulk-export">
+        <div class="bulk-field">
+          <label for="bulk-scope">Alcance</label>
+          <select id="bulk-scope" class="map-select">
+            <option value="team">Equipo</option>
+            <option value="competition">Competencia</option>
+          </select>
+        </div>
+        <div class="bulk-field">
+          <label for="bulk-comp">Competencia</label>
+          <select id="bulk-comp" class="map-select"></select>
+        </div>
+        <div class="bulk-field" id="bulk-team-field">
+          <label for="bulk-team">Equipo</label>
+          <select id="bulk-team" class="map-select"></select>
+        </div>
+        <button class="btn" id="btn-bulk-export">Exportar XLSX</button>
+      </div>
+      <p class="td-muted" id="bulk-status" style="margin-top:8px"></p>
     </div>`;
 
   const refresh = () => renderImport();
+
+  _wireBulkExport(el, comps);
+
+  // Exportación del catálogo de partidos (T-D10).
+  const gamesHost = el.querySelector('[data-xm="games"]');
+  if (gamesHost) {
+    const compLabel = (comps.find(c => String(c.id) === String(_catalogComp)) || {}).label || "";
+    _mountTableExport(gamesHost, () => el.querySelector("#games-table table"),
+      _baseMeta({ title: "Catálogo de partidos", section: "partidos", entity: "", entitySlug: "liga", competitionLabel: compLabel }));
+  }
 
   document.getElementById("btn-import").addEventListener("click", async () => {
     const url = document.getElementById("url-input").value.trim();
@@ -725,14 +873,9 @@ async function _renderCompetitionsTab(el) {
 
 // ── League section — sortable table ───────────────────────────────────────
 let _leagueTeams    = [];
-let _leagueSummary  = null;  // {avg, leaders, population} de include=summary (T-01)
-let _leagueSortKey  = "oer";
-let _leagueSortDir  = -1; // -1 desc, 1 asc
+let _leagueSummary  = null;  // {avg, leaders, population} de include=summary (T-01), alimenta el mapa
 let _leagueMap      = "ef";
 let _leagueComp     = null; // null = la competencia por defecto (se resuelve al cargar); "all" = todas
-
-// Columnas con ficha (rank/pct) en la respuesta de /api/league.
-const LEAGUE_RANKABLE = new Set(["oer", "der", "net_rating", "efg_pct", "ts_pct", "or_pct", "dr_pct", "to_pct", "pace", "pts", "stl"]);
 
 // Scatter map presets — each defines the X/Y axes for el mapa de liga.
 // Cada eje declara la dirección de su métrica (`higher` | `lower` | `neutral`) y el título se arma
@@ -778,171 +921,6 @@ function _mapAxis(a) {
   };
 }
 
-const LEAGUE_COLS = [
-  { key: null,           label: "#" },
-  { key: "team_name",    label: "Equipo" },
-  { key: "games",        label: "PJ",    title: "Partidos" },
-  { key: "oer",          label: "OER",   title: "Eficiencia Ofensiva" },
-  { key: "der",          label: "DER",   title: "Eficiencia Defensiva" },
-  { key: "net_rating",   label: "NRtg",  title: "Rating Neto" },
-  { key: "efg_pct",      label: "eFG%",  title: "Effective FG%" },
-  { key: "ts_pct",       label: "TS%",   title: "True Shooting%" },
-  { key: "or_pct",       label: "OR%",   title: "Rebote Ofensivo%" },
-  { key: "dr_pct",       label: "DR%",   title: "Rebote Defensivo%" },
-  { key: "to_pct",       label: "TO%",   title: "Turnover%" },
-  { key: "pace",         label: "Pace",  title: "Pace" },
-  { key: "pts",          label: "Pts",   title: "Puntos por partido" },
-];
-
-// C-09 — tabla de posiciones clásica. Se alimenta del mismo `_leagueTeams` que el ranking:
-// sin fetch adicional. Puntos, orden y desempate los decide el backend (`table_points`,
-// `standings_pos`; DA-31). Con varias competencias y "Todas" elegido no se muestra: sumaría
-// partidos de torneos distintos. `compSelHTML` = selector de competencia de la vista.
-function _standingsCardHTML(teams, compSelHTML, pickComp) {
-  const header = `
-    <div class="map-header">
-      <div class="card-title" style="margin:0">Tabla general</div>
-      ${compSelHTML}
-    </div>`;
-  if (pickComp) {
-    return `<div class="card">${header}<p class="empty">Elegí una competencia para ver la tabla general.</p></div>`;
-  }
-  const rows = [...teams].sort((a, b) => a.standings_pos - b.standings_pos);
-  const th = ["Equipo", "PJ", "PG", "PP", "Pts", "PF", "PC"]
-    .map((h, i) => `<th${i ? ' style="text-align:right"' : ""}>${h}</th>`).join("");
-  const body = rows.map(t => `
-    <tr data-code="${t.team_code}">
-      <td>${t.team_name}</td>
-      <td style="text-align:right">${t.games ?? "—"}</td>
-      <td style="text-align:right">${t.wins ?? "—"}</td>
-      <td style="text-align:right">${t.losses ?? "—"}</td>
-      <td style="text-align:right;font-weight:700">${t.table_points ?? "—"}</td>
-      <td style="text-align:right">${t.pts_for ?? "—"}</td>
-      <td style="text-align:right">${t.pts_against ?? "—"}</td>
-    </tr>`).join("");
-  return `
-    <div class="card">
-      ${header}
-      <p class="td-muted">Solo partidos importados, no el fixture completo.</p>
-      <div class="table-wrap">
-        <table id="standings-table" class="search-table">
-          <thead><tr>${th}</tr></thead>
-          <tbody>${body}</tbody>
-        </table>
-      </div>
-    </div>`;
-}
-
-function _sortedLeague() {
-  return [..._leagueTeams].sort((a, b) =>
-    _cmpNullsLast(a[_leagueSortKey], b[_leagueSortKey], _leagueSortDir));
-}
-
-// Formato por columna de la tabla de Liga (coincide con LEAGUE_COLS y la ficha).
-const _LEAGUE_FMT = {
-  oer: DEC2, der: DEC2, net_rating: DEC2, pace: DEC2, pts: DEC2, stl: DEC2,
-  efg_pct: PCT, ts_pct: PCT, or_pct: PCT, dr_pct: PCT, to_pct: PCT,
-};
-
-function _leagueCell(t, key) {
-  const fmt = _LEAGUE_FMT[key] || DEC2;
-  const disp = fmt(t[key]);
-  const pct = t.pct?.[key];
-  const bg = pct != null ? percentileBg(pct) : null;
-  const style = bg ? ` style="background:${bg}"` : "";
-  const title = pct != null ? ` title="p${pct}"` : "";
-  return `<td${style}${title}>${disp}</td>`;
-}
-
-function _leagueTableHTML(teams) {
-  const sorted = teams;
-  const sortRankable = LEAGUE_RANKABLE.has(_leagueSortKey);
-  const headers = LEAGUE_COLS.map(c => {
-    const cls = c.key === _leagueSortKey
-      ? (_leagueSortDir === -1 ? "sort-desc" : "sort-asc")
-      : "";
-    const attrs = c.key ? `data-key="${c.key}"` : "";
-    return `<th class="${cls}" ${attrs} title="${c.title || ""}">${c.label}</th>`;
-  }).join("");
-
-  const rows = sorted.map((t, i) => {
-    const fuera = t.in_population === false;
-    // # = puesto de la métrica ordenada si es rankeable; si no, el índice de la fila.
-    let numCell = `${i + 1}`;
-    if (sortRankable && t.rank?.[_leagueSortKey]) {
-      const r = t.rank[_leagueSortKey];
-      numCell = `${r.tied ? "=" : ""}${r.rank}`;
-    }
-    const chip = fuera ? ` <span class="mc-low-chip">Muestra baja</span>` : "";
-    return `
-    <tr style="cursor:pointer" class="${fuera ? "fuera-poblacion" : ""}" data-code="${t.team_code}">
-      <td class="td-muted">${numCell}</td>
-      <td class="td-team">${t.team_name}${chip}</td>
-      <td>${t.games}</td>
-      ${_leagueCell(t, "oer")}
-      ${_leagueCell(t, "der")}
-      ${_leagueCell(t, "net_rating")}
-      ${_leagueCell(t, "efg_pct")}
-      ${_leagueCell(t, "ts_pct")}
-      ${_leagueCell(t, "or_pct")}
-      ${_leagueCell(t, "dr_pct")}
-      ${_leagueCell(t, "to_pct")}
-      ${_leagueCell(t, "pace")}
-      ${_leagueCell(t, "pts")}
-    </tr>`;
-  }).join("");
-
-  return `<thead><tr>${headers}</tr></thead><tbody>${rows}</tbody>${_leagueFootHTML()}`;
-}
-
-// Pie de tabla: "Líder" (nombre y valor de leaders[clave]) y "Ø competencia" (avg[clave]).
-function _leagueFootHTML() {
-  const s = _leagueSummary;
-  if (!s || (!s.leaders && !s.avg)) return "";
-  const cols = ["oer", "der", "net_rating", "efg_pct", "ts_pct", "or_pct", "dr_pct", "to_pct", "pace", "pts"];
-  const leaderCells = cols.map(k => {
-    const l = s.leaders?.[k];
-    const fmt = _LEAGUE_FMT[k] || DEC2;
-    return `<td title="${l ? esc(l.name) : ""}">${l ? fmt(l.value) : "—"}</td>`;
-  }).join("");
-  const avgCells = cols.map(k => {
-    const fmt = _LEAGUE_FMT[k] || DEC2;
-    return `<td>${s.avg?.[k] != null ? fmt(s.avg[k]) : "—"}</td>`;
-  }).join("");
-  return `
-    <tfoot>
-      <tr class="league-foot-leader"><td></td><td>Líder</td><td></td>${leaderCells}</tr>
-      <tr class="league-foot-avg"><td></td><td>Ø competencia</td><td></td>${avgCells}</tr>
-    </tfoot>`;
-}
-
-function _bindLeagueTableEvents(tableEl) {
-  tableEl.querySelectorAll("th[data-key]").forEach(th => {
-    th.addEventListener("click", () => {
-      const key = th.dataset.key;
-      if (_leagueSortKey === key) {
-        _leagueSortDir *= -1;
-      } else {
-        _leagueSortKey = key;
-        _leagueSortDir = key === "team_name" ? 1 : -1;
-      }
-      tableEl.innerHTML = _leagueTableHTML(_sortedLeague());
-      _bindLeagueTableEvents(tableEl);
-      _bindLeagueRowClicks(tableEl);
-    });
-  });
-}
-
-function _bindLeagueRowClicks(tableEl) {
-  tableEl.querySelectorAll("tbody tr").forEach(tr => {
-    tr.addEventListener("click", () => {
-      document.getElementById("team-select").value = tr.dataset.code;
-      setSection("team");
-      renderTeam(tr.dataset.code);
-    });
-  });
-}
-
 function _drawLeagueMap() {
   const map = LEAGUE_MAPS.find(m => m.id === _leagueMap) || LEAGUE_MAPS[0];
   const hintEl = document.getElementById("map-hint");
@@ -960,6 +938,15 @@ function _drawLeagueMap() {
   drawLeagueScatter("chart-scatter", _leagueTeams, axis);
 }
 
+// T-06: abre el equipo al hacer clic en una fila del ranking (conserva el comportamiento previo).
+function _openTeamFromRow(row) {
+  const code = String(row.id ?? "").split(":").pop() || row.id;
+  const sel = document.getElementById("team-select");
+  if (sel) sel.value = code;
+  setSection("team");
+  renderTeam(code);
+}
+
 async function renderLeague() {
   const sec = document.getElementById("sec-league");
   sec.innerHTML = '<p class="empty"><span class="spinner"></span>Cargando...</p>';
@@ -970,6 +957,7 @@ async function renderLeague() {
       const def = comps.find(c => c.is_default);
       _leagueComp = def ? String(def.id) : null;
     }
+    // El mapa de liga sigue con /api/league (no migra, T-D7).
     const res = await api.league(_leagueComp, { summary: true });
     _leagueTeams = res.teams || [];
     _leagueSummary = { avg: res.avg || {}, leaders: res.leaders || {}, population: res.population || null };
@@ -979,20 +967,38 @@ async function renderLeague() {
       ? `<select id="league-comp" class="map-select">${_compOptions(comps, _leagueComp, "Todas las competencias", "all")}</select>`
       : "";
     sec.innerHTML = `
-      ${_standingsCardHTML(_leagueTeams, compSelHTML, comps.length > 1 && _leagueComp === "all")}
       <div class="card">
         <div class="map-header">
-          <div class="card-title" style="margin:0">Ranking de equipos — Liga <span style="color:var(--muted);font-size:10px;font-weight:400;margin-left:8px">Click en columna para ordenar</span></div>
+          <div class="card-title" style="margin:0">Tabla general</div>
+          ${compSelHTML}
         </div>
-        <div class="table-wrap">
-          <table id="league-table" class="table-sticky"></table>
+        <p class="td-muted">Solo partidos importados, no el fixture completo.</p>
+        <div id="league-standings-dt"></div>
+      </div>
+      <div class="card">
+        <div class="map-header">
+          <div class="card-title" style="margin:0">Ranking de equipos — Liga</div>
         </div>
+        <div id="league-ranking-dt"></div>
       </div>`;
 
-    const tableEl = document.getElementById("league-table");
-    tableEl.innerHTML = _leagueTableHTML(_sortedLeague());
-    _bindLeagueTableEvents(tableEl);
-    _bindLeagueRowClicks(tableEl);
+    // Parámetros de tabla: "all" (todas) se envía como sin competencia.
+    const compParam = (_leagueComp && _leagueComp !== "all") ? _leagueComp : null;
+
+    // Tabla general (league_standings): el backend responde 400 con el mensaje de C-09
+    // cuando hay varias competencias y no se eligió una.
+    const standEl = document.getElementById("league-standings-dt");
+    mountTable(standEl, () => api.table("league_standings", { competition: compParam }), {
+      tableId: "league_standings",
+      onRowClick: _openTeamFromRow,
+    });
+
+    // Ranking (league_teams): clic de fila → abre el equipo.
+    const rankEl = document.getElementById("league-ranking-dt");
+    mountTable(rankEl, () => api.table("league_teams", { competition: compParam }), {
+      tableId: "league_teams",
+      onRowClick: _openTeamFromRow,
+    });
 
     const compSel = document.getElementById("league-comp");
     if (compSel) compSel.addEventListener("change", e => { _leagueComp = e.target.value; renderLeague(); });
@@ -1029,26 +1035,8 @@ async function renderLeague() {
 // ── Clutch por equipo (últimos N min, dif ≤ `margin`) — dentro de Equipo (Feat 05 v2) ──
 // Umbral y ventana salen siempre de la respuesta (`margin`, `window_secs`): nunca escribir
 // esos números acá (C-06). Antes de la respuesta el título dice solo "Cierres".
-let _clutchData = null;
-let _clutchSort = { key: "date", dir: -1 };
+let _clutchData = null;   // se mantiene para resetear al cambiar de equipo/competencia
 let _clutchReq  = 0;   // descarta respuestas viejas al cambiar de equipo o competencia
-
-const CLUTCH_COLS = [
-  { key: "date", label: "Fecha", date: true },
-  { key: "opponent_code", label: "Rival", txt: true }, { key: "home_away", label: "L/V", txt: true },
-  { key: "entry_margin", label: d => `Δ@${_clock(d.window_secs)}`, int: true },
-  { key: "overtime_periods", label: "PR", title: "Prórrogas", ot: true },
-  { key: "point_diff", label: "Dif", diff: true }, { key: "pts", label: "Pts", int: true },
-  { key: "off_rating", label: "Off" }, { key: "def_rating", label: "Def" },
-  { key: "efg_pct", label: "eFG%", pct: true }, { key: "ts_pct", label: "TS%", pct: true },
-  { key: "tov", label: "TOV", int: true }, { key: "ast", label: "AST", int: true },
-  { key: "reb", label: "REB", int: true },
-  { key: "fouls_drawn", label: "FR", int: true }, { key: "fouls_committed", label: "FC", int: true },
-  { key: "top_finisher", label: "Finaliza", leader: "pts" }, { key: "top_creator", label: "Crea", leader: "ast" },
-];
-
-// Segundos → reloj de juego "m:ss" (300 → "5:00").
-const _clock = s => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 
 function _clutchTitle(d) {
   if (!d) return `<div class="card-title">Cierres</div>`;
@@ -1078,7 +1066,6 @@ async function renderTeamClutch(teamCode) {
     return;
   }
   if (req !== _clutchReq) return;   // llegó tarde: otro equipo o competencia elegidos
-  _clutchData = d;
   const title = _clutchTitle(d);
   if (!d.games_qualified) {
     box.innerHTML = `<div class="card">${title}<p class="empty">Sin cierres apretados: ${_clutchCount(d)}.</p></div>`;
@@ -1089,10 +1076,14 @@ async function renderTeamClutch(teamCode) {
       ${title}
       <p class="td-muted">Agregado del equipo en cierres apretados — récord <strong>${d.clutch_record}</strong> · ${_clutchCount(d)}</p>
       <div id="team-clutch-standard-panel"></div>
-      <div class="card-title" style="margin-top:16px">Por partido <span style="color:var(--muted);font-size:10px;font-weight:400;margin-left:8px">Click en columna para ordenar</span></div>
-      <div class="table-wrap"><table id="clutch-table" class="search-table"></table></div>
+      <div class="card-title" style="margin-top:16px">Por partido</div>
+      <div id="team-clutch-dt"></div>
     </div>`;
-  _drawClutchTable();
+  // Tabla por partido migrada a createDataTable (T-06). Conserva competencia y recuento (C-06).
+  const compParam = (_teamComp && _teamComp !== "all") ? _teamComp : null;
+  mountTable(document.getElementById("team-clutch-dt"),
+    () => api.table("clutch_games", { team: teamCode, competition: compParam }),
+    { tableId: "clutch_games" });
   _loadClutchStandard(teamCode, d.margin, d.window_secs);
 }
 
@@ -1114,36 +1105,6 @@ async function _loadClutchStandard(teamCode, margin, windowSecs) {
     if (req !== _clutchStdReq) return;
     renderStandardPanel(el, { error: e.message || "No se pudo cargar el conjunto estándar" }, { layout: "grid" });
   }
-}
-
-function _drawClutchTable() {
-  const t = document.getElementById("clutch-table");
-  if (!t || !_clutchData) return;
-  const k = _clutchSort.key;
-  const _val = v => (v && typeof v === "object") ? (v.pts ?? v.ast ?? null) : v;
-  const sorted = [..._clutchData.per_game].sort((a, b) =>
-    _cmpNullsLast(_val(a[k]), _val(b[k]), _clutchSort.dir));
-  const cell = (c, r) => {
-    const v = r[c.key];
-    if (c.leader) return v ? `${v.name} (${v[c.leader]})` : "—";
-    if (c.ot)     return v || "";   // sin prórroga: celda vacía
-    if (c.date)   return _fmtDate(v);
-    if (c.diff)   { if (v == null) return "—";   // sin dato: ni color ni valor crudo (RF-3/RF-4)
-                    const cls = v > 0 ? "above-avg" : v < 0 ? "below-avg" : ""; return `<span class="${cls}">${v > 0 ? "+" : ""}${v}</span>`; }
-    if (c.txt)    return v || "—";
-    if (c.int)    return v == null ? "—" : v;
-    if (c.pct)    return PCT(v);
-    return DEC2(v);
-  };
-  t.innerHTML = `
-    <thead><tr>${CLUTCH_COLS.map(c => `<th data-key="${c.key}"${c.title ? ` title="${c.title}"` : ""}>${typeof c.label === "function" ? c.label(_clutchData) : c.label}</th>`).join("")}</tr></thead>
-    <tbody>${sorted.map(r => `<tr>${CLUTCH_COLS.map(c => `<td>${cell(c, r)}</td>`).join("")}</tr>`).join("")}</tbody>`;
-  t.querySelectorAll("th").forEach(th => th.addEventListener("click", () => {
-    const key = th.dataset.key;
-    if (_clutchSort.key === key) _clutchSort.dir *= -1;
-    else _clutchSort = { key, dir: ["date","opponent_code","home_away","top_finisher","top_creator"].includes(key) ? 1 : -1 };
-    _drawClutchTable();
-  }));
 }
 
 // ── Team section — competencia y últimos N resueltos en el servidor (C-02) ─────
@@ -1188,8 +1149,11 @@ function _renderUsageRanking(players) {
   }).join("");
   el.innerHTML = `
     <div class="card" style="margin-top:8px">
-      <div class="card-title">Jugadores más influyentes — USO%</div>
-      <table class="game-log" style="width:100%">
+      <div class="map-header">
+        <div class="card-title" style="margin:0">Jugadores más influyentes — USO%</div>
+        <span class="xm-host" data-xm="usage"></span>
+      </div>
+      <table class="game-log" id="usage-table" style="width:100%">
         <thead><tr>
           <th>Jugador</th><th></th>
           <th style="text-align:right">USO%</th>
@@ -1205,6 +1169,12 @@ function _renderUsageRanking(players) {
       document.getElementById("player-select").dispatchEvent(new Event("change"));
     });
   });
+  const uHost = el.querySelector('[data-xm="usage"]');
+  if (uHost) {
+    const tname = _teamData?.team_name || document.getElementById("team-select")?.value || "equipo";
+    _mountTableExport(uHost, () => el.querySelector("#usage-table"),
+      _baseMeta({ title: `Ranking de uso — ${tname}`, section: "ranking-uso", entity: tname, entitySlug: _teamData?.team_code, competitionLabel: _teamCompLabel() }));
+  }
 }
 
 function _renderTeamContent(main, data) {
@@ -1273,34 +1243,7 @@ function _renderTeamContent(main, data) {
     </div>
     <div class="card">
       <div class="card-title">Game log</div>
-      <div class="table-wrap">
-        <table>
-          <thead><tr>
-            <th>Fecha</th><th>Rival</th><th>L/V</th>
-            <th>Pts</th><th>OER</th><th>DER</th><th>eFG%</th><th>TS%</th>
-            <th>OR%</th><th>DR%</th><th>TO%</th><th title="AS/PER del partido">AS/PER</th>
-          </tr></thead>
-          <tbody>
-            ${data.game_log.map(g => {
-              const c = (k, f) => fmtOrNull(g[k], f, g.null_reasons?.[k]);
-              return `
-              <tr>
-                <td class="td-muted">${_fmtDate(g.date)}</td>
-                <td>${g.opponent}</td>
-                <td class="td-muted">${g.home_away}</td>
-                <td class="td-result">${g.pts}</td>
-                <td>${c("oer", DEC2)}</td>
-                <td>${c("der", DEC2)}</td>
-                <td>${c("efg_pct", PCT)}</td>
-                <td>${c("ts_pct", PCT)}</td>
-                <td>${c("or_pct", PCT)}</td>
-                <td>${c("dr_pct", PCT)}</td>
-                <td>${c("to_pct", PCT)}</td>
-                <td>${c("ast_to", DEC2)}</td>
-              </tr>`; }).join("")}
-          </tbody>
-        </table>
-      </div>
+      <div id="team-gamelog-dt"></div>
     </div>`;
 
   if (data.game_log.length) {
@@ -1309,6 +1252,50 @@ function _renderTeamContent(main, data) {
   }
   _teamCardGroups = TEAM_CARD_GROUPS;
   _loadTeamStandard(data.team_code);
+  _loadTeamGameLog(data.team_code);
+
+  // Exportación de las tablas no migradas de Equipo (T-D10): Four Factors y detalle de tiro.
+  const ffHost = main.querySelector('[data-xm="four-factors"]');
+  if (ffHost) _mountTableExport(ffHost, () => main.querySelector("#four-factors-table"),
+    _baseMeta({ title: `Four Factors — ${data.team_name}`, section: "four-factors", entity: data.team_name, entitySlug: data.team_code, competitionLabel: _teamCompLabel() }));
+  _mountShotDetailExports(main, data.team_name, data.team_code, _teamCompLabel());
+}
+
+// Monta exportación en cada grilla de detalle de tiro (T-D10). No es un <table>, así que
+// se serializan las parejas etiqueta/valor de los stat-box.
+function _mountShotDetailExports(container, entityName, entitySlug, compLabel) {
+  container.querySelectorAll("[data-shot-detail]").forEach(grid => {
+    const host = grid.querySelector("[data-xm-shot]");
+    if (!host) return;
+    const meta = _baseMeta({ title: `Detalle de tiro — ${entityName}`, section: "detalle-tiro", entity: entityName, entitySlug, competitionLabel: compLabel });
+    exportMenu(host, {
+      getData: () => {
+        const boxes = [...grid.querySelectorAll(".stat-box")];
+        const columns = [{ key: "metrica", label: "Métrica", fmt: "text" }, { key: "valor", label: "Valor", fmt: "text" }];
+        const rows = boxes.map(b => [b.querySelector(".stat-label")?.textContent.trim() || "", b.querySelector(".stat-value")?.textContent.trim() || ""]);
+        return { meta, columns, rows, footer: [], pageInfo: `${rows.length} filas` };
+      },
+      getNode: () => grid,
+    });
+  });
+}
+
+// Etiqueta de la competencia activa de Equipo (para la cabecera de exportación).
+function _teamCompLabel() {
+  const sel = document.getElementById("team-comp");
+  if (sel && sel.selectedOptions[0] && _teamComp !== "all") return sel.selectedOptions[0].textContent;
+  return "";
+}
+
+// Game log de equipo migrado a createDataTable (team_game_log). Respeta competencia,
+// "Últ. N" y base elegida en la vista (T-D8).
+function _loadTeamGameLog(teamCode) {
+  const el = document.getElementById("team-gamelog-dt");
+  if (!el) return;
+  const compParam = (_teamComp && _teamComp !== "all") ? _teamComp : null;
+  mountTable(el,
+    () => api.table("team_game_log", { team: teamCode, competition: compParam, last: _teamLastN || null, base: _teamStdBase }),
+    { tableId: "team_game_log" });
 }
 
 // Re-dibuja las grillas de fichas de Equipo/Jugador con el conjunto estándar ya
@@ -1347,7 +1334,7 @@ async function _loadTeamStandard(teamCode) {
     renderStandardPanel(el, payload, {
       layout: "grid",
       base: _teamStdBase,
-      onBaseChange: newBase => { _teamStdBase = newBase; _loadTeamStandard(teamCode); },
+      onBaseChange: newBase => { _teamStdBase = newBase; _loadTeamStandard(teamCode); _loadTeamGameLog(teamCode); },
     });
     if (main) bindMetricCards(main, { entityType: "team", contextQuery: { ...ctxQuery, id: teamCode } });
   } catch (e) {
@@ -1492,12 +1479,17 @@ async function renderTeamOnOff(teamCode, playerName, playerId = null) {
 
     box.innerHTML = `
       <div class="card">
-        <div class="card-title">ON / OFF <span style="color:var(--muted2);font-weight:400;text-transform:none;letter-spacing:0">— ${playerName} · Uso ${r.usg_pct != null ? PCT(r.usg_pct) : "—"}</span></div>
+        <div class="map-header">
+          <div class="card-title" style="margin:0">ON / OFF <span style="color:var(--muted2);font-weight:400;text-transform:none;letter-spacing:0">— ${playerName} · Uso ${r.usg_pct != null ? PCT(r.usg_pct) : "—"}</span></div>
+          <span class="xm-host" data-xm="onoff"></span>
+        </div>
         <div id="team-onoff-standard-panel" style="margin-top:8px"></div>
       </div>`;
     box.scrollIntoView({ behavior: "smooth", block: "nearest" });
 
     const panelEl = document.getElementById("team-onoff-standard-panel");
+    _mountPanelExport(box.querySelector('[data-xm="onoff"]'), () => panelEl,
+      _baseMeta({ title: `ON/OFF — ${playerName}`, section: "on-off", entity: playerName, entitySlug: `${teamCode}-${playerName}`, competitionLabel: _teamCompLabel() }));
     if (playerId != null) {
       renderStandardPanel(panelEl, null, { layout: "compare" });
       try {
@@ -1526,7 +1518,10 @@ async function renderTeamLineup(teamCode, players, playerIds = []) {
     const lead = (l, key) => l ? `${l.name} (${l[key]})` : "—";
     box.innerHTML = `
       <div class="card">
-        <div class="card-title">Combinación <span style="color:var(--muted2);font-weight:400;text-transform:none;letter-spacing:0">— ${players.join(" · ")}</span></div>
+        <div class="map-header">
+          <div class="card-title" style="margin:0">Combinación <span style="color:var(--muted2);font-weight:400;text-transform:none;letter-spacing:0">— ${players.join(" · ")}</span></div>
+          <span class="xm-host" data-xm="lineup"></span>
+        </div>
         <p class="td-muted" style="margin-top:8px">
           ${DEC1(r.sample.possessions)} posesiones · ${Math.round(r.sample.seconds / 60)}' en cancha ·
           ${r.games_used} partido(s) usado(s)${r.games_excluded ? ` (${r.games_excluded} excluido(s) por datos inconsistentes)` : ""}
@@ -1541,6 +1536,8 @@ async function renderTeamLineup(teamCode, players, playerIds = []) {
     box.scrollIntoView({ behavior: "smooth", block: "nearest" });
 
     const panelEl = document.getElementById("team-lineup-standard-panel");
+    _mountPanelExport(box.querySelector('[data-xm="lineup"]'), () => panelEl,
+      _baseMeta({ title: `Combinación — ${players.join(" · ")}`, section: "combinacion", entity: players.join("-"), entitySlug: teamCode, competitionLabel: _teamCompLabel() }));
     if (playerIds.length >= 3) {
       renderStandardPanel(panelEl, null, { layout: "grid" });
       try {
@@ -1662,9 +1659,12 @@ async function renderCompare() {
                       : `<p class="empty">${_radarMsg(dataA)}</p>`}
           </div>
           <div class="card">
-            <div class="card-title">${dataA.team_name} vs ${dataB.team_name}</div>
+            <div class="map-header">
+              <div class="card-title" style="margin:0">${dataA.team_name} vs ${dataB.team_name}</div>
+              <span class="xm-host" data-xm="compare-box"></span>
+            </div>
             <div class="table-wrap">
-              <table class="compare-table fiba-box">
+              <table class="compare-table fiba-box" id="compare-box-table">
                 <thead><tr>
                   <th style="color:var(--accent)">${dataA.team_name}</th>
                   <th class="lbl"></th>
@@ -1676,9 +1676,12 @@ async function renderCompare() {
           </div>
         </div>
         <div class="card">
-          <div class="card-title">Métricas avanzadas</div>
+          <div class="map-header">
+            <div class="card-title" style="margin:0">Métricas avanzadas</div>
+            <span class="xm-host" data-xm="compare-adv"></span>
+          </div>
           <div class="table-wrap">
-            <table class="search-table">
+            <table class="search-table" id="compare-adv-table">
               <thead><tr>
                 <th style="text-align:left">Equipo</th>
                 <th>Off</th><th>Def</th><th>Net</th><th>eFG%</th><th>TS%</th><th>Pace</th>
@@ -1693,6 +1696,14 @@ async function renderCompare() {
           </div>
           <p class="td-muted" style="margin:8px 0 0">${_refLegend(dataA, ["equipo", "equipos"])}</p>
         </div>`;
+
+      const cmpResult = document.getElementById("compare-result");
+      const cmpComp = document.getElementById("compare-comp");
+      const cmpLabel = cmpComp && cmpComp.value ? cmpComp.selectedOptions[0]?.textContent : "";
+      _mountTableExport(cmpResult.querySelector('[data-xm="compare-box"]'), () => cmpResult.querySelector("#compare-box-table"),
+        _baseMeta({ title: `Comparación — ${dataA.team_name} vs ${dataB.team_name}`, section: "comparar", entity: `${dataA.team_name}-${dataB.team_name}`, competitionLabel: cmpLabel }));
+      _mountTableExport(cmpResult.querySelector('[data-xm="compare-adv"]'), () => cmpResult.querySelector("#compare-adv-table"),
+        _baseMeta({ title: `Comparación avanzada — ${dataA.team_name} vs ${dataB.team_name}`, section: "comparar-avanzadas", entity: `${dataA.team_name}-${dataB.team_name}`, competitionLabel: cmpLabel }));
 
       if (radarOk) drawCompareRadar("chart-compare-radar", avA, avB, lg, dataA.team_name, dataB.team_name);
     } catch (e) {
@@ -1748,21 +1759,26 @@ function _shotDetailGrid(av, totals) {
     return statBox(label, a, disp, rs[avgKey]);
   };
   return `
-    <div class="card-title" style="margin-top:14px;font-size:11px;color:var(--muted)">Detalle de tiro — promedio (total temporada)</div>
-    <div class="stat-grid">
-      ${cell("T2i", "fga2", "fga2")}
-      ${cell("T2c", "fgm2", "fgm2")}
-      ${cell("T3i", "fga3", "fga3")}
-      ${cell("T3c", "fgm3", "fgm3")}
-      ${cell("TLi", "fta",  "fta")}
-      ${cell("TLc", "ftm",  "ftm")}
-    </div>
-    <div class="card-title" style="margin-top:14px;font-size:11px;color:var(--muted)">Puntos por tiro</div>
-    <div class="stat-grid">
-      ${statBox("PPT",    av.ppt,    DEC2(av.ppt),    rs.ppt)}
-      ${statBox("PPT 2",  av.ppt_2,  DEC2(av.ppt_2),  rs.ppt_2)}
-      ${statBox("PPT 3",  av.ppt_3,  DEC2(av.ppt_3),  rs.ppt_3)}
-      ${statBox("PPT TL", av.ppt_ft, DEC2(av.ppt_ft), rs.ppt_ft)}
+    <div data-shot-detail>
+      <div class="map-header" style="margin-top:14px">
+        <div class="card-title" style="margin:0;font-size:11px;color:var(--muted)">Detalle de tiro — promedio (total temporada)</div>
+        <span class="xm-host" data-xm-shot></span>
+      </div>
+      <div class="stat-grid">
+        ${cell("T2i", "fga2", "fga2")}
+        ${cell("T2c", "fgm2", "fgm2")}
+        ${cell("T3i", "fga3", "fga3")}
+        ${cell("T3c", "fgm3", "fgm3")}
+        ${cell("TLi", "fta",  "fta")}
+        ${cell("TLc", "ftm",  "ftm")}
+      </div>
+      <div class="card-title" style="margin-top:14px;font-size:11px;color:var(--muted)">Puntos por tiro</div>
+      <div class="stat-grid">
+        ${statBox("PPT",    av.ppt,    DEC2(av.ppt),    rs.ppt)}
+        ${statBox("PPT 2",  av.ppt_2,  DEC2(av.ppt_2),  rs.ppt_2)}
+        ${statBox("PPT 3",  av.ppt_3,  DEC2(av.ppt_3),  rs.ppt_3)}
+        ${statBox("PPT TL", av.ppt_ft, DEC2(av.ppt_ft), rs.ppt_ft)}
+      </div>
     </div>`;
 }
 
@@ -1925,7 +1941,7 @@ async function _loadPlayerStandard(playerId) {
     renderStandardPanel(el, payload, {
       layout: "grid",
       base: _playerStdBase,
-      onBaseChange: newBase => { _playerStdBase = newBase; _loadPlayerStandard(playerId); },
+      onBaseChange: newBase => { _playerStdBase = newBase; _loadPlayerStandard(playerId); _loadPlayerGameLog(playerId); },
     });
     if (main) bindMetricCards(main, { entityType: "player", contextQuery: { ...ctxQuery, id: playerId } });
   } catch (e) {
@@ -2031,47 +2047,12 @@ function _renderPlayerContent(main, data) {
       </div>
       <div class="card">
         <div class="card-title">Game log — ${playerName}</div>
-        <div class="table-wrap">
-          <table>
-            <thead><tr>
-              <th>Fecha</th><th>Rival</th><th>Pts</th>
-              <th>FGM/A</th><th>3PM/A</th><th>FTM/A</th>
-              <th>OR</th><th>DR</th><th>Ast</th><th>TOV</th><th title="AS/PER del partido">AS/PER</th>
-              <th>OER</th><th>eFG%</th><th>TS%</th>
-            </tr></thead>
-            <tbody>
-              ${log.map(g => {
-                // DNP: el partido figura, pero sin números — no jugó, no son ceros (C-11 RF-10)
-                if (g.played === false) return `
-                <tr>
-                  <td class="td-muted">${_fmtDate(g.date)}</td>
-                  <td>${g.opponent}</td>
-                  <td colspan="12" class="td-muted null-val" title="No jugó (DNP)">DNP</td>
-                </tr>`;
-                const c = (k, f) => fmtOrNull(g[k], f, g.null_reasons?.[k]);
-                return `
-                <tr>
-                  <td class="td-muted">${_fmtDate(g.date)}</td>
-                  <td>${g.opponent}</td>
-                  <td class="td-result">${g.pts}</td>
-                  <td>${g.fgm}/${g.fga}</td>
-                  <td>${g.fgm3}/${g.fga3}</td>
-                  <td>${g.ftm}/${g.fta}</td>
-                  <td>${g.orb}</td>
-                  <td>${g.drb}</td>
-                  <td>${g.ast}</td>
-                  <td>${g.tov}</td>
-                  <td>${c("ast_to", DEC2)}</td>
-                  <td>${c("oer", DEC2)}</td>
-                  <td>${c("efg_pct", PCT)}</td>
-                  <td>${c("ts_pct", PCT)}</td>
-                </tr>`; }).join("")}
-            </tbody>
-          </table>
-        </div>
+        <div id="player-gamelog-dt"></div>
       </div>`;
     if (radarOk) drawRadar("chart-player-radar", av, lg, playerName);
     drawPlayerEvolution("chart-player-evo", log, lg?.oer?.avg);
+    _loadPlayerGameLog(data.player_id);
+    _mountShotDetailExports(main, playerName, String(data.player_id ?? ""), _playerCompLabel());
 
     if (comps.length > 1) {
       document.getElementById("player-comp").addEventListener("change", e => {
@@ -2093,13 +2074,39 @@ function _renderPlayerContent(main, data) {
   }
 }
 
-// ── Search section ───────────────────────────────────────────────────────────
-let _searchData = null;
-let _searchComp = "";   // id de competencia del último fetch ("" = todas)
+// Game log de jugador migrado a createDataTable (player_game_log). Respeta competencia
+// y base elegida (T-D8); los DNP vienen como filas con métricas nulas razón `dnp`.
+function _loadPlayerGameLog(playerId) {
+  const el = document.getElementById("player-gamelog-dt");
+  if (!el || playerId == null) return;
+  const compParam = (_playerComp && _playerComp !== "all") ? _playerComp : null;
+  mountTable(el,
+    () => api.table("player_game_log", { player_id: playerId, competition: compParam, base: _playerStdBase }),
+    { tableId: "player_game_log" });
+}
 
-// Grupos de posición del filtro (el backend manda `position_group`: G, F, C o null)
+function _playerCompLabel() {
+  const sel = document.getElementById("player-comp");
+  if (sel && sel.selectedOptions[0] && _playerComp !== "all") return sel.selectedOptions[0].textContent;
+  return "";
+}
+
+// ── Search section (T-06: migrada a createDataTable con rowFilter) ─────────────
+let _searchComp = "";   // id de competencia del último fetch ("" = todas)
+let _searchTable = null;        // handle de createDataTable
+let _searchPayload = null;      // payload actual (para el mapa de índices de columnas)
+let _searchColIdx = {};         // key → índice en payload.columns
+
+// Grupos de posición del filtro: PG/SG/G → G, SF/PF/F → F, C → C.
 const POSITION_GROUPS = [["G", "Base/Escolta (G)"], ["F", "Alero/Ala-pívot (F)"], ["C", "Pívot (C)"]];
-let _searchSort = { key: "player", dir: 1 };
+function _posGroup(pos) {
+  const p = String(pos || "").toUpperCase();
+  if (!p) return null;
+  if (p === "C") return "C";
+  if (p.includes("F")) return "F";
+  if (p.includes("G")) return "G";
+  return null;
+}
 
 const SEARCH_METRICS = [
   { key: "efg_pct", label: "eFG%", pct: true }, { key: "ts_pct", label: "TS%", pct: true },
@@ -2114,27 +2121,36 @@ const SEARCH_METRICS = [
   { key: "minutes", label: "Min" }, { key: "plus_minus", label: "+/-" },
 ];
 
-const SEARCH_COLS = [
-  { key: "player", label: "Jugador", txt: true }, { key: "team_code", label: "Eq", txt: true },
-  { key: "position", label: "Pos", txt: true }, { key: "games", label: "G", int: true },
-  { key: "minutes", label: "Min" }, { key: "plus_minus", label: "+/-" },
-  { key: "efg_pct", label: "eFG%", pct: true }, { key: "ts_pct", label: "TS%", pct: true },
-  { key: "oer", label: "OER" }, { key: "uso_pct", label: "USO%", pct: true },
-  { key: "pts", label: "Pts" }, { key: "ast", label: "Ast" }, { key: "tov", label: "TOV" }, { key: "ast_to", label: "AS/PER" },
-  { key: "stl", label: "ST" }, { key: "blk", label: "Blq" },
-];
+// Equipos del plantel (para el select de equipo): se leen de la columna _team del payload.
+function _searchTeams() {
+  if (!_searchPayload) return [];
+  const idx = _searchColIdx["_team"];
+  if (idx == null) return [];
+  return [...new Set(_searchPayload.rows.map(r => r.values[idx]).filter(Boolean))].sort();
+}
+
+async function _loadSearchPayload() {
+  _searchPayload = await api.table("search_players", { competition: _searchComp || null });
+  _searchColIdx = {};
+  _searchPayload.columns.forEach((c, i) => { _searchColIdx[c.key] = i; });
+  return _searchPayload;
+}
 
 async function renderSearch() {
   const main = document.getElementById("search-main");
-  if (!_searchData) {
+  if (!_searchPayload) {
     main.innerHTML = '<p class="empty"><span class="spinner"></span>Cargando buscador...</p>';
-    try { _searchData = await api.searchPlayers({ competition: _searchComp }); }
-    catch (e) { main.innerHTML = `<p class="empty below-avg">No se pudo cargar el buscador</p>`; return; }
+    try { await _loadSearchPayload(); }
+    catch (e) {
+      if (navigator.onLine === false || e instanceof TypeError) main.innerHTML = `<p class="empty below-avg">Sin conexión. No se pudo cargar el buscador.</p>`;
+      else main.innerHTML = `<p class="empty below-avg">${e.message || "No se pudo cargar el buscador"}</p>`;
+      return;
+    }
   }
-  if (!_searchData.length && !_searchComp) { main.innerHTML = `<p class="empty">No hay jugadores importados todavía</p>`; return; }
+  if (!_searchPayload.rows.length && !_searchComp) { main.innerHTML = `<p class="empty">No hay jugadores importados todavía</p>`; return; }
 
   const comps = await api.competitions().catch(() => []);
-  const teams = [...new Set(_searchData.map(p => p.team_code))].sort();
+  const teams = _searchTeams();
 
   main.innerHTML = `
     <div class="card">
@@ -2161,22 +2177,36 @@ async function renderSearch() {
     </div>
     <div id="search-results"></div>`;
 
+  const box = document.getElementById("search-results");
+  _searchTable = createDataTable(box, {
+    tableId: "search_players",
+    payload: _searchPayload,
+    onRowClick: row => {
+      // id del payload = player_id; el nombre/equipo salen de las columnas de texto.
+      const name = row.values[_searchColIdx["_name"]];
+      const team = row.values[_searchColIdx["_team"]];
+      setSection("player");
+      renderPlayer(team, name, Number(row.id) || null);
+    },
+  });
+
   document.getElementById("sf-apply").addEventListener("click", _applySearch);
   // Cambiar de competencia recalcula los promedios en el backend (RF-7)
   document.getElementById("sf-comp").addEventListener("change", async e => {
     _searchComp = e.target.value;
-    const box = document.getElementById("search-results");
     box.innerHTML = '<p class="empty"><span class="spinner"></span>Cargando buscador...</p>';
-    try { _searchData = await api.searchPlayers({ competition: _searchComp }); }
+    try { await _loadSearchPayload(); }
     catch { box.innerHTML = '<p class="empty below-avg">No se pudo cargar el buscador</p>'; return; }
-    _applySearch();
+    renderSearch();
   });
   document.getElementById("sf-clear").addEventListener("click", async () => {
     main.querySelectorAll(".search-filters input, .search-ranges input").forEach(i => i.value = "");
     main.querySelectorAll(".search-filters select").forEach(s => s.value = "");
     if (_searchComp) {   // volver a "todas las competencias"
       _searchComp = "";
-      try { _searchData = await api.searchPlayers(); } catch { return; }
+      try { await _loadSearchPayload(); } catch { return; }
+      renderSearch();
+      return;
     }
     _applySearch();
   });
@@ -2184,6 +2214,7 @@ async function renderSearch() {
 }
 
 function _applySearch() {
+  if (!_searchTable) return;
   const name = document.getElementById("sf-name").value.trim().toLowerCase();
   const team = document.getElementById("sf-team").value;
   const pos  = document.getElementById("sf-pos").value;
@@ -2199,56 +2230,35 @@ function _applySearch() {
     ranges.push({ key: inp.dataset.key, op: "max", val: pct ? parseFloat(inp.value)/100 : parseFloat(inp.value) });
   });
 
-  const filtered = _searchData.filter(p => {
-    if (name && !p.player.toLowerCase().includes(name)) return false;
-    if (team && p.team_code !== team) return false;
-    if (pos  && p.position_group !== pos) return false;   // grupo G/F/C; sin posición no entra en ninguno
+  const nameIdx = _searchColIdx["_name"], teamIdx = _searchColIdx["_team"], posIdx = _searchColIdx["_position"];
+  const rowFilter = row => {
+    const v = row.values;
+    if (name && !String(v[nameIdx] || "").toLowerCase().includes(name)) return false;
+    if (team && v[teamIdx] !== team) return false;
+    if (pos && _posGroup(v[posIdx]) !== pos) return false;   // sin posición no entra en ninguno
     for (const r of ranges) {
-      const v = p[r.key];
-      if (v == null) return false;               // null no matchea rango (Feature 08)
-      if (r.op === "min" && v < r.val) return false;
-      if (r.op === "max" && v > r.val) return false;
+      const idx = _searchColIdx[r.key];
+      const val = idx != null ? v[idx] : null;
+      if (val == null) return false;               // null no matchea rango (Feature 08)
+      if (r.op === "min" && val < r.val) return false;
+      if (r.op === "max" && val > r.val) return false;
     }
     return true;
-  });
-  document.getElementById("sf-count").textContent = `${filtered.length} jugadores`;
-  _renderSearchResults(filtered);
-}
-
-function _renderSearchResults(rows) {
-  const box = document.getElementById("search-results");
-  if (!rows.length) { box.innerHTML = `<p class="empty">Ningún jugador cumple los filtros</p>`; return; }
-  const k = _searchSort.key;
-  const sorted = [...rows].sort((a, b) => _cmpNullsLast(a[k], b[k], _searchSort.dir));
-  const fmt = (c, p) => {
-    const v = p[c.key];
-    if (c.txt) return v || "—";
-    return fmtOrNull(v, c.int ? String : c.pct ? PCT : DEC2, p.null_reasons?.[c.key]);
   };
-  box.innerHTML = `
-    <div class="card">
-      <div class="table-wrap">
-        <table class="search-table">
-          <thead><tr>${SEARCH_COLS.map(c => `<th data-key="${c.key}">${c.label}</th>`).join("")}</tr></thead>
-          <tbody>
-            ${sorted.map(p => `
-              <tr data-team="${p.team_code}" data-player-id="${p.player_id ?? ""}" data-player="${p.player.replace(/"/g,'&quot;')}">
-                ${SEARCH_COLS.map(c => `<td>${fmt(c, p)}</td>`).join("")}
-              </tr>`).join("")}
-          </tbody>
-        </table>
-      </div>
-    </div>`;
-  box.querySelectorAll("th").forEach(th => th.addEventListener("click", () => {
-    const key = th.dataset.key;
-    if (_searchSort.key === key) _searchSort.dir *= -1;
-    else _searchSort = { key, dir: ["player","team_code","position"].includes(key) ? 1 : -1 };
-    _renderSearchResults(rows);
-  }));
-  box.querySelectorAll("tbody tr").forEach(tr => tr.addEventListener("click", () => {
-    setSection("player");
-    renderPlayer(tr.dataset.team, tr.dataset.player, tr.dataset.playerId ? Number(tr.dataset.playerId) : null);
-  }));
+
+  // Etiquetas de filtros locales para la cabecera de exportación.
+  const labels = [];
+  if (name) labels.push({ label: "Nombre contiene", value: name });
+  if (team) labels.push({ label: "Equipo", value: team });
+  if (pos) labels.push({ label: "Posición", value: (POSITION_GROUPS.find(g => g[0] === pos) || [, pos])[1] });
+  for (const r of ranges) {
+    const m = SEARCH_METRICS.find(x => x.key === r.key);
+    labels.push({ label: `${m ? m.label : r.key} ${r.op === "min" ? "≥" : "≤"}`, value: m?.pct ? `${(r.val * 100).toFixed(1)}%` : r.val });
+  }
+
+  _searchTable.setRowFilter(rowFilter, labels);
+  const count = _searchTable.getState().rows.length;
+  document.getElementById("sf-count").textContent = `${count} jugadores`;
 }
 
 // ── Bootstrap ──────────────────────────────────────────────────────────────

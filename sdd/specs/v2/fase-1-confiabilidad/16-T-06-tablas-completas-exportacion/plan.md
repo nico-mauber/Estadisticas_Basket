@@ -2,7 +2,7 @@
 
 > **ID:** T-06 · **Prioridad:** P0 · **Fase y orden:** 1·16
 > **Depende de:** T-05 · T-01 · T-02 · C-11 · F-13 (+ C-02, C-06, C-09, F-11 cerrados) — ver [spec.md](spec.md)
-> **Estado:** Borrador (agente) — pendiente de revisión humana (gate Paso 2)
+> **Estado:** ✅ Aprobado
 > **Fuente:** Especificación v2 §3 · T-06 · Arquitectura §3.11, §3.3, §3.2, §6, §7.6, §7.7, §8
 > **Estimación:** XL · 30–40 h
 

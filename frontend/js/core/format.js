@@ -17,6 +17,20 @@ function _nf(decimals) {
 
 export const isNull = v => v == null || !Number.isFinite(Number(v));
 
+// Comparador único de tablas ordenables: el nulo se APARTA de la comparación en vez de
+// recibir un valor extremo, por eso su posición no depende de `dir` — queda al final
+// tanto ascendente como descendente (C-11 / T-06 RF-2). Movido desde app.js.
+export function cmpNullsLast(av, bv, dir) {
+  const _n = v => v == null || (typeof v === "number" && isNaN(v));
+  const an = _n(av), bn = _n(bv);
+  if (an && bn) return 0;
+  if (an) return 1;
+  if (bn) return -1;
+  if (typeof av === "string" || typeof bv === "string")
+    return dir * String(av).localeCompare(String(bv), "es");
+  return dir * (av - bv);
+}
+
 export function fmtNumber(v, decimals = 2) {
   return isNull(v) ? "—" : _nf(decimals).format(Number(v));
 }
