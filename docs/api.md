@@ -312,9 +312,9 @@ Shot chart de **11 zonas** del jugador (ver clasificación en [database.md](data
 }
 ```
 
-Por zona: `made`, `attempts`, `pct` (% acierto) y `pf` (puntos por intento = made × valor zona / attempts; `null` si 0 intentos).
+Por zona: `made`, `attempts`, `pct` (% acierto), `pf` (puntos por intento; `null` si 0 intentos), `share` (proporción del total de tiros, C-03), más los aliases `fg_pct`=`pct` y `efg_pct`=`efg`. Los campos `pct`/`pf` son legacy — el frontend C-03 usa `GET /api/shot-zones` en su lugar.
 
-`has_coordinates` — `true` si al menos un tiro del jugador tiene `x!=0` o `y!=0`; hoy siempre `false`: las coordenadas reales se guardan aparte en `shots.court_x/court_y` (F-11) y el mapa las usará en C-03. El frontend usa este flag para elegir entre el chart de 11 zonas y el chart simplificado de 3 zonas (ver [frontend.md](frontend.md#shot-chart)).
+`has_coordinates` — `true` si al menos un tiro del jugador tiene `x!=0` o `y!=0`; hoy siempre `false` (F-11 guarda las coordenadas pero la clasificación aún no las usa). El frontend usa `GET /api/shot-zones` (C-03) que elige 11 o 3 zonas automáticamente.
 
 ### GET `/api/shots/<team_code>` (agregado del equipo)
 
@@ -327,6 +327,53 @@ Mismo shape que el de jugador, pero agrega los tiros de **todos los jugadores** 
 - `games` — partidos con datos de tiro
 
 Tiros sin coordenadas (`x=0, y=0`, partido sin array `shot` en FIBA) caen en `top_key_3` (3PT) o `mid_top` (2PT) o `restricted_area` (2PT con keyword de pintura) — en la práctica, si ningún tiro del jugador tiene coordenadas, solo esas 3 claves de `zones` tendrán `attempts>0` (ver `has_coordinates` arriba).
+
+---
+
+## GET `/api/shot-zones`
+
+Mapa de tiro enriquecido con percentil y muestra por zona (C-03). Reemplaza los endpoints legacy `/api/shots/…` para el frontend.
+
+**Query params:**
+| Param | Requerido | Valores | Default |
+|-------|-----------|---------|---------|
+| `entity` | sí | `team` \| `player` | — |
+| `id` | sí | código de equipo o `player_id` | — |
+| `competition` | no | id de competencia | última de la entidad |
+| `last` | no | entero ≥ 1 | todos los partidos |
+
+**Response 200:**
+```json
+{
+  "zones": {
+    "restricted_area": {
+      "made": 45, "attempts": 80,
+      "fg_pct": 0.5625, "efg_pct": 0.5625,
+      "ppt": 1.125, "share": 0.457,
+      "percentile": 38, "sample": {"level": "alta", "n": 80, "threshold": 30}
+    },
+    "top_key_3": { "...": "mismos campos" },
+    "...": "11 zonas (ZONE_KEYS_11)"
+  },
+  "summary": {
+    "total_shots": 175, "ppt": 1.05, "efg_pct": 0.512
+  },
+  "has_coordinates": false,
+  "context": {
+    "entity": "team", "id": "ALB",
+    "competition": {"id": 1, "label": "Liga Regular"},
+    "last": null
+  }
+}
+```
+
+`percentile` — percentil del PPT de esa zona respecto a todas las demás entidades del mismo tipo en la competencia (population.percentile, direction "higher"). `null` sin competencia o sin universo. `sample` — confiabilidad de la muestra (T-02). `share` — proporción de tiros del total (`attempts / total_fga`).
+
+**Errores:**
+- `400` — `{"code": "parametro_invalido", "error": "..."}` si `entity` no es `team` ni `player`, o falta `id`.
+- `404` — entidad no encontrada.
+
+Sin competencia: todas las zonas llevan `percentile: null` y `percentile_reason: "sin_universo"`.
 
 ---
 

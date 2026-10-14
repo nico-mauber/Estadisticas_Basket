@@ -10,6 +10,7 @@ import { percentileBg } from "./core/colors.js";
 import { createDataTable, mountTable } from "./components/data-table.js";
 import { exportMenu } from "./components/export-menu.js";
 import { tableToData, downloadBlob } from "./components/exporters.js";
+import { shotChart, bindZoneTooltips } from "./components/shot-chart.js";
 
 // ── Toast ──────────────────────────────────────────────────────────────────
 function toast(msg, type = "ok") {
@@ -1431,37 +1432,43 @@ async function renderTeam(teamCode) {
   }
 }
 
-// Mapa de tiro AGREGADO del equipo (Feature 10) — reusa api.teamShots + _shotChartSVG
+// Mapa de tiro AGREGADO del equipo (C-03) — usa api.shotZones + shotChart
 function renderTeamShotmapTeam(teamCode) {
   const box = document.getElementById("team-teamshot");
   if (!box) return;
   box.innerHTML = '<div class="card"><p class="empty"><span class="spinner"></span>Cargando mapa de tiro del equipo...</p></div>';
-  api.teamShots(teamCode).then(shots => {
-    if (!shots || !shots.total_shots) { box.innerHTML = ""; return; }
+  api.shotZones({ entity: 'team', id: teamCode, competition: _teamComp }).then(shots => {
+    if (!shots || !shots.summary?.total_shots) {
+      box.innerHTML = '<div class="card"><p class="empty">Sin tiros registrados para este equipo.</p></div>';
+      return;
+    }
     box.innerHTML = `
       <div class="card">
         <div class="card-title">Mapa de tiro del equipo <span style="color:var(--muted2);font-weight:400;text-transform:none;letter-spacing:0">— ${teamCode}</span></div>
-        ${_shotChartSVG(shots.zones, shots.total_shots, shots.summary, shots.has_coordinates)}
+        ${shotChart(shots)}
       </div>`;
+    bindZoneTooltips(box, shots);
   }).catch(() => { box.innerHTML = ""; });
 }
 
-// Shot chart del jugador DENTRO de la vista Equipo (reusa api.playerShots + _shotChartSVG)
+// Shot chart del jugador DENTRO de la vista Equipo (C-03) — usa api.shotZones + shotChart
 function renderTeamShotmap(teamCode, playerName) {
   const box = document.getElementById("team-shotmap");
   if (!box) return;
   box.innerHTML = '<div class="card"><p class="empty"><span class="spinner"></span>Cargando mapa de tiro...</p></div>';
-  api.playerShots(teamCode, playerName).then(shots => {
-    if (!shots || !shots.total_shots) {
-      box.innerHTML = "";
-      toast("Sin datos de tiro para este jugador", "err");
+  const playerId = _selectedPlayer()?.id;
+  if (!playerId) { box.innerHTML = ""; return; }
+  api.shotZones({ entity: 'player', id: playerId, competition: _teamComp }).then(shots => {
+    if (!shots || !shots.summary?.total_shots) {
+      box.innerHTML = '<div class="card"><p class="empty">Sin tiros registrados para este jugador.</p></div>';
       return;
     }
     box.innerHTML = `
       <div class="card">
         <div class="card-title">Shot chart por zonas <span style="color:var(--muted2);font-weight:400;text-transform:none;letter-spacing:0">— ${playerName}</span></div>
-        ${_shotChartSVG(shots.zones, shots.total_shots, shots.summary, shots.has_coordinates)}
+        ${shotChart(shots)}
       </div>`;
+    bindZoneTooltips(box, shots);
     box.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }).catch(() => { box.innerHTML = ""; });
 }
@@ -1715,36 +1722,6 @@ async function renderCompare() {
   });
 }
 
-// ── Shot chart SVG — half court, estilo "El Metro" (cancha clara, heatmap por P/F) ──
-// Geometría y paleta compartidas entre el modo 11 zonas (coords reales) y el modo
-// simplificado de 3 zonas (fallback: partido sin array `shot` de FIBA → x=0,y=0).
-const SC_W = 340, SC_H = 320;
-const SC_cx = 170, SC_cy = 256;
-const SC_cL = 20, SC_cR = 320, SC_cT = 8, SC_cB = 288;
-const SC_r3 = 135, SC_rP = 50;
-const SC_pbX1 = 121, SC_pbX2 = 219, SC_pbTop = 140;
-const SC_c3xL = 38, SC_c3xR = 302;
-const SC_c3yJoin = Math.round(SC_cy - Math.sqrt(SC_r3 * SC_r3 - (SC_cx - SC_c3xL) ** 2));
-
-const SC_courtBg = "#f3f6fa", SC_paintBg = "#c7d8ec", SC_restrictBg = "#b4c8e6",
-      SC_cornerBg = "#efe9c4", SC_line = "#46566a", SC_boxText = "#1f2937";
-
-// Heatmap por PPT (puntos por tiro), umbrales calcados de la imagen de referencia.
-// La fórmula no cambió con C-03 — solo el nombre —, así que los colores son idénticos.
-const _scBoxFill = ppt => ppt >= 1.00 ? "#79b13f" : ppt >= 0.85 ? "#ef8b3a" : "#df574c";
-
-function _scHCirc(r) {
-  return `M${SC_cx - r},${SC_cy} A${r},${r} 0 0,0 ${SC_cx + r},${SC_cy} Z`;
-}
-
-// Spokes (líneas que abren desde el aro separando los sectores del modo 11 zonas)
-function _scSpoke(deg) {
-  const t = deg * Math.PI / 180;
-  const x1 = SC_cx + SC_rP * Math.cos(t),  y1 = SC_cy - SC_rP * Math.sin(t);
-  const x2 = SC_cx + 250 * Math.cos(t),    y2 = SC_cy - 250 * Math.sin(t);
-  return `<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="${SC_line}" stroke-width="1.2" clip-path="url(#sc-clip)"/>`;
-}
-
 // C-07 — detalle de tiro: intentos/convertidos de las 3 categorías (promedio por
 // partido + total de temporada) y los 4 PPT. Compartido por Equipo y Jugador.
 function _shotDetailGrid(av, totals) {
@@ -1780,111 +1757,6 @@ function _shotDetailGrid(av, totals) {
         ${statBox("PPT TL", av.ppt_ft, DEC2(av.ppt_ft), rs.ppt_ft)}
       </div>
     </div>`;
-}
-
-function _scLbl(zones, totalShots, key, lx, ly) {
-  const z = zones?.[key];
-  if (!z?.attempts) return '';
-  // C-03: cada zona muestra % de acierto, eFG% y PPT. El indicador "P/F" se retiró:
-  // era esta misma fórmula (puntos de la zona / intentos) mal etiquetada.
-  const share = DEC1((z.attempts / totalShots) * 100);
-  const ppt   = z.ppt != null ? DEC2(z.ppt) : '—';
-  const fg    = DEC1(z.pct * 100) + '%';
-  const efg   = z.efg != null ? DEC1(z.efg * 100) + '%' : '—';
-  const bg    = _scBoxFill(z.ppt);
-  const w = 54, h = 44, r = 4;
-  const x0 = lx - w / 2, y0 = ly - h / 2;
-  return `
-    <rect x="${x0}" y="${y0}" width="${w}" height="${h}" rx="${r}" fill="${bg}" stroke="rgba(0,0,0,0.25)" stroke-width="0.8"/>
-    <text x="${lx - 5}" y="${ly - 11}" text-anchor="end"   fill="rgba(0,0,0,0.70)" font-size="7.5" font-family="Inter,sans-serif">${share}%</text>
-    <text x="${lx + 4}" y="${ly - 11}" text-anchor="start" fill="rgba(0,0,0,0.70)" font-size="7.5" font-family="Inter,sans-serif">PPT ${ppt}</text>
-    <text x="${lx}"     y="${ly + 5}"  text-anchor="middle" fill="${SC_boxText}" font-size="14" font-weight="800" font-family="Inter,sans-serif">${fg}</text>
-    <text x="${lx}"     y="${ly + 16}" text-anchor="middle" fill="rgba(0,0,0,0.70)" font-size="7.5" font-family="Inter,sans-serif">eFG ${efg}</text>`;
-}
-
-function _scBadge(summary) {
-  if (!summary) return '';
-  const pf  = summary.ppt     != null ? DEC2(summary.ppt) : '—';   // C-03: era "P/F"
-  const efg = summary.efg_pct != null ? DEC1(summary.efg_pct * 100) + ' %' : '—';
-  const cw = 70, ch = 38, bx = SC_cR - 2 * cw, by = SC_cT + 2;
-  return `
-    <rect x="${bx}"      y="${by}" width="${cw}" height="${ch}" rx="4" fill="#ef8b3a"/>
-    <rect x="${bx + cw}" y="${by}" width="${cw}" height="${ch}" rx="4" fill="#9aa83a"/>
-    <text x="${bx + cw/2}"        y="${by + 14}" text-anchor="middle" fill="rgba(0,0,0,0.65)" font-size="9"  font-family="Inter,sans-serif">PPT</text>
-    <text x="${bx + cw/2}"        y="${by + 31}" text-anchor="middle" fill="${SC_boxText}" font-size="15" font-weight="800" font-family="Inter,sans-serif">${pf}</text>
-    <text x="${bx + cw + cw/2}"   y="${by + 14}" text-anchor="middle" fill="rgba(0,0,0,0.65)" font-size="9"  font-family="Inter,sans-serif">eFG%</text>
-    <text x="${bx + cw + cw/2}"   y="${by + 31}" text-anchor="middle" fill="${SC_boxText}" font-size="15" font-weight="800" font-family="Inter,sans-serif">${efg}</text>`;
-}
-
-function _courtLinesSVG() {
-  return `
-    <rect width="${SC_W}" height="${SC_H}" fill="${SC_courtBg}" rx="8"/>
-    <rect x="${SC_cL}" y="${SC_cT}" width="${SC_cR-SC_cL}" height="${SC_cB-SC_cT}" fill="${SC_courtBg}" rx="3"/>
-    <!-- Esquinas amarillas (fuera de la línea de 3 lateral) -->
-    <rect x="${SC_cL}"   y="${SC_c3yJoin}" width="${SC_c3xL-SC_cL}" height="${SC_cB-SC_c3yJoin}" fill="${SC_cornerBg}" clip-path="url(#sc-clip)"/>
-    <rect x="${SC_c3xR}" y="${SC_c3yJoin}" width="${SC_cR-SC_c3xR}" height="${SC_cB-SC_c3yJoin}" fill="${SC_cornerBg}" clip-path="url(#sc-clip)"/>
-    <!-- Pintura + zona restringida (azul) -->
-    <rect x="${SC_pbX1}" y="${SC_pbTop}" width="${SC_pbX2-SC_pbX1}" height="${SC_cB-SC_pbTop}" fill="${SC_paintBg}" clip-path="url(#sc-clip)"/>
-    <path d="${_scHCirc(SC_rP)}" fill="${SC_restrictBg}" clip-path="url(#sc-clip)"/>
-    <!-- Spokes (sectores) -->
-    ${_scSpoke(150)}${_scSpoke(108)}${_scSpoke(72)}${_scSpoke(30)}
-    <!-- Líneas de cancha -->
-    <rect x="${SC_cL}" y="${SC_cT}" width="${SC_cR-SC_cL}" height="${SC_cB-SC_cT}" fill="none" stroke="${SC_line}" stroke-width="1.5" rx="3"/>
-    <rect x="${SC_pbX1}" y="${SC_pbTop}" width="${SC_pbX2-SC_pbX1}" height="${SC_cB-SC_pbTop}" fill="none" stroke="${SC_line}" stroke-width="1.5"/>
-    <path d="M${SC_pbX1},${SC_pbTop} A49,49 0 0,0 ${SC_pbX2},${SC_pbTop}" fill="none" stroke="${SC_line}" stroke-width="1.5" stroke-dasharray="4,3"/>
-    <path d="M${SC_c3xL},${SC_cB} L${SC_c3xL},${SC_c3yJoin} A${SC_r3},${SC_r3} 0 0,0 ${SC_c3xR},${SC_c3yJoin} L${SC_c3xR},${SC_cB}" fill="none" stroke="${SC_line}" stroke-width="1.5"/>
-    <path d="M${SC_cx-SC_rP},${SC_cy} A${SC_rP},${SC_rP} 0 0,0 ${SC_cx+SC_rP},${SC_cy}" fill="none" stroke="${SC_line}" stroke-width="1.2"/>
-    <circle cx="${SC_cx}" cy="${SC_cy}" r="9" fill="none" stroke="#c2611f" stroke-width="2"/>
-    <line x1="${SC_cx-26}" y1="${SC_cB-3}" x2="${SC_cx+26}" y2="${SC_cB-3}" stroke="${SC_line}" stroke-width="3"/>`;
-}
-
-function _scSvgWrap(inner) {
-  return `<svg viewBox="0 0 ${SC_W} ${SC_H}" xmlns="http://www.w3.org/2000/svg"
-    style="width:100%;max-width:440px;margin:0 auto;display:block;border-radius:8px">
-    <defs>
-      <clipPath id="sc-clip"><rect x="${SC_cL}" y="${SC_cT}" width="${SC_cR-SC_cL}" height="${SC_cB-SC_cT}"/></clipPath>
-    </defs>
-    ${inner}
-  </svg>`;
-}
-
-// 11 zonas — requiere coordenadas reales de tiro (array `shot` de FIBA con x/y)
-function _shotChart11SVG(zones, totalShots, summary) {
-  return _scSvgWrap(`
-    ${_courtLinesSVG()}
-    <!-- Cajas de estadística por zona (heatmap) -->
-    ${_scLbl(zones, totalShots, 'top_key_3',       SC_cx,          70)}
-    ${_scLbl(zones, totalShots, 'left_wing_3',     SC_cL + 34,    150)}
-    ${_scLbl(zones, totalShots, 'right_wing_3',    SC_cR - 34,    150)}
-    ${_scLbl(zones, totalShots, 'mid_top',         SC_cx,         162)}
-    ${_scLbl(zones, totalShots, 'mid_left_far',    SC_cx - 64,    206)}
-    ${_scLbl(zones, totalShots, 'mid_right_far',   SC_cx + 64,    206)}
-    ${_scLbl(zones, totalShots, 'restricted_area', SC_cx,         236)}
-    ${_scLbl(zones, totalShots, 'mid_left_close',  SC_cx - 64,    263)}
-    ${_scLbl(zones, totalShots, 'mid_right_close', SC_cx + 64,    263)}
-    ${_scLbl(zones, totalShots, 'left_corner_3',   SC_cL + 30,    263)}
-    ${_scLbl(zones, totalShots, 'right_corner_3',  SC_cR - 30,    263)}
-    ${_scBadge(summary)}`);
-}
-
-// 3 zonas — fallback honesto cuando el partido no trae coordenadas de tiro
-// (Feature 01: sdd/specs/01-shot-chart-fallback-visual). Solo `top_key_3`,
-// `mid_top` y `restricted_area` pueden tener attempts>0 en este caso.
-function _shotChart3SVG(zones, totalShots, summary) {
-  return _scSvgWrap(`
-    ${_courtLinesSVG()}
-    <!-- Cajas de estadística: Triple / Media / Pintura -->
-    ${_scLbl(zones, totalShots, 'top_key_3',       SC_cx, 70)}
-    ${_scLbl(zones, totalShots, 'mid_top',         SC_cx, 162)}
-    ${_scLbl(zones, totalShots, 'restricted_area', SC_cx, 236)}
-    ${_scBadge(summary)}`);
-}
-
-// Dispatcher: `hasCoordinates` viene de `GET /api/shots/...` (`has_coordinates`).
-function _shotChartSVG(zones, totalShots, summary, hasCoordinates) {
-  return hasCoordinates === false
-    ? _shotChart3SVG(zones, totalShots, summary)
-    : _shotChart11SVG(zones, totalShots, summary);
 }
 
 // ── Player section — competencia resuelta en el servidor (C-02) ────────────
@@ -2061,15 +1933,16 @@ function _renderPlayerContent(main, data) {
       });
     }
 
-    // Shot chart — async, non-blocking (global del jugador, no filtrado por competencia)
-    api.playerShots(teamCode, playerName).then(shots => {
-      if (!shots || !shots.total_shots) return;
+    // Shot chart — async, non-blocking (C-03: usa api.shotZones + shotChart)
+    api.shotZones({ entity: 'player', id: data.player_id, competition: _playerComp }).then(shots => {
+      if (!shots || !shots.summary?.total_shots) return;
       const shotCard = document.createElement("div");
       shotCard.className = "card";
       shotCard.innerHTML = `
         <div class="card-title">Shot chart por zonas <span style="color:var(--muted2);font-weight:400;text-transform:none;letter-spacing:0">— ${playerName}</span></div>
-        ${_shotChartSVG(shots.zones, shots.total_shots, shots.summary, shots.has_coordinates)}`;
+        ${shotChart(shots)}`;
       main.insertBefore(shotCard, main.querySelector(".chart-grid"));
+      bindZoneTooltips(shotCard, shots);
     }).catch(() => {});
   }
 }

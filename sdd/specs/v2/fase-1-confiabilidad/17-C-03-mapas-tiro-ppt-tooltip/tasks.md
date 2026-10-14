@@ -1,6 +1,6 @@
 # Tasks — C-03: Mapas de tiro: PPT y detalle por zona
 
-> **ID:** C-03 · **Fase y orden:** 1·17 · **Estado:** Borrador (agente) — pendiente de revisión humana (gate Paso 3)
+> **ID:** C-03 · **Fase y orden:** 1·17 · **Estado:** ✅ Aprobado
 > **Fuente:** [plan.md](plan.md) · [spec.md](spec.md)
 
 ## Orden de ejecución

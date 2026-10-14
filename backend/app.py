@@ -26,6 +26,7 @@ import bundles  # noqa: F401 — se importa para que registre los 5 tipos de ent
 import cache
 import tables  # noqa: F401 — se importa para que registre las tablas de T-06 al arrancar
 import export_xlsx
+import shot_zones
 from metrics_catalog import MetricsError
 from tables import TableError
 from competitions import CompetitionError
@@ -110,91 +111,9 @@ def _opp_for(game_id: str, team_code: str) -> TeamGameStats | None:
     ).first()
 
 
-def _classify_zone(action_type: str, sub_type: str, y: float = 0, x: float = 0) -> str:
-    if action_type == "3pt":
-        if x != 0 or y != 0:
-            if y < 15 or y > 85:
-                return "corner_3"
-        return "above_break_3"
-    sub = (sub_type or "").lower()
-    if any(k in sub for k in ["layup", "dunk", "alley", "tip", "hook", "putback", "driving"]):
-        return "paint"
-    return "mid_range"
-
-
-_PAINT_KWORDS = {"layup", "dunk", "alley", "tip", "hook", "putback", "driving", "fingerroll"}
-
-ZONE_KEYS_11 = [
-    "restricted_area",
-    "mid_left_close", "mid_right_close",
-    "mid_left_far",   "mid_right_far",   "mid_top",
-    "left_corner_3",  "right_corner_3",
-    "left_wing_3",    "right_wing_3",    "top_key_3",
-]
-
-ZONE_POINTS = {
-    "restricted_area": 2, "mid_left_close": 2, "mid_right_close": 2,
-    "mid_left_far": 2,    "mid_right_far": 2,   "mid_top": 2,
-    "left_corner_3": 3,   "right_corner_3": 3,
-    "left_wing_3": 3,     "right_wing_3": 3,    "top_key_3": 3,
-}
-
-_2PT_ZONES = {"restricted_area", "mid_left_close", "mid_right_close",
-              "mid_left_far", "mid_right_far", "mid_top"}
-_3PT_ZONES = {"left_corner_3", "right_corner_3", "left_wing_3",
-              "right_wing_3", "top_key_3"}
-
-
-def _classify_zone_11(action_type: str, sub_type: str, x: float = 0, y: float = 0) -> str:
-    """
-    Classify a shot into one of 11 zones.
-
-    Coordinate system (FIBA LiveStats normalized):
-      x: 0–100, center=50, left<50
-      y: 0–100, baseline=0, increases away from basket
-
-    Zone geometry matches SVG rendering:
-      restricted_area  = full paint box (x 34–66)
-      mid_left_close   = outside paint left, near baseline (x<34, y<25)
-      mid_right_close  = outside paint right, near baseline (x>66, y<25)
-      mid_left_far     = left elbow / wing mid (x<42, y≥25)
-      mid_right_far    = right elbow (x≥58, y≥25)
-      mid_top          = high post center (x 42–58, y≥25)
-    """
-    sub       = (sub_type or "").lower()
-    has_coord = x != 0 or y != 0
-
-    if action_type == "3pt":
-        if has_coord and y < 14:
-            return "left_corner_3" if x < 50 else "right_corner_3"
-        if not has_coord:
-            return "top_key_3"
-        if x < 38:
-            return "left_wing_3"
-        if x >= 62:
-            return "right_wing_3"
-        return "top_key_3"
-
-    # 2pt — paint keywords always → restricted area
-    paint_sub = any(k in sub for k in _PAINT_KWORDS)
-    if paint_sub:
-        return "restricted_area"
-
-    if has_coord:
-        # Inside paint box (lane lines x ≈ 34–66)
-        if 34 <= x <= 66:
-            return "restricted_area"
-        # Outside paint, near baseline
-        if y < 25:
-            return "mid_left_close" if x < 50 else "mid_right_close"
-        # Mid-range above baseline
-        if x < 42:
-            return "mid_left_far"
-        if x >= 58:
-            return "mid_right_far"
-        return "mid_top"
-
-    return "mid_top"
+# Zone constants and classification moved to shot_zones.py (C-03)
+from shot_zones import (ZONE_KEYS_11, ZONE_POINTS, _2PT_ZONES, _3PT_ZONES,
+                         _PAINT_KWORDS, classify_zone as _classify_zone_11)
 
 
 def _opp_dict(opp: TeamGameStats) -> dict:
@@ -591,34 +510,16 @@ def player_stats(team_code: str, player_name: str):
 # ── Shots (jugador y equipo) ─────────────────────────────────────────────────
 
 def _zones_from_shots(rows):
-    """Clasifica una lista de tiros en las 11 zonas + totales. Compartido jugador/equipo."""
-    has_coordinates = any((row.x or 0) != 0 or (row.y or 0) != 0 for row in rows)
-    zones = {k: {"made": 0, "attempts": 0} for k in ZONE_KEYS_11}
-    for row in rows:
-        z = _classify_zone_11(row.action_type, row.sub_type, row.x or 0, row.y or 0)
-        zones[z]["attempts"] += 1
-        zones[z]["made"]     += row.made
+    """Clasifica una lista de tiros en las 11 zonas + totales. Delegado a shot_zones (C-03).
 
-    total_fga = sum(z["attempts"] for z in zones.values())
-    total_pts = sum(zones[k]["made"] * ZONE_POINTS[k] for k in ZONE_KEYS_11)
-    fgm2 = sum(zones[k]["made"] for k in _2PT_ZONES)
-    fgm3 = sum(zones[k]["made"] for k in _3PT_ZONES)
-
-    for k, z in zones.items():
-        if z["attempts"]:
-            z["pct"] = round(z["made"] / z["attempts"], 4)
-            # PPT = puntos de la zona / intentos de la zona. Antes se llamaba `pf`:
-            # misma fórmula, etiqueta equivocada (C-03 / Feature 16 §9).
-            z["ppt"] = round(z["made"] * ZONE_POINTS[k] / z["attempts"], 3)
-            # eFG% de la zona = (FGM + 0.5×3PM)/FGA aplicado a una zona de un solo
-            # valor de puntos → factor 1.0 en zonas de 2, 1.5 en zonas de 3.
-            factor   = 1.5 if ZONE_POINTS[k] == 3 else 1.0
-            z["efg"] = round(z["made"] * factor / z["attempts"], 4)
-        else:
-            z["pct"] = None
-            z["ppt"] = None
-            z["efg"] = None
-
+    Preserves legacy field names (pct, efg) alongside the new ones (fg_pct, efg_pct).
+    """
+    zones, total_fga, total_pts, fgm2, fgm3, has_coordinates = shot_zones.zone_table(rows)
+    # Legacy routes used 'pct' and 'efg'; zone_table uses 'fg_pct' and 'efg_pct'.
+    # Add legacy aliases for backward compatibility.
+    for z in zones.values():
+        z["pct"] = z["fg_pct"]
+        z["efg"] = z["efg_pct"]
     return zones, total_fga, total_pts, fgm2, fgm3, has_coordinates
 
 
@@ -697,6 +598,68 @@ def team_shots(team_code: str):
             "games":     games,
         },
     })
+
+
+# ── Shot zones with percentile and sample (C-03) ──────────────────────────
+
+@app.route("/api/shot-zones")
+@login_required
+def shot_zones_route():
+    """Shot zones enriched with PPT percentile and sample badge (C-03)."""
+    entity = request.args.get("entity")
+    if entity not in ("team", "player"):
+        return jsonify({"error": "El parametro entity debe ser 'team' o 'player'",
+                        "code": "parametro_invalido"}), 400
+
+    entity_id = request.args.get("id", "")
+    if not entity_id:
+        return jsonify({"error": "Se requiere el parametro id",
+                        "code": "parametro_invalido"}), 400
+
+    # Resolve competition and last from query args
+    try:
+        comp_raw = request.args.get("competition")
+        comp_id = competitions.resolve(comp_raw) if comp_raw else None
+    except CompetitionError as e:
+        return jsonify({"error": str(e)}), e.status
+
+    last_raw = request.args.get("last", "").strip()
+    last = None
+    if last_raw:
+        try:
+            last = int(last_raw)
+            if last < 1:
+                raise ValueError
+        except ValueError:
+            return jsonify({"error": "El parametro last debe ser un entero mayor a 0.",
+                            "code": "parametro_invalido"}), 400
+
+    if entity == "team":
+        entity_id = entity_id.upper()
+        shots_fn = shot_zones._shots_for_team
+    else:
+        # player: entity_id is player_id
+        try:
+            entity_id = int(entity_id)
+        except ValueError:
+            return jsonify({"error": "El id de jugador debe ser un entero",
+                            "code": "parametro_invalido"}), 400
+        entity_id = identity.canonical_id(entity_id)
+        if entity_id is None:
+            return jsonify({"error": "Jugador no encontrado"}), 404
+        shots_fn = shot_zones._shots_for_player
+
+    result = shot_zones.zones_with_stats(entity, entity_id, comp_id, last, shots_fn)
+
+    # Build context echo
+    labels = competitions.labels()
+    comp_label = labels.get(comp_id, {}).get("label") if comp_id else None
+    result["context"] = {
+        "competition": {"id": comp_id, "label": comp_label},
+        "applied": {"last": last} if last else {},
+    }
+
+    return jsonify(result)
 
 
 # ── Player search ────────────────────────────────────────────────────────────

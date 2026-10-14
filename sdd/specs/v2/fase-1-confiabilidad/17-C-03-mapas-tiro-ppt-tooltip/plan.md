@@ -3,7 +3,7 @@
 > **ID:** C-03 · **Prioridad:** P1 · **Fase y orden:** 1·17
 > **Depende de:** C-07 — [`../10-C-07-detalle-tiro-completo/plan.md`](../10-C-07-detalle-tiro-completo/plan.md) · T-01 — [`../15-T-01-ficha-de-metrica/plan.md`](../15-T-01-ficha-de-metrica/plan.md) · T-02 — [`../14-T-02-confiabilidad-muestra/plan.md`](../14-T-02-confiabilidad-muestra/plan.md)
 > **Habilita:** A-05, F-07, A-09
-> **Estado:** Borrador (agente) — pendiente de revisión humana (gate Paso 2)
+> **Estado:** ✅ Aprobado
 > **Fuente:** [spec.md](spec.md) · Especificación v2 §2 · C-03 · Arquitectura §1.5, §1.6, §2.2, §3.5, §3.6, §3.7, §4, §6, §8
 > **Estimación:** L · 12–18 h
 

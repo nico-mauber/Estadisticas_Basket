@@ -28,6 +28,7 @@ frontend/
 │       ├── standard-panel.js # Panel estándar de métricas (T-05)
 │       ├── metric-card.js   # Card de ficha con ranking (T-01)
 │       ├── sample-badge.js  # Badge de muestra (T-02)
+│       ├── shot-chart.js    # SVG cancha + tooltip/sheet por zona (C-03)
 │       └── settings-form.js # Formulario de configuración (F-13)
 └── icons/
     ├── icon-192.png    # Ícono PWA 192×192 (basketball)
@@ -55,7 +56,7 @@ La navegación es por `#hash` o botones de tab. No hay routing del servidor.
 
 **ON/OFF — minutos:** el panel muestra `N' en cancha` (tiempo de juego del equipo con el jugador en cancha/banca). La suma de segundos por partido es exacta (arreglado el doble-conteo por reloj no-monótono en `build_segments`).
 
-**Mapa de tiro del equipo (Feature 10):** además del mapa por jugador (botón "Ver mapa de tiro"), la vista Equipo muestra automáticamente el mapa AGREGADO del equipo (`#team-teamshot`, `renderTeamShotmapTeam` → `api.teamShots`), reusando `_shotChartSVG`.
+**Mapa de tiro del equipo (Feature 10 + C-03):** además del mapa por jugador (botón "Ver mapa de tiro"), la vista Equipo muestra automáticamente el mapa AGREGADO del equipo (`#team-teamshot`, `renderTeamShotmapTeam` → `api.shotZones`), usando `shotChart` + `bindZoneTooltips` de `components/shot-chart.js`.
 
 **Más stats en Combinación y Comparar (Feature 11):** la card de Combinación (lineup) incluye una tabla ancha (`.search-table`) con la línea completa (Off/Def/Net/eFG%/TS%/Pos/Pts/REB/AST/…); Comparar incluye una card "Métricas avanzadas" (tabla de 2 filas, una por equipo).
 
@@ -210,16 +211,25 @@ Al agregar una tabla ordenable nueva, usar este helper — no escribir un compar
 Un `null` tampoco recibe color de rendimiento: `statClass` y `winCls` (Comparar) devuelven clase
 neutra si falta cualquiera de los dos lados. Ver `sdd/specs/12-nulos-orden-color-dnp/`.
 
-## Shot chart
+## Shot chart (`components/shot-chart.js`, C-03)
 
-SVG de cancha clara estilo "El Metro" (`frontend/js/app.js`), generado por `_shotChartSVG(zones, totalShots, summary, hasCoordinates)`:
+SVG de cancha clara estilo "El Metro", extraído de `app.js` a `components/shot-chart.js`. Consume `GET /api/shot-zones` vía `api.shotZones(params)`.
 
-- `hasCoordinates=true` → `_shotChart11SVG`: 11 casilleros (restricted_area, mid_left/right_close, mid_left/right_far, mid_top, left/right_corner_3, left/right_wing_3, top_key_3).
-- `hasCoordinates=false` → `_shotChart3SVG`: 3 casilleros (Triple/top_key_3, Media/mid_top, Pintura/restricted_area). Hoy es el caso de todos los partidos: FIBA sí publica coordenadas (`tm[n].shot[]`) y desde F-11 se guardan en `shots.court_x/court_y`, pero el mapa de 11 zonas las usa recién en C-03 (ver [api.md → GET /api/shots](api.md#get-apishotsteam_codeplayer_name)).
+**Exports:**
+- `shotChart(payload, opts)` — renderiza SVG. Elige 11 zonas o 3 zonas según `payload.has_coordinates`.
+- `bindZoneTooltips(el, payload)` — enlaza interacción a los elementos `[data-zone]`: desktop (`hover:hover`) muestra tooltip posicionado cerca del cursor; mobile muestra bottom sheet con botón cerrar y backdrop.
 
-Ambos modos comparten geometría de cancha, paleta y heatmap por P/F (`_courtLinesSVG`, `_scLbl`, `_scBadge`, constantes `SC_*`) — sin duplicación de estilo entre modos.
+**Datos del tooltip (7 puntos):** nombre de zona, made/attempts, FG%, eFG%, PPT, share %, percentil, sample badge (si no es "alta").
 
-El mismo mapa se muestra en dos lugares: en la vista **Jugador** (`renderPlayer`) y dentro de la vista **Equipo** vía el botón "Ver mapa de tiro" (`renderTeamShotmap` → contenedor `#team-shotmap`). Ambos reusan `api.playerShots(...)` + `_shotChartSVG(...)`.
+**Colores por zona:** `percentileColor(zone.percentile)` de `core/colors.js`. Sin percentil (null): gris neutro `#d1d5db`. Zona con 0 intentos: caja gris chica con "—".
+
+**Modos:**
+- `has_coordinates=true` → 11 casilleros (restricted_area, mid_left/right_close, mid_left/right_far, mid_top, left/right_corner_3, left/right_wing_3, top_key_3).
+- `has_coordinates=false` → 3 casilleros (top_key_3, mid_top, restricted_area).
+
+**Call sites (3):** vista Equipo mapa agregado (`renderTeamShotmapTeam`), vista Equipo mapa por jugador (`renderTeamShotmap`), vista Jugador. Todos usan `api.shotZones({entity, id, competition})` + `shotChart(shots)` + `bindZoneTooltips(el, shots)`. Estado vacío: "Sin tiros registrados para este equipo/jugador."
+
+**CSS:** `.sc-tooltip` (desktop, position fixed, z-index 9999), `.sc-sheet` + `.sc-sheet-backdrop` (mobile bottom sheet).
 
 ## Login (frontend)
 
@@ -230,7 +240,7 @@ El mismo mapa se muestra en dos lugares: en la vista **Jugador** (`renderPlayer`
 
 ## Service Worker (`sw.js`)
 
-Cache name: `smart-basket-v22`
+Cache name: `smart-basket-v24`
 
 **Estrategia:**
 - `install`: pre-cachea los archivos estáticos listados en `STATIC[]`
@@ -245,7 +255,7 @@ Cache name: `smart-basket-v22`
 "/js/app.js", "/js/api.js", "/js/charts.js", "/js/core/format.js",
 "/js/core/prefs.js", "/js/core/catalog.js", "/js/core/colors.js", "/js/components/identity-merge.js",
 "/js/components/settings-form.js", "/js/components/standard-panel.js", "/js/components/sample-badge.js",
-"/js/components/metric-card.js", "/js/chart.umd.min.js"
+"/js/components/metric-card.js", "/js/components/shot-chart.js", "/js/chart.umd.min.js"
 ```
 
 Todo módulo ES nuevo que importe `app.js` debe agregarse a `STATIC` (y subir `CACHE`): el fetch

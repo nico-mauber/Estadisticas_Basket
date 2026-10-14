@@ -25,6 +25,7 @@ Smart-Basket es un monolito full-stack: Flask sirve tanto la API REST como los a
 │  │   lineups.py       (quintetos: lineups + on/off)  │   │
 │  │   config.py        (configuración global, F-13)   │   │
 │  │   prefs.py         (preferencias usuario, F-13)   │   │
+│  │   shot_zones.py    (zonas de tiro + percentil, C-03)│   │
 │  │   tables.py        (tablas completas, T-06)       │   │
 │  │   export_xlsx.py   (XLSX SpreadsheetML, T-06)     │   │
 │  │   database.py      (SQLite vía /data/basketball.db)│  │
@@ -116,6 +117,9 @@ Caché entre peticiones versionada (T-01). `memo(namespace, key, build_fn)` con 
 prefijadas por `(data_version, config_version)` leídas de la tabla `app_meta`. `bump_data_version` /
 `bump_config_version` invalidan todo lo cacheado al escribir datos (ingesta, borrado, competencias, identidad)
 o configuración (F-13). Tolerante a correr fuera de `app_context`.
+
+### `shot_zones.py`
+Zonas de tiro y percentil por zona (C-03). Extrae la clasificación de 11 zonas de `app.py` y agrega enriquecimiento estadístico. `classify_zone(action_type, sub_type, court_x, court_y, qualifiers)` clasifica un tiro en una de las 11 zonas (ZONE_KEYS_11). `zone_table(shots)` agrega tiros por zona con FG%, eFG%, PPT y share. `zones_with_stats(entity_type, entity_id, comp_id, last, shots_query_fn)` añade percentil y muestra por zona comparando con la población de la competencia. Alimenta `GET /api/shot-zones`.
 
 ### `sample.py`
 Confiabilidad de muestra (T-02): niveles (`baja`/`media`/`alta`), umbral relativo con piso absoluto, prior de

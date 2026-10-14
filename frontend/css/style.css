@@ -1171,6 +1171,45 @@ tbody tr.fuera-poblacion { opacity: .6; }
 .bulk-export .bulk-field { display: flex; flex-direction: column; gap: 4px; }
 .bulk-export label { font-size: 11px; color: var(--muted); font-weight: 600; }
 
+/* ── shot-chart tooltip (C-03) ── */
+.sc-tooltip {
+  position: fixed;
+  z-index: 1000;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 13px;
+  line-height: 1.5;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  pointer-events: none;
+  max-width: 240px;
+}
+.sc-tooltip .sc-ci { font-weight: 700; font-size: 15px; }
+.sc-tooltip .sc-row { display: flex; justify-content: space-between; gap: 12px; }
+.sc-tooltip .sc-pct { color: var(--muted); }
+
+/* Bottom sheet for mobile */
+.sc-sheet {
+  position: fixed; bottom: 0; left: 0; right: 0;
+  z-index: 1001;
+  background: var(--card);
+  border-top: 1px solid var(--border);
+  border-radius: 12px 12px 0 0;
+  padding: 16px;
+  box-shadow: 0 -4px 16px rgba(0,0,0,0.15);
+}
+.sc-sheet-backdrop {
+  position: fixed; inset: 0;
+  z-index: 1000;
+  background: rgba(0,0,0,0.3);
+}
+.sc-sheet .sc-close {
+  position: absolute; top: 8px; right: 12px;
+  background: none; border: none; font-size: 20px; cursor: pointer;
+  color: var(--text);
+}
+
 /* ── @media print (T-06) ── */
 #print-root { display: none; }
 @media print {

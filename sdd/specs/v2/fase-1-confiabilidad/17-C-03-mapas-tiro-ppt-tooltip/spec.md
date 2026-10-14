@@ -3,7 +3,7 @@
 > **ID:** C-03 · **Prioridad:** P1 · **Fase y orden:** 1·17
 > **Depende de:** C-07 — [`../10-C-07-detalle-tiro-completo/spec.md`](../10-C-07-detalle-tiro-completo/spec.md) · T-01 — [`../15-T-01-ficha-de-metrica/spec.md`](../15-T-01-ficha-de-metrica/spec.md) · T-02 — [`../14-T-02-confiabilidad-muestra/spec.md`](../14-T-02-confiabilidad-muestra/spec.md)
 > **Habilita:** A-05, F-07, A-09
-> **Estado:** Borrador (agente) — pendiente de revisión humana (gate Paso 1)
+> **Estado:** ✅ Aprobado
 > **Fuente:** Especificación v2 §2 · C-03 ([`../../00-especificacion-cliente-v2.md`](../../00-especificacion-cliente-v2.md)) · Arquitectura §1.0 (fila C-03/C-07), §1.5 D-06/D-07, §1.6, §2.2 (DA-03, DA-35), §3.5, §3.6, §4, §5, §6, §8, §9.1 ([`../../00-arquitectura-transversal.md`](../../00-arquitectura-transversal.md))
 
 ## 0. Contexto y situación actual
@@ -234,7 +234,7 @@ jugador."` (vacío de sección), `"{c}/{i}"` (formato convertidos/intentados), `
   parte del alcance normal — se aclara para que no se lea como pendiente).
 
 ## 9. Ambigüedades
-- **[DECISIÓN PROPUESTA — confirmar] Alcance de la corrección de geometría D-07.** La arquitectura marca D-07
+- **[DECISIÓN CONFIRMADA] Alcance de la corrección de geometría D-07.** La arquitectura marca D-07
   ("`_classify_zone_11` asume media cancha normalizada; FIBA da cancha completa") como responsabilidad de C-03
   (`shot_zones.py`), pero la transformación de coordenadas crudas de FIBA a media cancha (`to_half_court`) la crea
   F-11 según el mapa de módulos (§4: `shot_zones.py` con `to_half_court`, dueño C-03 según la tabla, pero
@@ -243,22 +243,22 @@ jugador."` (vacío de sección), `"{c}/{i}"` (formato convertidos/intentados), `
   `_classify_zone_11`** para que coincidan con esa media cancha ya transformada (no rehace la transformación). Si al
   implementar F-11 no entrega la transformación completa, C-03 documenta el hueco en progress.md y trabaja sobre
   coordenadas crudas con una nota de precisión reducida.
-- **[DECISIÓN PROPUESTA — confirmar] Población de referencia del percentil de zona.** La arquitectura no detalla
+- **[DECISIÓN CONFIRMADA] Población de referencia del percentil de zona.** La arquitectura no detalla
   explícitamente los criterios de población para el tipo de entidad `zone` (T-05 §3.5 solo dice que C-03 registra
   ese tipo). Se adopta: la población de una zona de **equipo** son todos los equipos de la competencia con al menos
   `sample.team.min` partidos (mismo criterio que T-01 para equipos, aplicado a su PPT de esa zona); la población de
   una zona de **jugador** son todos los jugadores con `minutes ≥ sample.player.min` (mismo criterio que T-01 para
   jugadores). Sin T-01 implementado todavía en el momento de escribir este spec, C-03 declara esta regla y la
   aplica llamando a `population()`/`ficha()` de `population.py` (dueño T-01, orden 15, anterior a C-03 en la fase).
-- **[DECISIÓN PROPUESTA — confirmar] "Peso de la zona" — sobre qué universo.** El cliente dice "% de los tiros del
+- **[DECISIÓN CONFIRMADA] "Peso de la zona" — sobre qué universo.** El cliente dice "% de los tiros del
   equipo o jugador"; se adopta: peso = intentos de la zona / intentos totales del **mismo contexto** que el resto
   del tooltip (mismo `competition`/`last` aplicado), no del histórico completo sin filtrar — así es coherente con
   RF-4 ("respeta la barra de contexto").
-- **[DECISIÓN PROPUESTA — confirmar] Umbral de muestra para zonas (T-02).** La arquitectura fija `sample.clock_zone.min`
+- **[DECISIÓN CONFIRMADA] Umbral de muestra para zonas (T-02).** La arquitectura fija `sample.clock_zone.min`
   (10 intentos) / `.high` (30) en `CONFIG_SPEC` (§3.2), bajo el consumidor "T-02, C-03, A-05" — se adopta esa clave
   también para la unidad "intentos" de zona de tiro (no crea una clave nueva), aunque su nombre menciona "clock_zone"
   (compartida con A-05, que también usa zonas del reloj de posesión).
-- **[DECISIÓN PROPUESTA — confirmar] `GET /api/shot-zones` vs. migrar `/api/shots/...`.** Se crea el endpoint nuevo
+- **[DECISIÓN CONFIRMADA] `GET /api/shot-zones` vs. migrar `/api/shots/...`.** Se crea el endpoint nuevo
   (arquitectura §6 lo fija como dueño C-03) y las rutas legado delegan en él para no duplicar lógica, agregando
   `share` a su respuesta actual sin retirar ningún campo — así ninguna vista que ya usa `/api/shots/...` se rompe
   mientras no se la migre explícitamente al nuevo endpoint.

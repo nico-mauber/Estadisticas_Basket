@@ -71,6 +71,7 @@ export const api = {
   player:        (code, name, params = {}) => apiFetch(`/api/player/${encodeURIComponent(code)}/${encodeURIComponent(name)}${qs(params)}`),
   playerShots:   (code, name) => apiFetch(`/api/shots/${encodeURIComponent(code)}/${encodeURIComponent(name)}`),
   teamShots:     code       => apiFetch(`/api/shots/${encodeURIComponent(code)}`),
+  shotZones:     params     => apiFetch(`/api/shot-zones${qs(params)}`),
   searchPlayers: (params = {}) => apiFetch(`/api/search/players${qs(params)}`),
   mergePlayers:  (targetId, sourceId) => send("/api/identity/merge", "POST", { target_id: targetId, source_id: sourceId }),
   // Cierres: "all" (todas las competencias) se envía como "sin parámetro": este endpoint no entiende "all"
