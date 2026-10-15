@@ -28,6 +28,8 @@ import tables  # noqa: F401 — se importa para que registre las tablas de T-06 
 import export_xlsx
 import shot_zones
 import possessions
+import game_analysis
+import matchups  # noqa: F401 — registra entidad matchup
 from metrics_catalog import MetricsError
 from tables import TableError
 from competitions import CompetitionError
@@ -818,6 +820,122 @@ def game_pbp(game_id: str):
         "first":          _to_dict(rows[0]),
         "last":           _to_dict(rows[-1]),
     })
+
+
+# ── Análisis de partido (F-07) ──────────────────────────────────────────────
+
+@app.route("/api/game/<game_id>")
+@login_required
+def game_detail_route(game_id: str):
+    base = request.args.get("base", "total")
+    if base not in ("total", "partido", "por40", "por100"):
+        return jsonify({"error": "Base de normalización inválida", "code": "parametro_invalido"}), 400
+    result = game_analysis.game_detail(game_id, base)
+    if result is None:
+        return jsonify({"error": "Partido no encontrado", "code": "no_encontrado"}), 404
+    return jsonify(result)
+
+
+@app.route("/api/game/<game_id>/pbp")
+@login_required
+def game_pbp_route(game_id: str):
+    game = Game.query.filter_by(game_id=game_id).first()
+    if not game:
+        return jsonify({"error": "Partido no encontrado", "code": "no_encontrado"}), 404
+    events = game_analysis._load_events(game_id)
+    if not events:
+        return jsonify({"error": "Partido sin play-by-play. Reimportá el partido.",
+                        "code": "sin_pbp"}), 404
+
+    player_id = None
+    raw_player = request.args.get("player")
+    if raw_player:
+        try:
+            player_id = int(raw_player)
+        except (ValueError, TypeError):
+            return jsonify({"error": "Jugador inválido", "code": "parametro_invalido"}), 400
+
+    types = None
+    raw_type = request.args.get("type")
+    if raw_type:
+        types = [t.strip() for t in raw_type.split(",") if t.strip()]
+
+    periods = None
+    raw_period = request.args.get("period")
+    if raw_period:
+        periods = [p.strip() for p in raw_period.split(",") if p.strip()]
+
+    try:
+        result = game_analysis.game_pbp(
+            game_id, events, game.home_code, game.away_code,
+            player_id=player_id, types=types, periods=periods,
+        )
+    except ValueError as e:
+        return jsonify({"error": str(e), "code": "parametro_invalido"}), 400
+    return jsonify(result)
+
+
+@app.route("/api/game/<game_id>/matchups")
+@login_required
+def game_matchups_route(game_id: str):
+    game = Game.query.filter_by(game_id=game_id).first()
+    if not game:
+        return jsonify({"error": "Partido no encontrado", "code": "no_encontrado"}), 404
+    events = PbpEvent.query.filter_by(game_id=game_id).first()
+    if not events:
+        return jsonify({"error": "Partido sin play-by-play: no se pueden calcular los cruces.",
+                        "code": "sin_pbp"}), 404
+
+    level = request.args.get("level", "quinteto")
+    side = request.args.get("side", "home")
+
+    try:
+        result = matchups.game_matchups(game_id, level, side=side)
+    except ValueError as e:
+        return jsonify({"error": str(e), "code": "parametro_invalido"}), 400
+
+    if result is None:
+        return jsonify({"error": "No se pudieron calcular los cruces.", "code": "sin_pbp"}), 404
+    return jsonify(result)
+
+
+@app.route("/api/game/<game_id>/shots")
+@login_required
+def game_shots_route(game_id: str):
+    team = request.args.get("team")
+    if not team:
+        return jsonify({"error": "Parámetro obligatorio: team", "code": "parametro_invalido"}), 400
+
+    player_id = None
+    raw_player = request.args.get("player")
+    if raw_player:
+        try:
+            player_id = int(raw_player)
+        except (ValueError, TypeError):
+            return jsonify({"error": "Jugador inválido", "code": "parametro_invalido"}), 400
+
+    quarters = None
+    raw_q = request.args.get("quarter")
+    if raw_q:
+        quarters = [q.strip() for q in raw_q.split(",") if q.strip()]
+
+    bands = None
+    raw_c = request.args.get("clock")
+    if raw_c:
+        bands = [b.strip() for b in raw_c.split(",") if b.strip()]
+
+    zone = request.args.get("zone")
+
+    try:
+        result = game_analysis.game_shots(
+            game_id, team,
+            player_id=player_id, quarters=quarters, bands=bands, zone=zone,
+        )
+    except ValueError as e:
+        msg = str(e)
+        code = "no_encontrado" if "no encontrado" in msg.lower() else "parametro_invalido"
+        return jsonify({"error": msg, "code": code}), 404 if code == "no_encontrado" else 400
+    return jsonify(result)
 
 
 # ── Posesiones (A-01) ────────────────────────────────────────────────────────

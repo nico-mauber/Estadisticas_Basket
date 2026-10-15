@@ -168,6 +168,12 @@ _register(
        unit="entidades", label="Tamaño mínimo de población", section="umbrales", consumer="T-01",
        status="activa"),
 
+    # ── Contexto (activas — F-07) ──
+    _k("game.run_min_points", type="int", default=8, min=4, max=20,
+       unit="puntos", label="Puntos mínimos de racha destacada",
+       help="Mínimo de puntos consecutivos de un equipo sin respuesta para destacar una racha en la línea de tiempo del partido.",
+       section="contexto", consumer="F-07, F-01, F-02", status="activa"),
+
     # ── Contexto (reservadas) ──
     _k("context.close_margin", type="int", default=10, min=1, max=40,
        unit="puntos", label="Diferencia de partido cerrado (contexto)", section="contexto", consumer="T-03"),

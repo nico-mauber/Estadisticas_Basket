@@ -649,6 +649,128 @@ Conciliación de posesiones reconstruidas vs fórmula del glosario para una comp
 
 ---
 
+## GET `/api/game/<game_id>` — NUEVO (F-07)
+
+Detalle completo de un partido: encabezado, box oficial, parciales, línea de tiempo, jugadores con conjunto estándar, quintetos, conciliación. Cacheado por `cache.memo("game", ...)`.
+
+**Query:** `?base=total|partido|por40|por100` (default `total`).
+
+**Response 200:**
+```json
+{
+  "game": { "game_id": "12345", "home_code": "CNF", "away_code": "PEN",
+            "home_name": "CNF", "away_name": "PEN", "date": "2026-03-15",
+            "competition": { "id": 1, "label": "Liga de Ascenso 2026" },
+            "home_score": 82, "away_score": 75 },
+  "box": { "home": { "pts": 82, "fgm": 28, "fga": 58, "fg_pct": 48.3, "..." : "..." },
+           "away": { "..." : "..." } },
+  "partials": { "periods": [{ "key": "Q1", "label": "1er cuarto",
+                  "home_pts": 22, "away_pts": 18, "ratings": { "home": { "off": 1.1, "..." : "..." }, "away": { "..." : "..." } } }],
+                "overtimes": 0 },
+  "timeline": { "plays": [{ "elapsed": 45, "period": 1, "clock": "9:15",
+                  "team": "CNF", "pts": 2, "home_score": 2, "away_score": 0,
+                  "is_timeout": false }],
+                "runs": [{ "team": "CNF", "pts": 10, "start_elapsed": 120, "end_elapsed": 280 }],
+                "lead_changes": 5, "ties": 3, "biggest_lead": { "home": 12, "away": 8 } },
+  "players": { "home": [{ "player_id": 7, "name": "Juan Pérez", "position": "PG",
+                  "played": true, "minutes": "25:30", "standard": { "pts": 15, "..." : "..." } }],
+               "away": [ "..." ] },
+  "lineups": { "home": [{ "players": [7, 12, 15, 18, 21], "names": ["...", "..."],
+                  "minutes": "8:30", "possessions": 22, "badge": "estrella",
+                  "standard": { "off_rating": 112.5, "..." : "..." } }],
+               "away": [ "..." ] },
+  "reconciliation": { "score_final": true, "players_sum": false, "period_sum": true,
+                      "timeline_final": true, "details": { "..." : "..." } }
+}
+```
+
+**Errores:** `404 no_encontrado`; `400 parametro_invalido` (base inválida).
+
+---
+
+## GET `/api/game/<game_id>/pbp` — NUEVO (F-07)
+
+Jugada a jugada filtrable. Devuelve eventos del partido con marcador acumulado.
+
+**Query:** `?player=<player_id>&type=<tipo1,tipo2>&period=<Q1,Q2,OT1>` (todos opcionales). Tipos válidos: `tiro`, `tiro_libre`, `rebote`, `asistencia`, `perdida`, `robo`, `tapon`, `falta`, `cambio`, `tiempo_muerto`, `otro`.
+
+**Response 200:**
+```json
+{
+  "game_id": "12345",
+  "total": 593,
+  "filtered": 36,
+  "type_groups": { "tiro": 128, "rebote": 95, "falta": 42, "..." : "..." },
+  "plays": [{ "action_number": 1, "period": 1, "clock": "10:00",
+              "team": "CNF", "player": "Juan Pérez", "player_id": 7,
+              "action_type": "2pt", "sub_type": "layup", "success": true,
+              "score": "2-0", "description": "2PT Layup Juan Pérez" }]
+}
+```
+
+**Errores:** `404 no_encontrado`; `404 sin_pbp`; `400 parametro_invalido` (tipo o período inválido).
+
+---
+
+## GET `/api/game/<game_id>/matchups` — NUEVO (F-07)
+
+Coincidencia en cancha de un partido: cruces entre quintetos y/o jugadores.
+
+**Query:** `?level=quinteto|jugador|jugador_quinteto` (default `quinteto`), `?side=home|away` (default `home`).
+
+**Response 200 (level=quinteto):**
+```json
+{
+  "game_id": "12345", "level": "quinteto", "side": "home",
+  "rows": [{ "matchup_id": "CNF:7-12-15-18-21|PEN:3-4-8-11-14",
+             "own": { "code": "CNF", "players": [7, 12, 15, 18, 21], "names": ["..."] },
+             "opp": { "code": "PEN", "players": [3, 4, 8, 11, 14], "names": ["..."] },
+             "minutes": "5:20", "possessions": 14, "badge": "estrella",
+             "own_stats": { "pts": 12, "fg": "5/9", "..." : "..." },
+             "opp_stats": { "pts": 8, "..." : "..." },
+             "net": 4 }]
+}
+```
+
+**Response 200 (level=jugador):**
+```json
+{
+  "game_id": "12345", "level": "jugador", "side": "home",
+  "rows": [{ "player_a": { "id": 7, "name": "Juan Pérez" },
+             "player_b": { "id": 3, "name": "Carlos López" },
+             "minutes": "12:30", "possessions": 34,
+             "a_stats": { "pts": 8, "..." : "..." },
+             "b_stats": { "pts": 5, "..." : "..." },
+             "plus_minus": 3 }]
+}
+```
+
+**Errores:** `404 no_encontrado`; `404 sin_pbp`; `400 parametro_invalido` (level o side inválido).
+
+---
+
+## GET `/api/game/<game_id>/shots` — NUEVO (F-07)
+
+Mapa de tiro de un equipo en un partido, con zonas y filtros.
+
+**Query:** `?team=<code>` (obligatorio), `?player=<player_id>`, `?quarter=<Q1,Q2>`, `?clock=<band>`, `?zone=<zona>` (todos opcionales excepto team).
+
+**Response 200:**
+```json
+{
+  "game_id": "12345", "team": "CNF",
+  "total": 58, "filtered": 58, "no_band": 58,
+  "shots": [{ "x": 250, "y": 120, "made": true, "pts": 2, "zone": "paint",
+              "player": "Juan Pérez", "player_id": 7, "period": 1, "clock": "8:45" }],
+  "zones": [{ "zone": "paint", "label": "Pintura", "attempts": 18, "made": 10,
+              "pct": 55.6, "pts": 20, "pps": 1.11, "badge": "estrella" }]
+}
+```
+
+**Errores:** `400 parametro_invalido` (falta `team` o jugador inválido).
+
+---
+
 ## POST `/api/identity/merge` — admin
 
 Une dos fichas de jugador **del mismo equipo** (C-08): `target_id` conserva el id y absorbe a `source_id`. Las filas de `player_game_stats` de la absorbida pasan a la vigente y `source_id` queda con `merged_into`, de modo que `GET /api/player/<source_id>` y cualquier consulta por su nombre resuelven a la ficha vigente. No se modifica ninguna estadística ni nombre crudo.
