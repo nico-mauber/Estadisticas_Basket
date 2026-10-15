@@ -727,6 +727,15 @@ function _qualityCheckCard(title, c, key) {
     </table></div>`;
   } else if (key === "possible_duplicates") {
     body = '<div id="dup-panel"></div>';   // lo dibuja identity-merge.js (C-08)
+  } else if (key === "possession_gaps" && c.status !== "no_disponible") {
+    const n = c.count || 0, pct = c.pct != null ? DEC1(c.pct) : "—";
+    const games = c.items ? c.items.length : 0;
+    body = n ? `<p>${n} posesiones incompletas (${pct} %) en ${games} partido(s).</p>` : "";
+    if (c.items && c.items.length) {
+      const line = i => `<li class="poss-gap-item" data-game="${i.game_id}">${_fmtDate(i.date)} · ${esc(i.label)} — <span class="td-muted">${i.incomplete || 0} incompleta(s)</span></li>`;
+      body += `<details${c.items.length <= 5 ? " open" : ""}><summary>Ver ${c.items.length}</summary>
+        <ul class="quality-items">${c.items.map(line).join("")}</ul></details>`;
+    }
   } else if (c.items.length) {
     const line = i => `<li>${_fmtDate(i.date)} · ${esc(i.label)}${i.team_code ? ` · <b>${i.team_code}</b>` : ""}${i.detail ? ` — <span class="td-muted">${esc(i.detail)}</span>` : ""}</li>`;
     body = `<details${c.items.length <= 5 ? " open" : ""}><summary>Ver ${c.items.length}</summary>
@@ -774,11 +783,19 @@ async function _renderQualityTab(el) {
         <span>${s.games} partidos · ${s.incomplete_games} incompletos · ${isDraft ? "en borrador (oculta fuera de Datos)" : "publicada"}</span>
       </div>` : '<p class="empty">Esta competencia no tiene partidos.</p>'}
     </div>
-    ${s.games ? QUALITY_CHECKS.map(([k, t]) => _qualityCheckCard(t, rep.checks[k], k)).join("") : ""}`;
+    ${s.games ? QUALITY_CHECKS.map(([k, t]) => _qualityCheckCard(t, rep.checks[k], k)).join("") : ""}
+    <div id="poss-conciliation"></div>`;
 
   renderDuplicateItems(document.getElementById("dup-panel"), rep.checks.possible_duplicates, {
     isAdmin: _isAdmin, toast,
     onMerged: () => { _afterDataChange(); _renderQualityTab(el); },
+  });
+
+  if (s.games) _renderConciliation(document.getElementById("poss-conciliation"), requested);
+
+  el.querySelectorAll(".poss-gap-item[data-game]").forEach(li => {
+    li.style.cursor = "pointer";
+    li.addEventListener("click", () => _openPossInspection(li.dataset.game));
   });
 
   document.getElementById("quality-comp").addEventListener("change", e => {
@@ -807,6 +824,120 @@ async function _renderQualityTab(el) {
       : { title: "Pasar a borrador", text: "Sus partidos dejan de verse en Liga, Equipo, Jugador, Comparar y Buscar hasta que la publiques.",
           confirm: "Pasar a borrador", onSubmit: () => setStatus("borrador") });
   });
+}
+
+// ── Conciliación de posesiones (A-01, T-D1) ───────────────────────────────
+async function _renderConciliation(el, compId) {
+  el.innerHTML = '<p class="empty"><span class="spinner"></span>Conciliando posesiones…</p>';
+  let rc;
+  try { rc = await api.possessionsReconcile({ competition: compId }); }
+  catch { el.innerHTML = '<p class="empty td-muted">No se pudo cargar la conciliación de posesiones.</p>'; return; }
+  if (!el.isConnected) return;
+  const teams = rc.teams || [], totals = rc.totals || {}, over = rc.games_over_5pct || [];
+  const row = t => `<tr>
+    <td class="td-team">${esc(t.team_name || t.team_code)}</td>
+    <td style="text-align:right">${t.games}</td>
+    <td style="text-align:right">${t.counted}</td>
+    <td style="text-align:right">${DEC1(t.formula)}</td>
+    <td style="text-align:right" class="${t.diff_pct != null && Math.abs(t.diff_pct) > 2 ? "poss-alert" : ""}">${t.diff_pct != null ? DEC1(t.diff_pct) + " %" : "—"}</td>
+    <td style="text-align:right">${t.incomplete}</td></tr>`;
+  const csvData = [["Equipo", "Partidos", "Reconstruidas", "Fórmula", "Diferencia %", "Incompletas"],
+    ...teams.map(t => [t.team_name || t.team_code, t.games, t.counted, t.formula, t.diff_pct, t.incomplete])];
+  el.innerHTML = `
+    <div class="card">
+      <div class="games-header">
+        <div class="card-title" style="margin:0">Conciliación de posesiones</div>
+        <button class="btn btn-ghost btn-sm" id="btn-poss-csv">CSV</button>
+      </div>
+      <p class="td-muted" style="font-size:12px;margin:var(--sp-2) 0">Reconstruidas una por una vs fórmula del glosario. Diferencia admitida: 2 % por equipo.</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Equipo</th><th style="text-align:right">PJ</th><th style="text-align:right">Reconstruidas</th><th style="text-align:right">Fórmula</th><th style="text-align:right">Dif %</th><th style="text-align:right">Incompletas</th></tr></thead>
+        <tbody>${teams.map(row).join("")}</tbody>
+        <tfoot><tr class="td-muted"><td>Total</td><td></td><td style="text-align:right">${totals.counted || 0}</td><td style="text-align:right">${DEC1(totals.formula)}</td><td style="text-align:right">${totals.diff_pct != null ? DEC1(totals.diff_pct) + " %" : "—"}</td><td style="text-align:right">${totals.incomplete || 0}</td></tr></tfoot>
+      </table></div>
+      ${over.length ? `<div style="margin-top:var(--sp-3)">
+        <div class="card-title" style="font-size:13px">Partidos con diferencia mayor al 5 %</div>
+        <ul class="quality-items">${over.map(o => `<li class="poss-gap-item" data-game="${o.game_id}" style="cursor:pointer">${esc(o.team_code)} · ${DEC1(o.diff_pct)} % · ${o.counted} reconstruidas / ${DEC1(o.formula)} fórmula</li>`).join("")}</ul>
+      </div>` : '<p class="td-muted" style="font-size:12px;margin-top:var(--sp-2)">Ningún partido supera el 5 %.</p>'}
+    </div>`;
+  document.getElementById("btn-poss-csv")?.addEventListener("click", () => {
+    const sep = ";", dec = v => typeof v === "number" ? String(v).replace(".", ",") : (v ?? "");
+    const csv = csvData.map(r => r.map(dec).join(sep)).join("\r\n");
+    downloadBlob(new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" }), "conciliacion_posesiones.csv");
+  });
+  el.querySelectorAll(".poss-gap-item[data-game]").forEach(li => {
+    li.addEventListener("click", () => _openPossInspection(li.dataset.game));
+  });
+}
+
+// ── Inspección de posesiones de un partido (A-01, T-D2) ────────────────────
+async function _openPossInspection(gameId) {
+  const backdrop = document.createElement("div");
+  backdrop.className = "modal-backdrop";
+  backdrop.innerHTML = '<div class="modal" style="max-width:900px;width:95vw"><p class="empty"><span class="spinner"></span>Cargando posesiones…</p></div>';
+  document.body.appendChild(backdrop);
+  backdrop.addEventListener("click", e => { if (e.target === backdrop) backdrop.remove(); });
+
+  let data;
+  try { data = await api.gamePossessions(gameId, { detail: 1 }); }
+  catch (e) {
+    backdrop.querySelector(".modal").innerHTML = `<h3>Error</h3><p>${esc(e.message || "No se pudieron cargar las posesiones.")}</p>
+      <div class="modal-actions"><button class="btn btn-ghost btn-sm" data-cancel>Cerrar</button></div>`;
+    backdrop.querySelector("[data-cancel]").addEventListener("click", () => backdrop.remove());
+    return;
+  }
+
+  const poss = data.possessions || [], rec = data.reconcile || {};
+  const teams = Object.keys(rec);
+  let filter = null;
+
+  function render() {
+    const filtered = filter ? poss.filter(p => p.team === filter) : poss;
+    const recSummary = teams.map(t => {
+      const r = rec[t];
+      if (!r) return "";
+      const cls = r.diff_pct != null && Math.abs(r.diff_pct) > 2 ? " poss-alert" : "";
+      return `<span>${t}: ${r.counted} reconstruidas · ${DEC1(r.formula_pbp)} fórmula · <span class="${cls}">${DEC1(r.diff_pct)} %</span></span>`;
+    }).join(" · ");
+
+    const endTypes = { t2c: "2P conv.", t2f: "2P errado", t3c: "3P conv.", t3f: "3P errado",
+      falta: "Falta", perdida: "Pérdida", fin_periodo: "Fin período" };
+    const fmtClock = s => s != null ? `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}` : "—";
+
+    const row = p => {
+      const cls = p.incomplete ? ' class="poss-incomplete"' : "";
+      const status = p.incomplete ? (p.incomplete_reason || "incompleta") : "OK";
+      return `<tr${cls}${p.incomplete && p.incomplete_reason ? ` title="${esc(p.incomplete_reason)}"` : ""}>
+        <td>${p.poss_id}</td><td>${esc(p.team)}</td><td>${p.period}${p.period_type === "OVERTIME" ? " OT" : ""}</td>
+        <td>${fmtClock(p.start_clock)}</td><td>${fmtClock(p.end_clock)}</td>
+        <td>${p.duration != null ? p.duration + "s" : "—"}</td>
+        <td>${p.chances ? p.chances.length : 1}</td>
+        <td>${endTypes[p.end_type] || p.end_type || "—"}</td>
+        <td style="text-align:right">${p.pts}</td>
+        <td>${status}</td></tr>`;
+    };
+
+    backdrop.querySelector(".modal").innerHTML = `
+      <div class="games-header" style="margin-bottom:var(--sp-3)">
+        <h3 style="margin:0">Posesiones · ${esc(data.game_id || gameId)}</h3>
+        <button class="btn btn-ghost btn-sm" data-cancel>Cerrar</button>
+      </div>
+      <div class="poss-summary">${recSummary}</div>
+      <div class="poss-filters">
+        <button class="filter-pill${!filter ? " active" : ""}" data-team="">Todos</button>
+        ${teams.map(t => `<button class="filter-pill${filter === t ? " active" : ""}" data-team="${t}">${t}</button>`).join("")}
+      </div>
+      <div class="poss-sheet"><div class="table-wrap table-sticky"><table>
+        <thead><tr><th>#</th><th>Equipo</th><th>Per.</th><th>Inicio</th><th>Fin</th><th>Dur.</th><th>Op.</th><th>Final.</th><th style="text-align:right">Pts</th><th>Estado</th></tr></thead>
+        <tbody>${filtered.map(row).join("")}</tbody>
+      </table></div></div>`;
+
+    backdrop.querySelector("[data-cancel]").addEventListener("click", () => backdrop.remove());
+    backdrop.querySelectorAll(".poss-filters .filter-pill").forEach(btn => {
+      btn.addEventListener("click", () => { filter = btn.dataset.team || null; render(); });
+    });
+  }
+  render();
 }
 
 async function _renderCompetitionsTab(el) {

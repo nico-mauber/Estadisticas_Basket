@@ -1,7 +1,7 @@
 """
 Catálogo estándar de métricas (T-05, Grupo C): metadatos puros, sin fórmulas.
 
-`stats_engine.compute_standard` es el único lugar con las 83 fórmulas; este módulo solo
+`stats_engine.compute_standard` es el único lugar con las 86 fórmulas; este módulo solo
 describe cada clave (etiqueta, formato, dirección, agrupación, cómo escala con la base) y
 orquesta la petición HTTP (`build_payload`) delegando en los cargadores de cada tipo de
 entidad (`register_entity`, Grupo C: bundles.py/lineups.py/clutch.py).
@@ -39,7 +39,8 @@ class MetricDef:
 
 GROUPS = [
     {"key": "volumen", "label": "Volumen",
-     "metrics": ["games", "minutes", "possessions", "pace", "sec_per_poss"]},
+     "metrics": ["games", "minutes", "possessions", "pace", "sec_per_poss",
+                 "possessions_counted", "off_poss_duration"]},
     {"key": "produccion", "label": "Producción",
      "metrics": ["pts", "pts_against", "ppp", "oer", "der", "net_rating", "plus_minus"]},
     {"key": "tiro_volumen", "label": "Tiro — intentos y aciertos",
@@ -59,7 +60,7 @@ GROUPS = [
     {"key": "faltas", "label": "Faltas",
      "metrics": ["pf", "fouls_drawn"]},
     {"key": "uso", "label": "Uso",
-     "metrics": ["uso_pct", "uso_2p", "uso_3p"]},
+     "metrics": ["uso_pct", "uso_2p", "uso_3p", "player_poss_duration"]},
     {"key": "extra", "label": "Otras métricas",
      "metrics": [
          "plays", "pps", "ft_rate_report", "peso_1p", "peso_2p", "peso_3p",
@@ -89,6 +90,8 @@ _DEFS = [
     _md("possessions", "Posesiones", "volumen", "dec1", "neutral", "volume", "volume"),
     _md("pace", "PACE", "volumen", "dec1", "neutral", "rate", "fixed"),
     _md("sec_per_poss", "Seg/posesión", "volumen", "dec1", "neutral", "rate", "fixed"),
+    _md("possessions_counted", "Posesiones contadas", "volumen", "dec1", "neutral", "volume", "volume"),
+    _md("off_poss_duration", "Seg/posesión propia", "volumen", "dec1", "neutral", "rate", "fixed"),
 
     # ── produccion ──
     _md("pts", "PTS", "produccion", "int", "higher", "count", "count", legacy_keys=("pts_for",)),
@@ -171,6 +174,8 @@ _DEFS = [
         rel_dist=False),
     _md("uso_3p", "USO 3P", "uso", "pct", "neutral", "rate", "fixed", entities=_PLAYER_ONLY,
         rel_dist=False),
+    _md("player_poss_duration", "Seg. de posesión", "uso", "dec1", "neutral", "rate", "fixed",
+        entities=_PLAYER_ONLY),
 
     # ── extra ──
     _md("plays", "Jugadas (TCi+0,44·TLi+PER)", "extra", "dec1", "neutral", "volume", "volume"),
@@ -207,10 +212,10 @@ _DEFS = [
 
 METRICS: dict[str, MetricDef] = {d.key: d for d in _DEFS}
 
-# El conjunto de claves debe coincidir EXACTAMENTE con las 83 de stats_engine.compute_standard.
+# El conjunto de claves debe coincidir EXACTAMENTE con las 86 de stats_engine.compute_standard.
 assert set(METRICS) == stats_engine.metrics_catalog_keys(), (
     "metrics_catalog.METRICS debe tener las mismas claves que stats_engine.metrics_catalog_keys()")
-assert len(METRICS) == 83, f"Se esperaban 83 claves, hay {len(METRICS)}"
+assert len(METRICS) == 86, f"Se esperaban 86 claves, hay {len(METRICS)}"
 assert len(GROUPS) == 12, f"Se esperaban 12 grupos, hay {len(GROUPS)}"
 
 _group_keys_seen: set = set()
@@ -344,7 +349,7 @@ def catalog_json(lang: str = "es") -> dict:
 def standard_payload(bundle: "StatBundle", values: dict, *, context_echo: dict, base: str,
                      sample: dict | None = None, fichas: dict | None = None) -> dict:
     """Arma el payload de `GET /api/metrics/<entity_type>` (plan §4.8 paso 9): entidad, contexto,
-    base, grupos y las 83 claves (las que falten en `values` → `no_aplica`). `fichas` (T-01) se
+    base, grupos y las 86 claves (las que falten en `values` → `no_aplica`). `fichas` (T-01) se
     fusiona en cada objeto de métrica."""
     values_completos = {}
     for key in METRICS:

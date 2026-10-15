@@ -592,7 +592,8 @@ Informe de calidad de una competencia (F-11). **Query:** `?competition=<id>` (ob
                                  "items": [{ "kind": "candidato", "reason": "apellido_inicial", "team_code": "CNF", "can_merge": true,
                                              "players": [{ "player_id": 15, "name": "J. Feldeine", "games": 12, "jerseys": ["7"], "first_date": "2025-10-02", "last_date": "2026-03-01" },
                                                          { "player_id": 41, "name": "Jerome Feldeine", "games": 1, "jerseys": ["7"], "first_date": "2026-03-08", "last_date": "2026-03-08" }] }] },
-    "possession_gaps":         { "status": "no_disponible", "count": null, "reason": "requiere_posesiones" }
+    "possession_gaps":         { "status": "alerta", "count": 2, "pct": 0.1, "counts_as_incomplete": false,
+                                 "items": [{ "game_id": "2849328", "date": "2026-01-15", "label": "A 81 – 77 B", "incomplete": 2, "reasons": {"cambio_sin_cierre": 1, "sin_finalizacion": 1}, "diff_pct": {"A": 0.25, "B": 0.05} }] }
   }
 }
 ```
@@ -600,6 +601,51 @@ Informe de calidad de una competencia (F-11). **Query:** `?competition=<id>` (ob
 Un partido es **incompleto** si falla un chequeo con `counts_as_incomplete: true`; la competencia está lista para publicar si no tiene incompletos. `status` de cada chequeo: `ok` · `alerta` · `no_disponible`.
 
 `possible_duplicates` (C-08) lista **avisos**, nunca partidos incompletos: `kind: "candidato"` = dos fichas del mismo equipo que **nunca jugaron el mismo partido** y que parecen la misma persona (`reason`: `apellido_inicial` — mismo apellido e inicial compatible, p. ej. `J. Feldeine`/`Jerome Feldeine`; `dorsal_apellido` — mismo dorsal y apellido que comparte 4+ caracteres iniciales), con `can_merge: true`; `kind: "posible_fusion_incorrecta"` (`reason: "nombre_completo_distinto"`) = una ficha cuyos partidos traen nombres completos de FIBA distintos, es decir que la clave tipográfica pudo juntar a dos personas (solo detectable en partidos reprocesados con `INGEST_VERSION` ≥ 3).
+
+---
+
+## GET `/api/game/<game_id>/possessions` — NUEVO (A-01)
+
+Posesiones reconstruidas de un partido. **Query:** `?team=<code>` (filtra por equipo atacante), `?detail=1` (incluye `event_numbers`).
+
+**Response 200:**
+```json
+{
+  "game_id": "2849328",
+  "teams": { "home": "OMU", "away": "SAY" },
+  "possessions": [
+    { "poss_id": 1, "team": "OMU", "opp": "SAY", "period": 1, "period_type": "REGULAR",
+      "start_clock": 600, "end_clock": 583, "duration": 17, "start_event": 4, "end_event": 11,
+      "end_type": "t2c", "pts": 2, "chances": [{ "n": 1, "start_clock": 600, "shot_clock_start": 24, "pts": 2 }],
+      "incomplete": false }
+  ],
+  "reconcile": {
+    "OMU": { "counted": 81, "incomplete": 0, "formula_pbp": 80.8, "diff_pct": 0.25, "pts_poss": 72, "pts_outside": 0, "pts_box": 72, "pts_ok": true }
+  }
+}
+```
+
+**Errores:** `404 no_encontrado` — partido inexistente; `404 sin_pbp` — partido sin play-by-play; `400 parametro_invalido` — equipo inválido para este partido.
+
+---
+
+## GET `/api/possessions/reconcile` — NUEVO (A-01)
+
+Conciliación de posesiones reconstruidas vs fórmula del glosario para una competencia. **Query:** `?competition=<id>` (obligatorio, no acepta `all`).
+
+**Response 200:**
+```json
+{
+  "competition": { "id": 1, "label": "Liga de Ascenso 2026" },
+  "teams": [{ "team_code": "OMU", "team_name": "OmniSports", "games": 13, "counted": 1042,
+              "incomplete": 1, "formula": 1039.5, "diff_pct": 0.24, "within_2pct": true }],
+  "totals": { "counted": 2099, "formula": 2104.6, "diff_pct": -0.27, "incomplete": 2, "incomplete_pct": 0.1 },
+  "games_over_5pct": [],
+  "games_excluded": { "sin_pbp": 0 }
+}
+```
+
+**Errores:** `400 competencia_inexistente`; `400 parametro_invalido` (falta `competition` o vale `all`).
 
 ---
 

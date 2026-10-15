@@ -27,6 +27,7 @@ import cache
 import tables  # noqa: F401 — se importa para que registre las tablas de T-06 al arrancar
 import export_xlsx
 import shot_zones
+import possessions
 from metrics_catalog import MetricsError
 from tables import TableError
 from competitions import CompetitionError
@@ -817,6 +818,94 @@ def game_pbp(game_id: str):
         "first":          _to_dict(rows[0]),
         "last":           _to_dict(rows[-1]),
     })
+
+
+# ── Posesiones (A-01) ────────────────────────────────────────────────────────
+
+@app.route("/api/game/<game_id>/possessions")
+@login_required
+def game_possessions_route(game_id: str):
+    game = Game.query.filter_by(game_id=game_id).first()
+    if not game:
+        return jsonify({"error": "Partido no encontrado.", "code": "no_encontrado"}), 404
+    events = PbpEvent.query.filter_by(game_id=game_id).first()
+    if not events:
+        return jsonify({"error": "Este partido no tiene play-by-play.", "code": "sin_pbp"}), 404
+
+    team_filter = request.args.get("team")
+    if team_filter and team_filter not in (game.home_code, game.away_code):
+        return jsonify({"error": "Equipo inválido para este partido.", "code": "parametro_invalido"}), 400
+
+    detail = request.args.get("detail") == "1"
+    full = possessions._game_full(game_id)
+    poss_list, outside_points, anomalies = full
+
+    result_poss = poss_list
+    if team_filter:
+        result_poss = [p for p in poss_list if p.team == team_filter]
+
+    rec = possessions.reconcile({"game_id": game_id})
+
+    def _serialize_poss(p):
+        d = {
+            "poss_id": p.poss_id, "team": p.team, "opp": p.opp,
+            "period": p.period, "period_type": p.period_type,
+            "start_clock": p.start_clock, "end_clock": p.end_clock,
+            "duration": p.duration,
+            "start_event": p.start_event, "end_event": p.end_event,
+            "origin": p.origin, "ptype": p.ptype,
+            "chances": [{"n": c.n, "start_event": c.start_event,
+                         "start_clock": c.start_clock, "shot_clock_start": c.shot_clock_start,
+                         "end_event": c.end_event, "end_type": c.end_type,
+                         "pts": c.pts, "outcome": c.outcome} for c in p.chances],
+            "shots": p.shots,
+            "end_type": p.end_type, "pts": p.pts,
+            "own_on_court": p.own_on_court, "opp_on_court": p.opp_on_court,
+            "lineup_changed": p.lineup_changed,
+            "finisher_id": p.finisher_id, "assister_id": p.assister_id,
+            "turnover_by_id": p.turnover_by_id,
+            "incomplete": p.incomplete, "incomplete_reason": p.incomplete_reason,
+        }
+        if detail:
+            d["event_numbers"] = p.event_numbers
+            d["box"] = p.box
+            d["opp_box"] = p.opp_box
+            d["score_start"] = p.score_start
+        return d
+
+    return jsonify({
+        "game_id": game_id,
+        "teams": {"home": game.home_code, "away": game.away_code},
+        "possessions": [_serialize_poss(p) for p in result_poss],
+        "outside_points": outside_points,
+        "reconcile": rec,
+        "anomalies": [{"action_number": a.get("action_number"), "kind": a.get("kind"),
+                       "detail": a.get("detail")} for a in anomalies],
+    })
+
+
+@app.route("/api/possessions/reconcile")
+@login_required
+def possessions_reconcile_route():
+    comp_param = request.args.get("competition")
+    if not comp_param or comp_param == "all":
+        return jsonify({"error": "Elegí una competencia para conciliar.",
+                        "code": "parametro_invalido"}), 400
+    try:
+        comp_id = int(comp_param)
+    except (ValueError, TypeError):
+        return jsonify({"error": "La competencia no existe.",
+                        "code": "competencia_inexistente"}), 400
+
+    from database import Competition
+    comp = Competition.query.filter_by(id=comp_id).first()
+    if not comp:
+        return jsonify({"error": "La competencia no existe.",
+                        "code": "competencia_inexistente"}), 400
+
+    result = possessions.reconcile({"comp_id": comp_id})
+    result["competition"] = {"id": comp.id, "label": competitions.label(comp)}
+    return jsonify(result)
 
 
 # ── Lineups / ON-OFF / Clutch (motor de quintetos + cierres) ─────────────────

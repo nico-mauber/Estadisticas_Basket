@@ -1,7 +1,7 @@
 # Tasks — A-01: Reconstrucción de la posesión
 
 > **ID:** A-01 · **Prioridad:** P0 · **Fase y orden:** 3·01
-> **Estado:** Borrador (agente) — pendiente de revisión humana (gate Paso 3)
+> **Estado:** ✅ Aprobado
 > **Fuente:** [spec.md](spec.md) · [plan.md](plan.md) · [Especificación v2 §5.1 · A-01](../../00-especificacion-cliente-v2.md)
 
 ## Orden de ejecución

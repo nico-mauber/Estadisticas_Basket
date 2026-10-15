@@ -154,7 +154,12 @@ def band(poss: float, entity_type: str, metric_key: str, *, poss_def: float | No
     `z·σ·√(1/(poss_of+K) + 1/(poss_def+K))`."""
     p = ENTITY_SAMPLE[entity_type]
     z = config.get("sample.band_z")
-    sigma = config.get("sample.ppp_sd")
+    try:
+        import possessions as _poss_mod
+        ps = _poss_mod.ppp_stats(config.get("ui.default_competition_id") or 1)
+        sigma = ps["sd"] if ps["n"] >= 500 and ps["sd"] else config.get("sample.ppp_sd")
+    except Exception:
+        sigma = config.get("sample.ppp_sd")
     k = config.get(f"regression.{p}.k")
     if metric_key == "net_rating":
         pd = poss_def if poss_def is not None else poss
@@ -356,7 +361,7 @@ def _onoff_units_for_team(team_code: str, comp_id: int, min_poss: float) -> tupl
     return out, excluded
 
 
-def calibrate_k(entity_type: str, comp_id: int) -> dict:
+def calibrate_k(entity_type: str, comp_id: int, method: str = "partidos_alternos") -> dict:
     """Calibración de K por correlación de mitades (partidos alternos), plan §4.3."""
     if entity_type not in ("lineup", "onoff"):
         raise ValueError("no_calibrable")
@@ -395,7 +400,7 @@ def calibrate_k(entity_type: str, comp_id: int) -> dict:
     return {
         "entity": entity_type,
         "competition_id": comp_id,
-        "method": "partidos_alternos",
+        "method": method,
         "units": len(units),
         "units_excluded": excluded,
         "n_half_mean": round(n_half_mean, 1) if n_half_mean is not None else None,

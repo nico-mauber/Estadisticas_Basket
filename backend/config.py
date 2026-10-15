@@ -184,7 +184,9 @@ _register(
     _k("clock.mid_max", type="int", default=16, min=10, max=20,
        unit="segundos", label="Zona de reloj: mid máximo", section="contexto", consumer="A-05"),
     _k("clock.reset_secs", type="int", default=14, min=10, max=24,
-       unit="segundos", label="Reset de reloj de posesión", section="contexto", consumer="A-01, A-05"),
+       unit="segundos", label="Reset de reloj de posesión",
+       help="Segundos de posesión tras rebote ofensivo (FIBA: 14).",
+       section="contexto", consumer="A-01, A-05", status="activa"),
 
     # ── Momentum (reservadas) ──
     _k("momentum.margin", type="int", default=10, min=1, max=40,

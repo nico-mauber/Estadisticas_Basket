@@ -185,6 +185,32 @@ def _team_game_ids(team_code: str, comp_id: int | None = None) -> set[str]:
     return {tr.game_id for tr in q.all()}
 
 
+def game_pbp_data(game_id: str) -> dict | None:
+    """Eventos + info de un partido para possessions.py.
+
+    Returns {game_id, events, player_rows, home_code, away_code} or None."""
+    def build():
+        g = Game.query.filter_by(game_id=game_id).first()
+        if not g:
+            return None
+        events = [
+            {c.name: getattr(e, c.name) for c in e.__table__.columns} for e in
+            PbpEvent.query.filter_by(game_id=game_id).order_by(PbpEvent.action_number).all()
+        ]
+        if not events:
+            return None
+        player_rows = PlayerGameStats.query.filter_by(game_id=game_id).all()
+        return {
+            "game_id":     game_id,
+            "events":      events,
+            "player_rows": player_rows,
+            "home_code":   g.home_code,
+            "away_code":   g.away_code,
+            "info":        {"date": g.date, "competition_id": g.competition_id},
+        }
+    return memo(("game_pbp_data", game_id), build)
+
+
 def team_pbp_games(team_code: str, comp_id: int | None = None) -> list[dict]:
     """Partidos del equipo con pbp: [{game_id, events, player_rows, opp_code, info}, ...].
 

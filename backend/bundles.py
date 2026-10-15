@@ -84,6 +84,15 @@ def _team_bundle_from_games(team_code, comp_id, ctx):
     bundle = sum_bundles([b for _, b in per_game])
     bundle.meta["games_total"] = games_total
     bundle.meta["games_excluded"] = {}
+    try:
+        import possessions as _poss
+        tp = _poss.team_possessions(team_code, comp_id)
+        if tp:
+            bundle.possessions_counted = len(tp)
+            bundle.poss_seconds = sum(p.duration or 0 for p in tp)
+    except Exception as _e:
+        import logging
+        logging.getLogger(__name__).exception("A-01 poss integration failed for %s", team_code)
     return bundle
 
 

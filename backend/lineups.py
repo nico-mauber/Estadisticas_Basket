@@ -158,6 +158,97 @@ def build_segments(events, team_code, starters):
     return segments
 
 
+def build_segments_both(events, codes, starters):
+    """Quintetos de AMBOS equipos por tramo (A-01 RF-9).
+
+    codes: (home_code, away_code).
+    starters: {code: set(nombres) | None}. None si no hay 5 titulares.
+    Salida: [{"on_court": {code: frozenset | None}, "events": [...], "seconds": float}].
+    Invariante: sum(s["seconds"]) == 600*quarters + 300*overtimes.
+    """
+    home, away = codes
+    on_court = {}
+    for code in codes:
+        s = starters.get(code)
+        on_court[code] = set(s) if s else None
+
+    def _frozen():
+        return {c: (frozenset(on_court[c]) if on_court[c] is not None else None) for c in codes}
+
+    segments = []
+    cur_on = _frozen()
+    bucket, seg_seconds = [], 0.0
+    last_period = None
+    period_floor = None
+
+    for ev in events:
+        period = ev.get("period")
+        clock = ev.get("clock_secs") or 0
+        plen = PERIOD_LEN.get(ev.get("period_type"), 600)
+
+        if period != last_period:
+            if period_floor is not None:
+                seg_seconds += period_floor
+            period_floor = plen
+            last_period = period
+
+        if clock < period_floor:
+            seg_seconds += period_floor - clock
+            period_floor = clock
+
+        tc = ev.get("team_code")
+        if ev.get("action_type") == "substitution" and tc in codes and on_court[tc] is not None:
+            player = ev.get("player_name")
+            sub = (ev.get("sub_type") or "").lower()
+            if sub == "out":
+                on_court[tc].discard(player)
+            elif sub == "in":
+                on_court[tc].add(player)
+        else:
+            new_on = _frozen()
+            if new_on != cur_on and bucket:
+                segments.append({"on_court": cur_on, "events": bucket, "seconds": seg_seconds})
+                bucket, seg_seconds = [], 0.0
+            cur_on = new_on
+            bucket.append(ev)
+
+    if period_floor is not None:
+        seg_seconds += period_floor
+    segments.append({"on_court": cur_on, "events": bucket, "seconds": seg_seconds})
+    return segments
+
+
+def event_lineups(events, codes, starters):
+    """Per-event lineup lookup (A-01): returns list parallel to events.
+
+    Each entry: {code: frozenset | None} — the on_court at that event.
+    Substitutions update state but get the PREVIOUS lineup (before the sub applies).
+    """
+    home, away = codes
+    on_court = {}
+    for code in codes:
+        s = starters.get(code)
+        on_court[code] = set(s) if s else None
+
+    def _frozen():
+        return {c: (frozenset(on_court[c]) if on_court[c] is not None else None) for c in codes}
+
+    result = []
+    for ev in events:
+        tc = ev.get("team_code")
+        if ev.get("action_type") == "substitution" and tc in codes and on_court[tc] is not None:
+            result.append(_frozen())
+            player = ev.get("player_name")
+            sub = (ev.get("sub_type") or "").lower()
+            if sub == "out":
+                on_court[tc].discard(player)
+            elif sub == "in":
+                on_court[tc].add(player)
+        else:
+            result.append(_frozen())
+    return result
+
+
 def _leaders(evs, players):
     """Líderes de puntos/asistencias/rebotes entre `players`, sobre los eventos dados."""
     pts, ast, treb = {}, {}, {}

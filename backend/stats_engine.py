@@ -731,7 +731,7 @@ def league_averages(member_values: list, keys: list) -> dict:
 
 
 # ── T-05: conjunto estándar de métricas (Grupo B) ────────────────────────────
-# `compute_standard` es el único lugar con las 83 fórmulas del catálogo (metrics_catalog.py,
+# `compute_standard` es el único lugar con las 86 fórmulas del catálogo (metrics_catalog.py,
 # Grupo C, solo metadatos). `StatBundle` es el contrato de entrada: conteos crudos ya sumados
 # de una selección de partidos de una entidad (equipo, jugador, quinteto, ON/OFF, cierre).
 
@@ -773,6 +773,8 @@ class StatBundle:
     shots: dict | None
     possessions_counted: float | None
     null_reasons: dict
+    poss_seconds: float | None = None
+    finished_poss: dict | None = None
     derived: dict | None = None
     meta: dict = field(default_factory=dict)
 
@@ -1335,7 +1337,7 @@ def _player_extra(bundle: "StatBundle") -> dict:
 
 
 def compute_standard(bundle: "StatBundle") -> dict:
-    """Las 83 métricas del catálogo estándar (plan §4.2/§4.3) a partir de un `StatBundle`.
+    """Las 86 métricas del catálogo estándar (plan §4.2/§4.3) a partir de un `StatBundle`.
 
     Entidades *teamlike* (`team`, `lineup`, `onoff`, `clutch`) usan `own`/`opp`. *player* usa
     `own` para tiro/balón/rebote/defensa/faltas/USO y `on_court` (equipo con el jugador en
@@ -1385,6 +1387,29 @@ def compute_standard(bundle: "StatBundle") -> dict:
         out.update(_usage_na())
         out.update(_teamlike_extra(bundle))
 
+    # A-01: métricas de posesiones reconstruidas
+    pc = bundle.possessions_counted
+    if pc is not None:
+        out["possessions_counted"] = _m(pc, None)
+        out["off_poss_duration"] = (_m(round(bundle.poss_seconds / pc, 1), None)
+                                    if pc > 0 and bundle.poss_seconds is not None
+                                    else _m(None, "sin_intentos"))
+    else:
+        reason = "sin_pbp" if bundle.games == 0 else "requiere_posesiones"
+        out["possessions_counted"] = _m(None, reason)
+        out["off_poss_duration"] = _m(None, reason)
+
+    if is_player:
+        fp = bundle.finished_poss
+        if fp is not None and fp.get("count", 0) > 0 and fp.get("seconds") is not None:
+            out["player_poss_duration"] = _m(round(fp["seconds"] / fp["count"], 1), None)
+        elif pc is not None:
+            out["player_poss_duration"] = _m(None, "sin_intentos")
+        else:
+            out["player_poss_duration"] = _m(None, reason)
+    else:
+        out["player_poss_duration"] = _na()
+
     missing = set(metrics_catalog_keys()) - set(out)
     for key in missing:
         out[key] = _na()
@@ -1392,11 +1417,12 @@ def compute_standard(bundle: "StatBundle") -> dict:
 
 
 def metrics_catalog_keys() -> frozenset:
-    """Las 83 claves de `compute_standard` (plan §4.2). Vive acá (no en `metrics_catalog.py`,
+    """Las 86 claves de `compute_standard` (plan §4.2). Vive acá (no en `metrics_catalog.py`,
     Grupo C) para que `compute_standard` no dependa de ese módulo nuevo; cuando exista,
     `metrics_catalog.METRICS` debe tener el mismo `set` (se verifica en T-C1/T-F3)."""
     groups = {
-        "volumen": ("games", "minutes", "possessions", "pace", "sec_per_poss"),
+        "volumen": ("games", "minutes", "possessions", "pace", "sec_per_poss",
+                    "possessions_counted", "off_poss_duration"),
         "produccion": ("pts", "pts_against", "ppp", "oer", "der", "net_rating", "plus_minus"),
         "tiro_volumen": ("fga2", "fgm2", "fga3", "fgm3", "fta", "ftm", "fga", "fgm"),
         "tiro_pct": ("fg_pct", "fg2_pct", "fg3_pct", "ft_pct", "efg_pct", "ts_pct"),
@@ -1406,7 +1432,7 @@ def metrics_catalog_keys() -> frozenset:
         "rebote": ("orb", "drb", "trb", "or_pct", "dr_pct", "trb_pct", "orb_pos", "drb_min", "orb_min"),
         "defensa": ("stl", "blk", "blk_received", "stops"),
         "faltas": ("pf", "fouls_drawn"),
-        "uso": ("uso_pct", "uso_2p", "uso_3p"),
+        "uso": ("uso_pct", "uso_2p", "uso_3p", "player_poss_duration"),
         "extra": (
             "plays", "pps", "ft_rate_report", "peso_1p", "peso_2p", "peso_3p",
             "to_ratio", "ast_ratio", "opp_efg_pct", "opp_ts_pct", "opp_to_pct", "opp_ft_rate",

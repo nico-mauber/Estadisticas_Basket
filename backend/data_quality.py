@@ -114,9 +114,7 @@ def report(competition_id: int) -> dict:
         "games_without_coords":    _check(no_coords, False),
         "null_fields":             _null_fields(gids),
         "possible_duplicates":     _duplicates(competition_id),
-        # INCREMENTO DIFERIDO (→ A-01): requiere el motor de posesiones
-        "possession_gaps":         {"status": "no_disponible", "count": None, "counts_as_incomplete": False,
-                                    "reason": "requiere_posesiones", "items": []},
+        "possession_gaps":         _possession_gaps(competition_id),
     }
     incomplete = sorted({it["game_id"] for c in checks.values() if c["counts_as_incomplete"]
                          for it in c["items"]})
@@ -125,6 +123,15 @@ def report(competition_id: int) -> dict:
                     "ready_to_publish": bool(gids) and not incomplete, "ingest_version": INGEST_VERSION},
         "checks": checks,
     }
+
+
+def _possession_gaps(competition_id: int) -> dict:
+    try:
+        import possessions
+        return possessions.possession_gaps_check(competition_id)
+    except Exception:
+        return {"status": "no_disponible", "count": None, "counts_as_incomplete": False,
+                "reason": "error_posesiones", "items": []}
 
 
 def _null_fields(gids: list[str]) -> dict:
