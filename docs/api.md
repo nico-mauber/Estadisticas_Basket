@@ -771,6 +771,47 @@ Mapa de tiro de un equipo en un partido, con zonas y filtros.
 
 ---
 
+## GET `/api/live/<game_id>` — NUEVO (F-01)
+
+Snapshot de un partido en curso, leído de FIBA LiveStats. El cliente hace polling cada `live.poll_secs` (10–60 s); el servidor cachea la descarga por partido durante `live.cache_ttl_secs`, así varios usuarios generan una sola descarga por intervalo. Al detectar el evento de fin (`game`/`end`) el partido se persiste solo (misma ingesta que `POST /api/import`) y la respuesta pasa a `finalizado`.
+
+**Query:** `?url=<bs.html de FIBA>` (opcional). Si se envía, debe ser del host de FIBA LiveStats y del mismo `game_id`; se usa para leer fecha y competencia al persistir. Sin `url` se usa `…/u/FUBB/<game_id>/bs.html`.
+
+**Response 200 (en curso):**
+```json
+{
+  "status": "en_curso", "stale": false, "fetched_at": "2026-10-16T21:14:32+00:00",
+  "game_id": "2849343", "has_pbp": true,
+  "clock": {"period": 3, "period_type": "REGULAR", "clock_secs": 245, "elapsed_secs": 1555, "label": "3C 4:05"},
+  "teams": {
+    "home": {"code": "LAG", "name": "…", "score": 61,
+             "standard": {"oer": {"value": 1.08, "reason": null}, "...": "der, net_rating, efg_pct, ts_pct, ppp, possessions, to_pct, or_pct, ft_rate, ppt, pace"},
+             "vs_season": {"competition_id": 3, "competition_label": "…", "games": 2,
+                           "metrics": {"oer": {"own_avg": 0.9594, "delta": 0.12}}}},
+    "away": {"...": "mismo shape"}
+  },
+  "distribution": {"home": {"total": 61,
+    "by_shot": {"paint_pts": {"value": 28, "reason": null}, "mid_pts": {}, "three_pts": {}, "ft_pts": {}, "otros_no_clasificado": {}},
+    "by_origin": {"second_chance_pts": {}, "fast_break_pts": {}, "pts_from_tov": {}}}, "away": {}},
+  "players_on_court": {"home": ["LAG|B. Gomez", "…5 claves"], "away": ["…"]},
+  "players": {"home": [{"player_id": "LAG|B. Gomez", "name": "B. Gomez", "jersey": "7", "minutes": 21.5, "pts": 12,
+     "on_court": true,
+     "standard": {"oer": {}, "ts_pct": {}, "efg_pct": {}, "uso_pct": {}, "plus_minus": {}},
+     "chains": {"points_created": {}, "points_from_assist": {}, "oreb_points": {}, "steal_points": {}, "turnover_cost": {}}}],
+   "away": []}
+}
+```
+- `by_shot` es excluyente y suma `total`; `by_origin` viene de FIBA y sus categorías se superponen (un contraataque tras pérdida cuenta en ambas). Un desglose que la competencia no publica viene `null` con razón `no_registrado`.
+- Jugadores en vivo no tienen id en la base: la clave es `"<equipo>|<nombre>"`.
+- `chains` es `null` con razón `sin_pbp` si FIBA aún no publicó jugada a jugada; con pbp, 0 es real (la acción no ocurrió).
+- `stale: true`: FIBA no respondió y se sirve el último snapshot (`fetched_at` es el de ese snapshot). `persist_error: true`: el partido terminó pero no se pudo guardar; se reintenta en el próximo polling.
+
+**Response 200 (finalizado):** `{"status": "finalizado", "stale": false, "fetched_at": "…", "game_id": "…", "redirect": "#/partido/<id>/analizar"}`. El frontend muestra entonces `GET /api/game/<game_id>`.
+
+**Errores:** `404 no_encontrado` (id no numérico, o FIBA responde 403/404 y no está en la base), `400 parametro_invalido` (`url` de otro host o de otro partido), `502 fiba_no_disponible` (FIBA no responde y no hay snapshot previo).
+
+---
+
 ## POST `/api/identity/merge` — admin
 
 Une dos fichas de jugador **del mismo equipo** (C-08): `target_id` conserva el id y absorbe a `source_id`. Las filas de `player_game_stats` de la absorbida pasan a la vigente y `source_id` queda con `merged_into`, de modo que `GET /api/player/<source_id>` y cualquier consulta por su nombre resuelven a la ficha vigente. No se modifica ninguna estadística ni nombre crudo.

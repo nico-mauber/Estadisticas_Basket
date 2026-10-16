@@ -29,6 +29,7 @@ import export_xlsx
 import shot_zones
 import possessions
 import game_analysis
+import live
 import matchups  # noqa: F401 — registra entidad matchup
 from metrics_catalog import MetricsError
 from tables import TableError
@@ -1024,6 +1025,24 @@ def possessions_reconcile_route():
     result = possessions.reconcile({"comp_id": comp_id})
     result["competition"] = {"id": comp.id, "label": competitions.label(comp)}
     return jsonify(result)
+
+
+# ── Partido en vivo (F-01) ───────────────────────────────────────────────────
+
+@app.route("/api/live/<game_id>")
+@login_required
+def live_route(game_id: str):
+    url = (request.args.get("url") or "").strip() or None
+    if url and not live.valid_source_url(game_id, url):
+        return jsonify({"error": "URL de FIBA LiveStats inválida para este partido.",
+                        "code": "parametro_invalido"}), 400
+    try:
+        return jsonify(live.live_snapshot(game_id, url))
+    except live.LiveNotFound:
+        return jsonify({"error": "Partido no encontrado.", "code": "no_encontrado"}), 404
+    except live.LiveFetchError:
+        return jsonify({"error": "No se pudo obtener el partido en vivo.",
+                        "code": "fiba_no_disponible"}), 502
 
 
 # ── Lineups / ON-OFF / Clutch (motor de quintetos + cierres) ─────────────────

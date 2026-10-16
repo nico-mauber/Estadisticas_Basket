@@ -12,6 +12,7 @@ import { exportMenu } from "./components/export-menu.js";
 import { tableToData, downloadBlob } from "./components/exporters.js";
 import { shotChart, bindZoneTooltips } from "./components/shot-chart.js";
 import { renderGameView } from "./components/game-view.js";
+import { renderLiveView, destroyLiveView } from "./components/live-view.js";
 
 // ── Toast ──────────────────────────────────────────────────────────────────
 function toast(msg, type = "ok") {
@@ -281,6 +282,7 @@ let _lastSection = "import";
 
 function setSection(id) {
   if (activeSection !== "config") _lastSection = activeSection;
+  if (id !== "partido") destroyLiveView();
   activeSection = id;
   document.querySelectorAll("nav button").forEach(b => b.classList.toggle("active", b.dataset.section === id));
   document.querySelectorAll(".section").forEach(s => s.style.display = s.id === `sec-${id}` ? "" : "none");
@@ -532,8 +534,9 @@ async function _renderImportTab(el) {
       <div class="import-panel">
         <input id="url-input" type="text" placeholder="https://fibalivestats.dcd.shared.geniussports.com/u/FUBB/2741550/bs.html" />
         <button class="btn" id="btn-import">Importar</button>
+        <button class="btn btn-ghost" id="btn-live">Seguir en vivo</button>
       </div>
-      <p class="import-hint">El sistema captura los datos automáticamente desde la URL de FIBA LiveStats.</p>
+      <p class="import-hint">El sistema captura los datos automáticamente desde la URL de FIBA LiveStats. "Seguir en vivo" muestra un partido en curso y lo guarda solo al terminar.</p>
       ${_seedEnabled ? `
       <div class="seed-panel">
         <button class="btn btn-seed" id="btn-seed">⚡ Agregar partidos (dev)</button>
@@ -615,6 +618,12 @@ async function _renderImportTab(el) {
       btn.disabled = false;
       btn.textContent = "Importar";
     }
+  });
+
+  document.getElementById("btn-live").addEventListener("click", () => {
+    const target = _liveTarget(document.getElementById("url-input").value);
+    if (!target) return toast("Ingresá la URL de FIBA LiveStats o el id del partido", "err");
+    showLiveGame(target.id, target.url);
   });
 
   document.getElementById("btn-seed")?.addEventListener("click", async e => {
@@ -2288,8 +2297,23 @@ const NAV_ITEMS = {
 
 // ── F-07: Analizar partido ──────────────────────────────────────────────────
 function showGame(gameId) {
+  destroyLiveView();
   setSection("partido");
   renderGameView(document.getElementById("partido-main"), gameId);
+}
+
+// ── F-01: Partido en vivo ──────────────────────────────────────────────────
+function showLiveGame(gameId, url = null) {
+  setSection("partido");
+  renderLiveView(document.getElementById("partido-main"), gameId, { url });
+}
+
+// URL de FIBA LiveStats (…/u/LIGA/<id>/bs.html) o id numérico suelto.
+function _liveTarget(input) {
+  const s = input.trim();
+  if (/^\d{5,}$/.test(s)) return { id: s, url: null };
+  const m = /\/(\d{5,})\//.exec(s);
+  return m ? { id: m[1], url: s } : null;
 }
 
 function renderApp() {

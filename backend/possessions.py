@@ -133,6 +133,13 @@ def _prepare(game_id):
         if pid is not None:
             n2id[(r.team_code, r.player_name)] = pid
 
+    xy = {s.action_number: (s.court_x, s.court_y)
+          for s in Shot.query.filter_by(game_id=game_id).all()}
+    return _prepare_data(game_id, events, rows, codes, xy, n2id)
+
+
+def _prepare_data(game_id, events, rows, codes, xy, n2id):
+    """Parte pura de `_prepare`: no toca la base (la reusa el modo en vivo, F-01)."""
     # reloj monótono: el piso arranca en plen y solo baja dentro del período
     mc, floor, last_pk = [], None, None
     for ev in events:
@@ -145,8 +152,6 @@ def _prepare(game_id):
         mc.append(floor)
 
     starters = {c: lineups.game_starters(rows, c) for c in codes}
-    xy = {s.action_number: (s.court_x, s.court_y)
-          for s in Shot.query.filter_by(game_id=game_id).all()}
     return {"game_id": game_id, "events": events, "codes": codes,
             "opp": {codes[0]: codes[1], codes[1]: codes[0]},
             "n2id": n2id, "mc": mc, "evl": lineups.event_lineups(events, codes, starters),
@@ -529,12 +534,26 @@ def _build(game_id):
     prep = _prepare(game_id)
     if prep is None:
         return [], {}, []
+    return _run(prep)
+
+
+def _run(prep):
     import shot_zones                             # diferido: shot_zones arrastra sample/context
     prep["zone"] = lambda at, st, x, y: shot_zones.classify_zone(
         at, st, *shot_zones.to_half_court(x, y), None)
     poss, outside, anoms = _Walker(prep).run()
     _finish(prep, poss, anoms)
     return poss, outside, anoms
+
+
+def build_from_events(game_id, events, rows, codes, xy, n2id):
+    """Posesiones desde datos en memoria (partido en vivo, F-01): sin caché ni base.
+
+    events: dicts ordenados por action_number; rows: objetos con team_code/player_name/starter;
+    xy: {action_number: (court_x, court_y)}; n2id: {(team_code, player_name): id}."""
+    if not events or not all(codes):
+        return [], {}, []
+    return _run(_prepare_data(game_id, events, rows, codes, xy, n2id))
 
 
 # ── API pública (cacheada) ───────────────────────────────────────────────────
