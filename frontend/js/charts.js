@@ -2,6 +2,7 @@
  * Smart-Basket chart helpers — Chart.js v4
  * All functions destroy previous instance before re-creating.
  */
+import { PCT, PCT0, DEC2, fmtNumber } from "./core/format.js";
 
 const _instances = {};
 
@@ -34,12 +35,17 @@ function _applyDefaults() {
   Chart.defaults.color = C.text;
   Chart.defaults.font.family = "Inter, system-ui, sans-serif";
   Chart.defaults.font.size = 12;
+  // Ticks y tooltips por defecto con coma decimal es-UY (DA-36)
+  Chart.defaults.locale = "es-UY";
 }
 
 // ── Normalize a value to 0-100 relative to league ──────────────────────────
 function _norm(value, leagueKey, league, higherIsBetter = true) {
   const lg = league?.[leagueKey];
-  if (!lg || value == null) return 0;
+  // Sin dato → null, no 0: un 0 dibujaría el eje en el peor valor posible y se
+  // leería como "rinde pésimo" en vez de "no hay dato" (Feature 12 RF-9).
+  // Sin promedio de liga (`Ø` nulo: "Todas las competencias" o sin datos, C-02) tampoco hay escala.
+  if (!lg || value == null || lg.avg == null || lg.best == null) return null;
   const best  = lg.best;
   const avg   = lg.avg;
   // Estimate "worst" symmetrically from avg
@@ -115,7 +121,7 @@ export function drawRadar(canvasId, averages, league, label = "Equipo") {
         legend: { position: "bottom", labels: { boxWidth: 12, padding: 16 } },
         tooltip: {
           callbacks: {
-            label: ctx => `${ctx.dataset.label}: ${ctx.raw.toFixed(0)}/100`,
+            label: ctx => `${ctx.dataset.label}: ${fmtNumber(ctx.raw, 0)}/100`,
           },
         },
       },
@@ -179,7 +185,7 @@ export function drawCompareRadar(canvasId, avgA, avgB, league, labelA, labelB) {
       },
       plugins: {
         legend: { position: "bottom", labels: { boxWidth: 12, padding: 16 } },
-        tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: ${ctx.raw.toFixed(0)}/100` } },
+        tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: ${fmtNumber(ctx.raw, 0)}/100` } },
       },
     },
   });
@@ -203,7 +209,8 @@ export function drawEvolution(canvasId, gameLog, leagueOerAvg) {
       datasets: [
         {
           label: "OER",
-          data: sorted.map(g => +(g.oer ?? 0).toFixed(3)),
+          // Partido sin dato: se omite el punto, no se dibuja en 0 (Feature 12 RF-8)
+          data: sorted.map(g => g.oer == null ? null : +g.oer.toFixed(3)),
           borderColor: C.accent,
           backgroundColor: C.accentA,
           borderWidth: 2,
@@ -215,7 +222,7 @@ export function drawEvolution(canvasId, gameLog, leagueOerAvg) {
         },
         {
           label: "eFG%",
-          data: sorted.map(g => +(((g.efg_pct ?? 0) * 100).toFixed(1))),
+          data: sorted.map(g => g.efg_pct == null ? null : +(g.efg_pct * 100).toFixed(1)),
           borderColor: C.blue,
           backgroundColor: "transparent",
           borderWidth: 2,
@@ -249,7 +256,7 @@ export function drawEvolution(canvasId, gameLog, leagueOerAvg) {
           grid: { display: false },
           title: { display: true, text: "eFG%", color: C.blue, font: { size: 11 } },
           position: "right",
-          ticks: { color: C.blue, callback: v => v + "%" },
+          ticks: { color: C.blue, callback: v => fmtNumber(v, Number.isInteger(v) ? 0 : 1) + "%" },
         },
       },
       plugins: {
@@ -260,7 +267,7 @@ export function drawEvolution(canvasId, gameLog, leagueOerAvg) {
 }
 
 // ── Player line — pts + OER per game ───────────────────────────────────────
-export function drawPlayerEvolution(canvasId, gameLog) {
+export function drawPlayerEvolution(canvasId, gameLog, leagueOerAvg) {
   _applyDefaults();
   _destroy(canvasId);
   const canvas = document.getElementById(canvasId);
@@ -276,7 +283,9 @@ export function drawPlayerEvolution(canvasId, gameLog) {
       datasets: [
         {
           label: "Puntos",
-          data: sorted.map(g => g.pts ?? 0),
+          // Partido sin dato o DNP: se omite el punto, no se dibuja en 0 (C-11 RF-10).
+          // El partido queda en el eje: el hueco muestra que no jugó.
+          data: sorted.map(g => g.played === false ? null : (g.pts ?? null)),
           borderColor: C.accent,
           backgroundColor: C.accentA,
           borderWidth: 2,
@@ -287,7 +296,7 @@ export function drawPlayerEvolution(canvasId, gameLog) {
         },
         {
           label: "OER",
-          data: sorted.map(g => +(g.oer ?? 0).toFixed(3)),
+          data: sorted.map(g => g.played === false || g.oer == null ? null : +g.oer.toFixed(3)),
           borderColor: C.green,
           backgroundColor: "transparent",
           borderWidth: 2,
@@ -295,6 +304,17 @@ export function drawPlayerEvolution(canvasId, gameLog) {
           tension: 0.3,
           yAxisID: "y2",
         },
+        // Promedio de OER de los jugadores de la competencia: el mismo valor que la card OER (C-02 RF-10)
+        ...(leagueOerAvg != null ? [{
+          label: "OER liga Ø",
+          data: sorted.map(() => +leagueOerAvg.toFixed(3)),
+          borderColor: C.muted,
+          backgroundColor: "transparent",
+          borderWidth: 1,
+          borderDash: [5, 5],
+          pointRadius: 0,
+          yAxisID: "y2",
+        }] : []),
       ],
     },
     options: {
@@ -316,33 +336,38 @@ export function drawPlayerEvolution(canvasId, gameLog) {
       },
       plugins: {
         legend: { position: "bottom", labels: { boxWidth: 12, padding: 16 } },
+        tooltip: {
+          callbacks: {
+            title: items => items.length
+              ? labels[items[0].dataIndex] + (sorted[items[0].dataIndex].played === false ? " · No jugó (DNP)" : "")
+              : "",
+          },
+        },
       },
     },
   });
 }
 
-// ── Scatter OER vs DER (league map) ────────────────────────────────────────
-// Default axis config (Eficiencia) — keeps old call sites working.
-const _DEFAULT_AXIS = {
-  xKey: "oer", xName: "OER", xTitle: "OER  (↑ mejor ataque)", xPct: false,
-  yKey: "der", yName: "DER", yTitle: "DER  (↓ mejor defensa)", yPct: false,
-};
-
-export function drawLeagueScatter(canvasId, teams, axis = _DEFAULT_AXIS) {
+// ── Scatter de liga (ejes configurables) ───────────────────────────────────
+// `axis` lo arma app.js (`_mapAxis`): títulos con la flecha del mejor rendimiento y rótulos de las
+// líneas de promedio. Este archivo no escribe flechas (C-10).
+export function drawLeagueScatter(canvasId, teams, axis) {
   _applyDefaults();
   _destroy(canvasId);
   const canvas = document.getElementById(canvasId);
   if (!canvas || !teams?.length) return;
 
-  const { xKey, yKey, xName, yName, xTitle, yTitle, xPct, yPct } = axis;
-  const fx = v => v == null ? "—" : (xPct ? (v * 100).toFixed(1) + "%" : (+v).toFixed(2));
-  const fy = v => v == null ? "—" : (yPct ? (v * 100).toFixed(1) + "%" : (+v).toFixed(2));
+  const { xKey, yKey, xName, yName, xTitle, yTitle, xPct, yPct, xAvgLabel, yAvgLabel } = axis;
+  const fx = v => xPct ? PCT(v) : DEC2(v);
+  const fy = v => yPct ? PCT(v) : DEC2(v);
 
   const valid = teams.filter(t => t[xKey] != null && t[yKey] != null);
   if (!valid.length) return;
 
-  const avgX = valid.reduce((s, t) => s + t[xKey], 0) / valid.length;
-  const avgY = valid.reduce((s, t) => s + t[yKey], 0) / valid.length;
+  // T-01: el promedio de la población (summary.avg) tiene prioridad sobre la media
+  // de las filas en pantalla, para que coincida con el "Ø" del pie de la tabla.
+  const avgX = axis.avgX != null ? axis.avgX : valid.reduce((s, t) => s + t[xKey], 0) / valid.length;
+  const avgY = axis.avgY != null ? axis.avgY : valid.reduce((s, t) => s + t[yKey], 0) / valid.length;
 
   const points = valid.map(t => ({
     x: t[xKey],
@@ -365,6 +390,8 @@ export function drawLeagueScatter(canvasId, teams, axis = _DEFAULT_AXIS) {
     },
     options: {
       responsive: true,
+      // Móvil: lienzo cuadrado; con el 2:1 por defecto el título del eje Y no entra (C-10 CA-7)
+      aspectRatio: window.innerWidth <= 768 ? 1 : 2,
       plugins: {
         legend: { display: false },
         tooltip: {
@@ -391,12 +418,12 @@ export function drawLeagueScatter(canvasId, teams, axis = _DEFAULT_AXIS) {
         x: {
           grid: { color: C.grid },
           title: { display: true, text: xTitle, color: C.muted },
-          ticks: { color: C.muted, callback: v => xPct ? (v * 100).toFixed(0) + "%" : v },
+          ticks: { color: C.muted, callback: v => xPct ? PCT0(v) : DEC2(v) },
         },
         y: {
           grid: { color: C.grid },
           title: { display: true, text: yTitle, color: C.muted },
-          ticks: { color: C.muted, callback: v => yPct ? (v * 100).toFixed(0) + "%" : v },
+          ticks: { color: C.muted, callback: v => yPct ? PCT0(v) : DEC2(v) },
           reverse: false,
         },
       },
@@ -418,11 +445,11 @@ export function drawLeagueScatter(canvasId, teams, axis = _DEFAULT_AXIS) {
         ctx.beginPath(); ctx.moveTo(xAvg, chart.chartArea.top); ctx.lineTo(xAvg, chart.chartArea.bottom); ctx.stroke();
         ctx.beginPath(); ctx.moveTo(chart.chartArea.left, yAvg); ctx.lineTo(chart.chartArea.right, yAvg); ctx.stroke();
 
-        // Quadrant labels (generic: axis names near the avg lines)
+        // Rótulos de las líneas de promedio de liga (sin flecha: la dirección la da el título del eje)
         ctx.font = "10px Inter, system-ui";
         ctx.fillStyle = "rgba(139,148,158,0.5)";
-        ctx.fillText(`↑ ${xName}`, xAvg + 4, chart.chartArea.top + 14);
-        ctx.fillText(`${yName}`, chart.chartArea.left + 4, yAvg - 6);
+        ctx.fillText(xAvgLabel ?? xName, xAvg + 4, chart.chartArea.top + 14);
+        ctx.fillText(yAvgLabel ?? yName, chart.chartArea.left + 4, yAvg - 6);
 
         // Team name labels
         ctx.font = "11px Inter, system-ui";

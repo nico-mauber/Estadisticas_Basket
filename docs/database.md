@@ -10,6 +10,38 @@
 
 ## Esquema
 
+### `competitions`
+Una competencia **en una temporada** (F-11): universo de cálculo de percentiles, promedios y rankings.
+
+| Columna | Tipo | Descripción |
+|---------|------|-------------|
+| `id` | INTEGER PK AUTOINCREMENT | |
+| `name` | TEXT NOT NULL | Nombre sin la temporada (ej. `Liga de Ascenso`) |
+| `season` | TEXT | Temporada detectada al final del texto de FIBA (`2026`, `2025/2026`); NULL si no hay |
+| `status` | TEXT NOT NULL DEFAULT `publicada` | `publicada` · `borrador` (sus partidos solo se ven en la sección Datos) |
+| `created_at` | TEXT | |
+
+(`name`, `season`) es único sin distinguir mayúsculas; se valida en `competitions.py` porque SQLite trata dos NULL como distintos en un UNIQUE.
+
+### `competition_aliases`
+Texto de competencia tal como llega de FIBA → competencia. Permite renombrar y fusionar sin tocar `games.competition`.
+
+| Columna | Tipo | Descripción |
+|---------|------|-------------|
+| `source_name` | TEXT PK | Texto crudo (ej. `Liga de Ascenso 2026`) |
+| `competition_id` | INTEGER NOT NULL FK → competitions | |
+
+### `game_sources`
+JSON crudo de FIBA archivado para reprocesar sin volver a descargarlo (F-11, DA-12). ~50 KB por partido.
+
+| Columna | Tipo | Descripción |
+|---------|------|-------------|
+| `game_id` | TEXT PK FK → games | Se borra en cascada con el partido |
+| `source_url` | TEXT | URL importada (NULL si se archivó al reprocesar un partido viejo) |
+| `fetched_at` | TEXT | |
+| `raw_gz` | BLOB | `data.json` comprimido con gzip |
+| `page_info` | TEXT | JSON `{date, competition}` scrapeado de `bs.html` |
+
 ### `games`
 Un registro por partido importado.
 
@@ -17,7 +49,7 @@ Un registro por partido importado.
 |---------|------|-------------|
 | `id` | INTEGER PK AUTOINCREMENT | |
 | `game_id` | TEXT UNIQUE NOT NULL | ID numérico extraído de la URL FIBA |
-| `competition` | TEXT | Nombre de la competencia |
+| `competition` | TEXT | Texto de competencia tal como lo publica FIBA (crudo, no se edita) |
 | `date` | TEXT | Fecha en formato `YYYY-MM-DD` |
 | `home_team` | TEXT | Nombre equipo local |
 | `home_code` | TEXT | Código corto equipo local (ej. `FUBB`) |
@@ -25,8 +57,10 @@ Un registro por partido importado.
 | `away_code` | TEXT | Código corto equipo visitante |
 | `home_score` | INTEGER | Puntos equipo local |
 | `away_score` | INTEGER | Puntos equipo visitante |
-| `minutes` | INTEGER DEFAULT 40 | Duración del partido (usado para pace) |
+| `minutes` | INTEGER DEFAULT 40 | Duración real: 40 + 5 por prórroga (PACE, rebote individual). 40 en partidos no reprocesados |
 | `imported_at` | TEXT DEFAULT now | Timestamp de importación |
+| `competition_id` | INTEGER | Competencia asignada (F-11): por alias al importar, o manual. Backfill idempotente al arrancar |
+| `ingest_version` | INTEGER | Versión de la ingesta con que se guardó (`ingest.INGEST_VERSION`); NULL = previa a F-11 → pendiente de reproceso |
 
 ---
 
@@ -57,15 +91,37 @@ Stats de box score por equipo por partido. Incluye stats del rival pre-calculada
 | `opp_orb` / `opp_drb` | INTEGER | Rebotes del rival |
 | `opp_tov` | INTEGER | Pérdidas del rival |
 | `opp_pf` | INTEGER | Faltas del rival (faltas recibidas) |
-| `paint_pts` | INTEGER | Puntos en la pintura (PeP) |
+| `paint_pts` | INTEGER | Puntos en la pintura. **Etiqueta de UI: `PtsEnPint`** — la columna NO se renombra (C-05 / Constitución 5) |
 | `second_chance_pts` | INTEGER | Puntos de segunda oportunidad (PtsSegCh) |
 | `pts_from_tov` | INTEGER | Puntos tras pérdida rival (PtPer) |
 | `bench_pts` | INTEGER | Puntos del banco |
 | `fast_break_pts` | INTEGER | Puntos de contraataque (PCA) |
+| `blk_received` | INTEGER | Tapones recibidos por el equipo (`tot_sBlocksReceived`, T-05). `NULL` = no importado todavía |
+| `fouls_drawn` | INTEGER | Faltas recibidas por el equipo (`tot_sFoulsOn`, T-05). `NULL` = no importado todavía |
 
 **Restricción única:** `(game_id, team_code)`
 
 > Las 6 columnas de desglose (`opp_pf` … `fast_break_pts`) provienen del box score FIBA. Partidos importados antes de su incorporación las muestran en `0` hasta reimportar.
+>
+> `paint_pts`, `second_chance_pts`, `pts_from_tov`, `bench_pts` y `fast_break_pts` se guardan **`NULL`** si FIBA no manda la clave (la competencia no publica el dato) y `0` solo si FIBA informa 0 (C-11). El `DEFAULT 0` de la columna solo aplica a filas viejas; reimportar un partido reescribe el valor.
+
+---
+
+### `players`
+Ficha persistente de cada jugador **en un equipo** (C-08). Es la identidad: todas las filas de `player_game_stats` de una misma persona apuntan a una ficha por `player_id`.
+
+| Columna | Tipo | Descripción |
+|---------|------|-------------|
+| `id` | INTEGER PK AUTOINCREMENT | Identificador estable del jugador (se usa en URLs y filtros) |
+| `team_code` | TEXT NOT NULL | |
+| `norm_key` | TEXT NOT NULL | Nombre normalizado: minúsculas, sin tildes, espacios colapsados |
+| `display_name` | TEXT NOT NULL | Grafía real del partido más reciente (nunca la clave normalizada) |
+| `first_name` / `family_name` | TEXT | Nombre completo de FIBA (`firstName` / `familyName`); `NULL` hasta reprocesar el partido |
+| `photo_url` | TEXT | Foto de FIBA (`photoT`/`photoS`); `NULL` si no la publica |
+| `merged_into` | INTEGER FK → players | Ficha que absorbió a esta (fusión manual). `NULL` = ficha vigente |
+| `created_at` | TEXT | ISO-8601 |
+
+**Restricción única:** `(team_code, norm_key)`. La competencia **no** forma parte de la clave: es un filtro.
 
 ---
 
@@ -82,8 +138,11 @@ Stats individuales por jugador por partido.
 | `jersey` | TEXT | Número de camiseta |
 | `minutes` | TEXT | Minutos jugados (formato `MM:SS`) |
 | `position` | TEXT DEFAULT `''` | Posición FIBA (`playingPosition`: G/F/C/PG/PF...). Vacío en partidos importados antes de su incorporación hasta reimportar |
-| `plus_minus` | INTEGER DEFAULT 0 | Plus/Minus del partido (`sPlusMinusPoints` FIBA; puede ser negativo) |
+| `plus_minus` | INTEGER DEFAULT 0 | Plus/Minus del partido (`sPlusMinusPoints` FIBA; puede ser negativo). `NULL` si FIBA no manda la clave (C-11) |
 | `starter` | INTEGER DEFAULT 0 | 1=titular en ese partido (`starter` FIBA). Base para reconstruir el quinteto inicial (lineups/on-off) |
+| `player_id` | INTEGER | Ficha del jugador (`players.id`). La completa `identity.assign_game` al importar/reprocesar y `identity.backfill_player_ids` al arrancar. Índice `ix_pgs_player_id` |
+| `first_name` / `family_name` | TEXT | Nombre completo de FIBA. `NULL` en partidos anteriores a `INGEST_VERSION` 3 hasta reprocesar |
+| `photo_url` | TEXT | Foto de FIBA. `NULL` si no la publica |
 | `pts` | INTEGER | |
 | `fgm` / `fga` | INTEGER | |
 | `fgm2` / `fga2` | INTEGER | |
@@ -91,13 +150,19 @@ Stats individuales por jugador por partido.
 | `ftm` / `fta` | INTEGER | |
 | `orb` / `drb` / `trb` | INTEGER | |
 | `ast` / `tov` / `stl` / `blk` / `pf` | INTEGER | |
+| `blk_received` | INTEGER | Tapones recibidos (`sBlocksReceived`, T-05). `NULL` = no importado todavía |
+| `fouls_drawn`  | INTEGER | Faltas recibidas (`sFoulsOn`, T-05). `NULL` = no importado todavía |
 
-**Restricción única:** `(game_id, team_code, player_name)`
+**Restricción única:** `(game_id, team_code, player_name)` — sobre el nombre **crudo**, tal como llega de FIBA.
+
+> **Identidad vs unicidad.** La restricción de arriba no define quién es un jugador: solo impide dos filas idénticas en un mismo partido. La **identidad** es la ficha de `players`: clave `(team_code, nombre normalizado)` (`norm_name()` en `stats_engine.py`), de modo que dos grafías del mismo nombre (`"C. Zinaich"` / `"C.  ZINAICH"`) comparten `player_id` sin tocar el nombre crudo, que se conserva en `player_game_stats`, `shots` y `pbp_events`. Los nombres que la normalización no une (`"J. Feldeine"` / `"Jerome Feldeine"`) los fusiona un administrador (`POST /api/identity/merge`): la ficha absorbida queda con `merged_into` y sus filas pasan a `player_id` de la vigente. Ver `sdd/specs/v2/fase-1-confiabilidad/07-C-08-jugadores-duplicados/`.
+>
+> La columna `position` puede venir vacía en algunos partidos (FIBA no siempre carga `playingPosition`): al unificar gana la más frecuente entre las no vacías.
 
 ---
 
 ### `shots`
-Registro de cada tiro por partido. Tiene coordenadas `x/y` si vienen del array `shot` de FIBA; si viene del play-by-play, `x=0, y=0`.
+Registro de cada tiro por partido, uno por evento `2pt`/`3pt` del play-by-play. Las coordenadas reales van en `court_x/court_y`; `x/y` quedan en 0.
 
 | Columna | Tipo | Descripción |
 |---------|------|-------------|
@@ -112,8 +177,11 @@ Registro de cada tiro por partido. Tiene coordenadas `x/y` si vienen del array `
 | `sub_type` | TEXT | Ej. `"layup"`, `"dunk"`, `"jumpshot"` |
 | `period` | INTEGER | Período del partido |
 | `action_number` | INTEGER | Número de acción en el play-by-play |
+| `court_x` / `court_y` | REAL | Coordenadas reales de FIBA (`tm[n].shot[]`): 0–100 a lo largo / a lo ancho de la cancha **completa**. NULL si el partido no las trae o no se reprocesó |
 
 **Restricción única:** `(game_id, action_number)`
+
+> `x`/`y` siguen en 0: la clasificación de 11 zonas asume otra geometría y se rehace con `court_x/court_y` en C-03.
 
 ---
 
@@ -127,7 +195,7 @@ Play-by-play completo: un registro por evento de FIBA (`raw["pbp"]`). Base de li
 | `team_code` | TEXT | `""` en eventos no-equipo (`game`/`period`, `tno=0`) |
 | `player_name` | TEXT | `""` en eventos no-jugador |
 | `period` | INTEGER | Período |
-| `period_type` | TEXT | `REGULAR` / `OT` |
+| `period_type` | TEXT | `REGULAR` / `OVERTIME` (en prórroga `period` reinicia en 1) |
 | `clock_secs` | INTEGER | Segundos **restantes** en el período (de `gt` `MM:SS`) |
 | `s1` / `s2` | INTEGER | Marcador corrido local / visitante tras el evento |
 | `action_type` | TEXT | `2pt`, `3pt`, `rebound`, `assist`, `steal`, `block`, `turnover`, `freethrow`, `foul`, `foulon`, `substitution`, `timeout`, `jumpball`, `game`, `period` |
@@ -135,7 +203,9 @@ Play-by-play completo: un registro por evento de FIBA (`raw["pbp"]`). Base de li
 | `success` | INTEGER | 1=exitoso (según el tipo de acción) |
 | `action_number` | INTEGER | Número de acción en el play-by-play |
 
-**Restricción única:** `(game_id, action_number)` — reimportar es idempotente (insert-or-ignore).
+**Restricción única:** `(game_id, action_number)`.
+
+> **Reimportar / reprocesar** (F-11): el partido se hace upsert y sus filas de `team_game_stats`, `player_game_stats`, `shots` y `pbp_events` se **reemplazan** completas. Mismo resultado y misma cantidad de filas sin importar cuántas veces se repita.
 
 > Partidos importados antes de la Feature 02 no tienen `pbp_events` hasta reimportarse.
 
@@ -155,6 +225,31 @@ Play-by-play completo: un registro por evento de FIBA (`raw["pbp"]`). Base de li
 
 Constantes asociadas en `app.py`: `ZONE_KEYS_11`, `ZONE_POINTS`, `_2PT_ZONES`, `_3PT_ZONES`. Tiros sin coordenadas (`x=0, y=0`) caen en `top_key_3` (3PT) o `mid_top` (2PT sin keyword de pintura).
 
+### `app_config`
+Configuración global de la aplicación (F-13). Solo almacena **overrides**: si el valor coincide con el default se borra la fila.
+
+| Columna | Tipo | Descripción |
+|---------|------|-------------|
+| `key` | TEXT PK | Clave del catálogo (`CONFIG_SPEC` en `config.py`) |
+| `value` | TEXT NOT NULL | Valor serializado como texto |
+| `updated_at` | TEXT NOT NULL | ISO-8601 |
+| `updated_by` | TEXT | Usuario que lo modificó |
+
+---
+
+### `user_prefs`
+Preferencias por usuario (F-13). Clave compuesta `(owner, scope, key)`.
+
+| Columna | Tipo | Descripción |
+|---------|------|-------------|
+| `owner` | TEXT NOT NULL | Usuario de sesión o `"_open"` si no hay auth |
+| `scope` | TEXT NOT NULL | Alcance: `table.columns`, `table.sort`, `table.colorize`, `panel.collapsed`, `ui` |
+| `key` | TEXT NOT NULL | Clave dentro del scope |
+| `value` | TEXT NOT NULL | Valor serializado |
+| `updated_at` | TEXT NOT NULL | ISO-8601 |
+
+---
+
 ## Inicialización y migración
 
 ```bash
@@ -162,3 +257,7 @@ python backend/database.py
 ```
 
 `init_db(app)` crea todas las tablas con `db.create_all()` (idempotente). Al arrancar `app.py` también corre `upgrade_db(app)`, que aplica `ALTER TABLE ADD COLUMN` para las columnas nuevas sobre DBs existentes — silencioso e idempotente (ignora columnas ya presentes). No requiere herramienta de migración externa.
+
+### Regla para columnas nuevas (C-11, vinculante)
+
+Toda columna nueva que guarde un dato publicado por FIBA se crea **sin valor por defecto** (`NULL` = "no importado todavía" o "la competencia no lo publica"), y la ingesta escribe `0` **solo** cuando FIBA informa 0. Un `DEFAULT 0` haría indistinguible "no hay dato" de "vale cero", y ese cero falso entraría en promedios y rankings.

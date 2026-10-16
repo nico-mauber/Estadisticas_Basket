@@ -1,6 +1,8 @@
 backend/__pycache__/
 backend/*.pyc
 backend/basketball.db
+backend/venv/
+package-lock.json
 *.db
 .env
 .env.*

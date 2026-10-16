@@ -5,6 +5,8 @@ Single auth system, differentiated only by environment config:
   - AUTH_USERS  — JSON map {"user": "<pbkdf2 hash>"}. Presence enables auth.
   - SECRET_KEY  — signs the session cookie (set per service on Render).
   - SESSION_SECURE — "true" to mark the cookie Secure (HTTPS only).
+  - ADMIN_USERS — optional, comma-separated. When set, only those users can modify
+                  data (delete, reassign, edit competitions, reprocess). Unset = everyone.
 
 No users table: credentials live in AUTH_USERS so they survive redeploys on
 both dev (ephemeral disk) and prod alike. Generate a hash with:
@@ -108,6 +110,41 @@ def login_required(fn):
     def wrapper(*args, **kwargs):
         if auth_enabled() and "user" not in session:
             return jsonify({"error": "No autenticado"}), 401
+        return fn(*args, **kwargs)
+    return wrapper
+
+
+def _admin_users() -> set[str] | None:
+    """ADMIN_USERS: usuarios separados por coma. None = variable ausente (todos son admin)."""
+    raw = os.environ.get("ADMIN_USERS", "").strip()
+    if not raw:
+        return None
+    return {u.strip() for u in raw.split(",") if u.strip()}
+
+
+def is_admin() -> bool:
+    """Puede modificar datos (borrar, reasignar, editar competencias, reprocesar) — DA-18.
+
+    App abierta (sin AUTH_USERS) → sí. Con login: si ADMIN_USERS está definida, solo esos
+    usuarios; si no, todo usuario autenticado.
+    """
+    if not auth_enabled():
+        return True
+    user = session.get("user")
+    if not user:
+        return False
+    admins = _admin_users()
+    return admins is None or user in admins
+
+
+def admin_required(fn):
+    """Gate de escritura: 401 sin sesión, 403 si el usuario no es administrador."""
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if auth_enabled() and "user" not in session:
+            return jsonify({"error": "No autenticado"}), 401
+        if not is_admin():
+            return jsonify({"error": "Tu usuario no tiene permiso para esta acción."}), 403
         return fn(*args, **kwargs)
     return wrapper
 
