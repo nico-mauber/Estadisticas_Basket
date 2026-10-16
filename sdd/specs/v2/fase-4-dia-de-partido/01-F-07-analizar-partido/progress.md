@@ -1,7 +1,7 @@
 # Progress — F-07: Analizar partido
 
-> **Estado:** 🔶 En progreso (backend completo, frontend pendiente)
-> **Fecha:** 2026-10-14
+> **Estado:** 🔶 En progreso (backend completo, frontend MVP listo)
+> **Fecha:** 2026-10-16
 > Reglas: `sdd/04-implement.md`. Spec: [spec.md](spec.md) · Plan: [plan.md](plan.md) · Tasks: [tasks.md](tasks.md)
 
 ## Estado de tareas
@@ -20,20 +20,20 @@
 - [x] T-B11 · Entidad `matchup` registrada en `metrics_catalog`
 - [x] T-B12 · Rutas `/api/game/<id>`, `/pbp`, `/matchups`, `/shots`
 - [x] T-C1 · Métodos de `api.js`: `game`, `gamePbp`, `gameMatchups`, `gameShots`
-- [ ] T-D1 · `drawScoreTimeline`
-- [ ] T-D2 · Esqueleto `renderGameView`
-- [ ] T-D3 · Bloque Resumen
-- [ ] T-D4 · Bloque Box
-- [ ] T-D5 · `shotChart` `colorBy: "none"` / `onZoneClick`
-- [ ] T-D6 · Bloque Tiros
-- [ ] T-D7 · Bloque Jugadas
-- [ ] T-D8 · Bloques Quintetos y Cruces
-- [ ] T-D9 · Exportación e informe de scouting
-- [ ] T-D10 · Pestaña `analizar` + habilitar S5
-- [ ] T-D11 · Enlaces desde catálogo y game logs
-- [ ] T-D12 · Estilos y responsive
-- [ ] T-E1 · Estados de bloques
-- [x] T-E2 · `sw.js` v25 → v26
+- [x] T-D1 · `drawScoreTimeline` en `charts.js`
+- [x] T-D2 · Esqueleto `renderGameView` en `game-view.js` (6 tabs: Resumen/Box/Tiros/Jugadas/Quintetos/Cruces)
+- [x] T-D3 · Bloque Resumen (parciales, timeline, ratings por período, conjunto estándar)
+- [x] T-D4 · Bloque Box (box oficial por equipo con jugadores, DNP, +/−, conciliación)
+- [x] T-D5 · `shotChart` `colorBy: "none"` (sin percentil en vista partido)
+- [x] T-D6 · Bloque Tiros (mapa de tiro home/away side-by-side)
+- [x] T-D7 · Bloque Jugadas (PBP filtrable por período/tipo/jugador, 200 eventos máx)
+- [x] T-D8 · Bloques Quintetos y Cruces (lineup table con OER/DER/Net/eFG/muestra, matchups con PPP)
+- [ ] T-D9 · Exportación e informe de scouting (diferido)
+- [x] T-D10 · Sección `partido` habilitada en app.js (sin botón nav, acceso desde catálogo)
+- [x] T-D11 · Click en fila del catálogo abre vista partido
+- [x] T-D12 · Estilos game-view en `style.css` (responsive, tabs, tablas, shots grid)
+- [ ] T-E1 · Estados de bloques (loading/error implementados en game-view.js, offline/retry pendiente)
+- [x] T-E2 · `sw.js` v26 → v27 (game-view.js en STATIC)
 - [ ] T-F1 … T-F23 · Verificación
 - [ ] T-G1 (diferido → F-12) · Enlace desde calendario
 
@@ -62,6 +62,9 @@
 - Sin cambios de esquema: ✅ (F-07 no toca esquema)
 - Endpoints probados (test_client): ✅ game 200, pbp 200 (593 total, 36 filtered), matchups quinteto 200 (36 rows), matchups jugador 200 (100 rows), shots 200, error cases 404/400
 - Consola del navegador sin errores JS: pendiente (verificación manual)
+- `game-view.js` syntax check: ✅ (node -c)
+- `shot-chart.js` syntax check: ✅ (node -c)
+- Dev server localhost:5000: ✅ (game-view.js served 200)
 
 ## Desviaciones respecto a docs/ o plan
 - **Parciales solo desde pbp:** `period_pts` (fuente oficial) no disponible sin F-11 ingest v2. Se usa el fallback pbp en todos los partidos.
@@ -81,8 +84,8 @@
 - ✅ `docs/architecture.md` — `game_analysis.py` y `matchups.py` descritos
 
 ## Deuda / TODO
-- T-D1..T-D12: Frontend completo (componente game-view.js, pestaña analizar)
-- T-E1: Estados vacío/error/offline de cada bloque
+- T-D9: Exportación e informe de scouting
+- T-E1: Estados offline/retry de cada bloque (loading/error ya implementados)
 - T-F1..T-F23: Verificación completa
 - Tablas T-06 formales (register_table)
 - load_matchup_bundles completo

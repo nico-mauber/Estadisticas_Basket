@@ -11,6 +11,7 @@ import { createDataTable, mountTable } from "./components/data-table.js";
 import { exportMenu } from "./components/export-menu.js";
 import { tableToData, downloadBlob } from "./components/exporters.js";
 import { shotChart, bindZoneTooltips } from "./components/shot-chart.js";
+import { renderGameView } from "./components/game-view.js";
 
 // ── Toast ──────────────────────────────────────────────────────────────────
 function toast(msg, type = "ok") {
@@ -274,7 +275,7 @@ async function refreshCompareSelectors() {
 }
 
 // ── Nav ────────────────────────────────────────────────────────────────────
-const sections = ["import", "league", "team", "compare", "player", "search", "config"];
+const sections = ["import", "league", "team", "compare", "player", "search", "partido", "config"];
 let activeSection = "import";
 let _lastSection = "import";
 
@@ -656,6 +657,15 @@ async function _renderImportTab(el) {
   const page = delta => { importPage += delta; refresh(); };
   document.getElementById("pg-prev")?.addEventListener("click", () => page(-1));
   document.getElementById("pg-next")?.addEventListener("click", () => page(1));
+
+  // F-07: click en fila del catálogo abre vista partido
+  el.querySelectorAll("tr[data-game-id]").forEach(tr => {
+    tr.style.cursor = "pointer";
+    tr.addEventListener("click", e => {
+      if (e.target.closest("input")) return;
+      showGame(tr.dataset.gameId);
+    });
+  });
 
   document.getElementById("btn-delete-sel")?.addEventListener("click", () => {
     if (selectedGames.size) _showDeleteModal(selectedGames.size, [...selectedGames]);
@@ -2273,7 +2283,14 @@ const NAV_ITEMS = {
   compare: { icon: "⚡", label: "Comparar" },
   player:  { icon: "👤", label: "Jugador" },
   search:  { icon: "🔎", label: "Buscar" },
+  partido: { icon: "🏀", label: "Partido" },
 };
+
+// ── F-07: Analizar partido ──────────────────────────────────────────────────
+function showGame(gameId) {
+  setSection("partido");
+  renderGameView(document.getElementById("partido-main"), gameId);
+}
 
 function renderApp() {
   loadPopulationMinSize();   // para el copy "la población tiene menos de N entidades" (T-01)
@@ -2285,7 +2302,7 @@ function renderApp() {
       ${_authRequired ? `<span class="header-user">${_authUser || ""} · <button class="header-logout" id="btn-logout">Salir</button></span>` : ""}
     </header>
     <nav>
-      ${sections.filter(s => s !== "config").map(s => `
+      ${sections.filter(s => s !== "config" && s !== "partido").map(s => `
         <button data-section="${s}">
           <span class="nav-icon">${NAV_ITEMS[s].icon}</span>
           ${NAV_ITEMS[s].label}
@@ -2352,6 +2369,11 @@ function renderApp() {
       <!-- Search -->
       <div class="section" id="sec-search">
         <div id="search-main"><p class="empty"><span class="spinner"></span>Cargando buscador...</p></div>
+      </div>
+
+      <!-- Partido (F-07) -->
+      <div class="section" id="sec-partido">
+        <div id="partido-main"><p class="empty">Selecciona un partido desde el catálogo.</p></div>
       </div>
 
       <!-- Config (F-13) -->
