@@ -2,7 +2,7 @@
 
 > **ID:** A-01 · **Prioridad:** P0 · **Fase y orden:** 3·01
 > **Depende de:** T-05, F-11, C-11 (+ F-13, T-03, T-02, C-08 ya cerrados) · **Habilita:** A-02…A-07, A-11, F-01, F-02, F-07
-> **Estado:** Borrador (agente) — pendiente de revisión humana (gate Paso 2)
+> **Estado:** ✅ Aprobado
 > **Fuente:** [Especificación v2 §5.1 · A-01](../../00-especificacion-cliente-v2.md) · Arquitectura §3.9, §3.10, §3.14, §3.8, §6, §9.2
 > **Estimación:** XL · 28–40 h
 

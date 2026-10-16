@@ -39,6 +39,28 @@ class CompetitionAlias(db.Model):
     competition_id = db.Column(db.Integer, db.ForeignKey("competitions.id"), nullable=False)
 
 
+class Player(db.Model):
+    """Ficha persistente de un jugador EN un equipo (C-08).
+
+    Clave de identidad: (team_code, norm_key) donde `norm_key` es el nombre normalizado
+    (minúsculas, sin tildes, sin espacios dobles). La competencia NO es parte de la clave: es
+    un filtro. `merged_into` apunta a la ficha que absorbió a esta (fusión manual); las
+    consultas siempre resuelven a la ficha canónica (`merged_into IS NULL`).
+    """
+    __tablename__  = "players"
+    __table_args__ = (db.UniqueConstraint("team_code", "norm_key"),)
+
+    id           = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    team_code    = db.Column(db.String,  nullable=False)
+    norm_key     = db.Column(db.String,  nullable=False)
+    display_name = db.Column(db.String,  nullable=False)   # grafía real más reciente
+    first_name   = db.Column(db.String)
+    family_name  = db.Column(db.String)
+    photo_url    = db.Column(db.String)
+    merged_into  = db.Column(db.Integer, db.ForeignKey("players.id"))
+    created_at   = db.Column(db.String,  default=lambda: datetime.utcnow().isoformat())
+
+
 class Game(db.Model):
     __tablename__ = "games"
 
@@ -107,6 +129,10 @@ class TeamGameStats(db.Model):
     pts_from_tov      = db.Column(db.Integer, default=0)
     bench_pts         = db.Column(db.Integer, default=0)
     fast_break_pts    = db.Column(db.Integer, default=0)
+    # T-05: tapones y faltas recibidas. NULL = "no importado todavía" (regla de columnas
+    # nuevas, C-11); un 0 informado por FIBA se guarda como 0.
+    blk_received      = db.Column(db.Integer)
+    fouls_drawn       = db.Column(db.Integer)
 
 
 class PlayerGameStats(db.Model):
@@ -123,6 +149,12 @@ class PlayerGameStats(db.Model):
     position    = db.Column(db.String,  default="")   # playingPosition FIBA (G/F/C...)
     plus_minus  = db.Column(db.Integer, default=0)    # sPlusMinusPoints FIBA (por partido)
     starter     = db.Column(db.Integer, default=0)    # 1=titular (FIBA `starter`)
+    # C-08: ficha del jugador y datos de identidad de FIBA. NULL = "no importado todavía"
+    # (los partidos viejos los reciben al reprocesar; `player_id` lo completa identity.py).
+    player_id   = db.Column(db.Integer)
+    first_name  = db.Column(db.String)
+    family_name = db.Column(db.String)
+    photo_url   = db.Column(db.String)
 
     pts  = db.Column(db.Integer, default=0)
     fgm  = db.Column(db.Integer, default=0)
@@ -141,6 +173,10 @@ class PlayerGameStats(db.Model):
     stl  = db.Column(db.Integer, default=0)
     blk  = db.Column(db.Integer, default=0)
     pf   = db.Column(db.Integer, default=0)
+    # T-05: tapones y faltas recibidas. NULL = "no importado todavía" (regla de columnas
+    # nuevas, C-11); un 0 informado por FIBA se guarda como 0.
+    blk_received = db.Column(db.Integer)
+    fouls_drawn  = db.Column(db.Integer)
 
 
 class Shot(db.Model):
@@ -189,6 +225,39 @@ class PbpEvent(db.Model):
     action_number = db.Column(db.Integer)
 
 
+class AppConfig(db.Model):
+    """Configuración global de la app (F-13). Solo guarda overrides del default."""
+    __tablename__ = "app_config"
+
+    key        = db.Column(db.String, primary_key=True)
+    value      = db.Column(db.Text, nullable=False)
+    updated_at = db.Column(db.String, nullable=False)
+    updated_by = db.Column(db.String)
+
+
+class AppMeta(db.Model):
+    """Metadatos de la app persistidos (T-01, Arq. §3.14/§5): versiones de datos y de
+    configuración que prefijan las claves de `cache.memo`. Una fila por clave
+    (`data_version`, `config_version`); `create_all` la crea idempotentemente y
+    `cache.get_versions` siembra las filas faltantes con `1`."""
+    __tablename__ = "app_meta"
+
+    key   = db.Column(db.String, primary_key=True)
+    value = db.Column(db.Text, nullable=False)
+
+
+class UserPref(db.Model):
+    """Preferencias personales por usuario de sesión (F-13)."""
+    __tablename__  = "user_prefs"
+    __table_args__ = (db.PrimaryKeyConstraint("owner", "scope", "key"),)
+
+    owner      = db.Column(db.String, nullable=False)
+    scope      = db.Column(db.String, nullable=False)
+    key        = db.Column(db.String, nullable=False)
+    value      = db.Column(db.Text, nullable=False)
+    updated_at = db.Column(db.String, nullable=False)
+
+
 class GameSource(db.Model):
     """JSON crudo de FIBA archivado (gzip) para reprocesar sin volver a descargarlo (F-11, DA-12)."""
     __tablename__ = "game_sources"
@@ -224,6 +293,16 @@ def upgrade_db(app):
         ("games", "ingest_version", "INTEGER"),
         ("shots", "court_x",        "REAL"),
         ("shots", "court_y",        "REAL"),
+        # C-08 — identidad de jugador (sin DEFAULT: NULL = "no importado todavía")
+        ("player_game_stats", "player_id",   "INTEGER"),
+        ("player_game_stats", "first_name",  "TEXT"),
+        ("player_game_stats", "family_name", "TEXT"),
+        ("player_game_stats", "photo_url",   "TEXT"),
+        # T-05 — tapones y faltas recibidas (sin DEFAULT: NULL = "no importado todavía")
+        ("team_game_stats",   "blk_received", "INTEGER"),
+        ("team_game_stats",   "fouls_drawn",  "INTEGER"),
+        ("player_game_stats", "blk_received", "INTEGER"),
+        ("player_game_stats", "fouls_drawn",  "INTEGER"),
     ]
     with app.app_context():
         conn = db.engine.raw_connection()
@@ -233,6 +312,8 @@ def upgrade_db(app):
                 cur.execute(f"ALTER TABLE {table} ADD COLUMN {col} {typedef}")
             except Exception:
                 pass  # column already exists
+        # C-08: el completado y todas las consultas de ficha filtran por player_id
+        cur.execute("CREATE INDEX IF NOT EXISTS ix_pgs_player_id ON player_game_stats(player_id)")
         conn.commit()
         conn.close()
 

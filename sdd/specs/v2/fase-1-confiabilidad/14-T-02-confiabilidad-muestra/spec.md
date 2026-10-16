@@ -3,7 +3,7 @@
 > **ID:** T-02 · **Prioridad:** P0 · **Fase y orden:** 1·14
 > **Depende de:** F-13 ([../12-F-13-configuracion/](../12-F-13-configuracion/spec.md)), T-05 ([../13-T-05-conjunto-estandar-metricas/](../13-T-05-conjunto-estandar-metricas/spec.md)); indirectas: F-11 ([../02-F-11-calidad-datos-competencias/](../02-F-11-calidad-datos-competencias/spec.md), universo por competencia y `admin_required`), C-08 ([../07-C-08-jugadores-duplicados/](../07-C-08-jugadores-duplicados/spec.md), ids de jugador en los ids de quinteto)
 > **Habilita:** T-01, T-06, C-03, F-06, F-19, T-03, F-09, F-10, A-06, A-08, A-11, F-15
-> **Estado:** Borrador (agente) — pendiente de revisión humana (gate Paso 1)
+> **Estado:** ✅ Aprobado — defaults de arquitectura confirmados (§9)
 > **Fuente:** Especificación v2 §3 · T-02 ([../../00-especificacion-cliente-v2.md](../../00-especificacion-cliente-v2.md)) · Arquitectura §2.1, §3.2, §3.7, §7.2, §9 ([../../00-arquitectura-transversal.md](../../00-arquitectura-transversal.md))
 
 ## 0. Contexto y situación actual
@@ -197,21 +197,21 @@ Copy nuevo (vía `t()`, a agregar a `docs/frontend.md`) marcado con ★.
 - Percentiles, ranking y ficha (T-01). Exclusión en sugerencias automáticas: el servicio la provee; F-15, F-03, A-10 la aplican.
 
 ## 9. Ambigüedades
-- [DECISIÓN PROPUESTA — confirmar] "Número útil de filas" (CA del cliente) no está cuantificado. Se propone: ≥ 5 quintetos
+- [DECISIÓN CONFIRMADA — default de arquitectura] "Número útil de filas" (CA del cliente) no está cuantificado. Se propone: ≥ 5 quintetos
   con nivel `media` o `alta` para el equipo con más partidos del dataset de verificación. Con los 13 partidos del seed (pocos
   partidos por equipo) puede no alcanzarse con umbral 15: en ese caso se documenta en `progress.md` y se verifica con la segunda
   competencia de R-05.
-- [DECISIÓN PROPUESTA — confirmar] Los **cierres del equipo** (panel Cierres) se tratan como entidad "split de contexto"
+- [DECISIÓN CONFIRMADA — default de arquitectura] Los **cierres del equipo** (panel Cierres) se tratan como entidad "split de contexto"
   (umbral 15/40 posesiones, K = 20), porque son el equipo filtrado por un tramo. El umbral "Cierre de partido por quinteto"
   es de F-06.
-- [DECISIÓN PROPUESTA — confirmar] Las **combinaciones de 3 o 4 jugadores** (el panel actual permite 3–5) usan los umbrales y
+- [DECISIÓN CONFIRMADA — default de arquitectura] Las **combinaciones de 3 o 4 jugadores** (el panel actual permite 3–5) usan los umbrales y
   el K de quinteto.
-- [DECISIÓN PROPUESTA — confirmar] Equipo y jugador llevan badge (partidos/minutos) pero **sin regresión**: el cliente limita
+- [DECISIÓN CONFIRMADA — default de arquitectura] Equipo y jugador llevan badge (partidos/minutos) pero **sin regresión**: el cliente limita
   la regresión a entidades pequeñas; equipos y jugadores entran en percentiles por umbral de población (T-01).
-- [DECISIÓN PROPUESTA — confirmar] La calibración por mitades usa **partidos alternos** (el cliente pide dividir posesiones;
+- [DECISIÓN CONFIRMADA — default de arquitectura] La calibración por mitades usa **partidos alternos** (el cliente pide dividir posesiones;
   eso requiere A-01). Unidades con menos del mínimo de la entidad quedan fuera; con menos de 10 unidades o `r ≤ 0` no se sugiere
   K y se devuelve la advertencia correspondiente.
-- [DECISIÓN PROPUESTA — confirmar] El resultado de la calibración **no se persiste** (se recalcula a pedido); al aplicar, el K
+- [DECISIÓN CONFIRMADA — default de arquitectura] El resultado de la calibración **no se persiste** (se recalcula a pedido); al aplicar, el K
   queda en la configuración con usuario y fecha (`app_config.updated_by/updated_at`), y la corrida sobre el dataset de
   verificación se registra en `progress.md`.
 - [DECISIÓN HUMANA: DA-15] Umbral relativo solo para quintetos (1,5 %) hasta calibrar. [DECISIÓN HUMANA: DA-16] K = 25 para

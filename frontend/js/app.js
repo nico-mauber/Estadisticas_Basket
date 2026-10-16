@@ -1,6 +1,17 @@
 import { api, setUnauthorizedHandler } from "./api.js";
 import { drawRadar, drawEvolution, drawPlayerEvolution, drawLeagueScatter, drawCompareRadar, resetZoom } from "./charts.js";
-import { PCT, PCT0, DEC1, DEC2, fmtNumber, isNull, nullDisplay, fmtOrNull } from "./core/format.js";
+import { PCT, PCT0, DEC1, DEC2, fmtNumber, isNull, nullDisplay, fmtOrNull, cmpNullsLast } from "./core/format.js";
+import { renderDuplicateItems } from "./components/identity-merge.js";
+import { renderSettingsForm } from "./components/settings-form.js";
+import { renderStandardPanel } from "./components/standard-panel.js";
+import { metricCard, bindMetricCards } from "./components/metric-card.js";
+import { loadCatalog, stdKeyFor, loadPopulationMinSize } from "./core/catalog.js";
+import { percentileBg } from "./core/colors.js";
+import { createDataTable, mountTable } from "./components/data-table.js";
+import { exportMenu } from "./components/export-menu.js";
+import { tableToData, downloadBlob } from "./components/exporters.js";
+import { shotChart, bindZoneTooltips } from "./components/shot-chart.js";
+import { renderGameView } from "./components/game-view.js";
 
 // ── Toast ──────────────────────────────────────────────────────────────────
 function toast(msg, type = "ok") {
@@ -14,120 +25,151 @@ function toast(msg, type = "ok") {
 // ── Stat helpers ───────────────────────────────────────────────────────────
 // PCT/DEC1/DEC2 y la regla de nulos viven en core/format.js (C-11).
 
-function statClass(value, avg, higherIsBetter = true) {
-  if (value == null || avg == null) return "neutral";
-  return (higherIsBetter ? value >= avg : value <= avg) ? "above-avg" : "below-avg";
-}
-
-// Comparador único de tablas ordenables: el nulo se APARTA de la comparación en
-// vez de recibir un valor extremo, por eso su posición no depende de `dir` — queda
-// al final tanto ascendente como descendente (Feature 12 RF-1/RF-2).
-function _cmpNullsLast(av, bv, dir) {
-  const isNull = v => v == null || (typeof v === "number" && isNaN(v));
-  const an = isNull(av), bn = isNull(bv);
-  if (an && bn) return 0;
-  if (an) return 1;
-  if (bn) return -1;
-  if (typeof av === "string" || typeof bv === "string")
-    return dir * String(av).localeCompare(String(bv));
-  return dir * (av - bv);
-}
+// Comparador null-safe `cmpNullsLast` vive ahora en core/format.js (T-06 T-D1).
 
 // `reason`: código de `null_reasons` del backend; si `value` es nulo se muestra "—" con
-// esa razón en el title, sea cual sea `display` (C-11 RF-4).
-function statBox(label, value, display, leagueKey, league, higherIsBetter = true, reason = null) {
-  const lg    = leagueKey ? league?.[leagueKey] : null;
-  const avg   = lg?.avg;
-  const cls   = statClass(value, avg, higherIsBetter);
-  // `def_to_ratio` = (STL+BLK+DR)/TOV es un RATIO, no un porcentaje: sin excluirlo,
-  // el `includes("to_")` lo formatea como % y un 3.275 se muestra "327.5%" — la misma
-  // familia de valor imposible que reporta C-02 (Feature 14 RF-5).
-  // `as_pos` cae en el mismo heurístico por `includes("as_")` y es un ratio (Feature 15 D-6)
-  const NOT_PCT = ["def_to_ratio", "as_pos"];
-  const isPct = !!leagueKey && !NOT_PCT.includes(leagueKey) &&
-    (leagueKey.includes("pct") || leagueKey.includes("or_") || leagueKey.includes("dr_") || leagueKey.includes("to_") || leagueKey.includes("as_"));
-  const fmt   = v => v != null ? (isPct ? PCT(v) : DEC2(v)) : "—";
-  // El indicador "↑ mejor de la liga" se retiró: era el máximo de la población sin
-  // mínimo de muestra y producía valores imposibles (↑ 9900.0%). Su reemplazo es el
-  // percentil de T-01 (Feature 14 RF-5, decisión del cliente en ROADMAP §5).
-  const context = lg ? `
-      <div class="stat-context">
-        <span class="avg">Ø ${fmt(avg)}</span>
-      </div>` : "";
+// esa razón en el title, sea cual sea `display` (C-11 RF-4). El bloque "Ø liga" se retiró
+// con T-01: Equipo y Jugador usan la ficha de métrica (metricCard); los pocos usos
+// restantes (detalle de tiro, AS/PER) muestran solo el valor.
+function statBox(label, value, display, reason = null) {
   return `
     <div class="stat-box">
       <div class="stat-label">${label}</div>
-      <div class="stat-value ${cls}">${isNull(value) ? nullDisplay(reason) : display}</div>
-      ${context}
+      <div class="stat-value neutral">${isNull(value) ? nullDisplay(reason) : display}</div>
     </div>`;
 }
 
-// ── Compute averages from a game_log array (for last-N filter) ─────────────
-function _computeAvg(gameLog) {
-  // Un DNP no cuenta como partido jugado (Feature 12 RF-6). El backend usa la misma
-  // población; si acá no se filtrara, el filtro de últimos N divergiría de `averages`.
-  // `played` solo viene en el game log de jugador — en el de equipo es undefined y no filtra.
-  gameLog = (gameLog || []).filter(g => g.played !== false);
-  const n = gameLog.length;
-  if (!n) return {};
-  const keys = [
-    "oer","der","efg_pct","ts_pct","fg2_pct","fg3_pct",
-    "ft_pct","ft_rate","ft_rate_report","pps","ppp",
-    "fg2_uso","fg3_uso","peso_1p","peso_2p","peso_3p",
-    "or_pct","dr_pct","trb_pct","to_pct","to_ratio","as_pct","ast_ratio",
-    "opp_efg_pct","opp_ts_pct","opp_to_pct","opp_ft_rate",
-    "pace","pts","possessions","plays",
-    "stocks","def_playmaking","def_to_ratio","physical_impact",
-    "reb_share","oreb_share","dreb_share",
-    "uso_pct","ast_to",   // keys de jugador (ausentes en logs de equipo → null)
-    "fgm","fga","fgm2","fga2","fgm3","fga3","ftm","fta",
-    "orb","drb","trb","ast","tov","stl","blk","pf",
-    "opp_pf","paint_pts","second_chance_pts","pts_from_tov","bench_pts","fast_break_pts",
-  ];
-  const result = {};
-  for (const k of keys) {
-    const vals = gameLog.map(g => g[k]).filter(v => v != null && !isNaN(v));
-    // null (no 0) cuando ningún partido tiene dato válido para esa tasa
-    result[k] = vals.length ? Math.round((vals.reduce((s, v) => s + v, 0) / vals.length) * 10000) / 10000 : null;
-  }
-  result.net_rating = (result.oer != null && result.der != null)
-    ? Math.round((result.oer - result.der) * 10000) / 10000
-    : null;
-  // DEF/TO acumulado (pooled, DA-02), mismo criterio que el backend (C-11)
-  const sum = k => gameLog.reduce((s, g) => s + (g[k] || 0), 0);
-  const tov = sum("tov");
-  result.def_to_ratio = tov ? Math.round(((sum("stl") + sum("blk") + sum("drb")) / tov) * 10000) / 10000 : null;
-  // Razón de cada nulo: la que comparten los partidos del filtro; si difieren, genérica.
-  result.null_reasons = {};
-  for (const [k, v] of Object.entries(result)) {
-    if (v != null) continue;
-    const rs = new Set(gameLog.map(g => g.null_reasons?.[k]).filter(Boolean));
-    result.null_reasons[k] = rs.size === 1 ? [...rs][0] : "sin_intentos";
-  }
-  return result;
+// ── Ficha de métrica en grillas de Equipo/Jugador (T-01) ─────────────────────
+// `metrics`: [[label, claveLegada|canónica, valorPromedio, displayRespaldo, reason?]].
+// Con `std` (respuesta de /api/metrics) se dibuja la ficha completa (metricCard);
+// sin `std` (o si la métrica no está en el conjunto estándar) se muestra solo el valor.
+function _fichaGridHTML(metrics, entityType, std, entityId) {
+  return metrics.map(([label, clave, value, display, reason]) => {
+    const stdKey = stdKeyFor(clave) || clave;
+    const mObj = std?.metrics?.[stdKey];
+    if (std && mObj) {
+      return metricCard(stdKey, mObj, { entityType, label, id: entityId, minSize: std.population?.min_size });
+    }
+    return statBox(label, value, display, reason);
+  }).join("");
+}
+
+// Etiqueta con su definición al pasar el cursor / tocar (C-01): `statBox` inserta el label como HTML.
+const _hint = (label, text) => `<span title="${esc(text)}">${label}</span>`;
+const _PCT_REB_HINT = "estimado por minutos mientras estuvo en cancha. No es comparable con el %s de equipo.";
+
+// Totales que respaldan un cociente: " (43/29)" bajo el valor (C-04). Vacío si falta alguno.
+const _ratioSub = (a, b) => a == null || b == null ? ""
+  : `<span style="font-size:9px;color:var(--muted)"> (${a}/${b})</span>`;
+
+// Caja de AS/PER (asistencias sobre pérdidas acumuladas de la selección). PER = pérdidas.
+function _astPerBox(av, totals) {
+  const label = '<span title="Asistencias sobre pérdidas, acumulado de la selección (PER = pérdidas)">AS/PER</span>';
+  return statBox(label, av.ast_to, DEC2(av.ast_to) + _ratioSub(totals?.ast, totals?.tov),
+                 av.null_reasons?.ast_to);
 }
 
 // ── Filtro por competencia (compartido: Liga/Equipo/Comparar/Jugador) ────────
-// Por id de competencia (F-11): el texto de FIBA puede renombrarse o fusionarse.
-// `comps` = [{id, label}] (de /api/competitions o del game log).
-function _logComps(gameLog) {
-  const byId = new Map();
-  (gameLog || []).forEach(g => {
-    if (g.competition_id != null) byId.set(String(g.competition_id), g.competition_label || "—");
-  });
-  return [...byId].map(([id, label]) => ({ id, label })).sort((a, b) => a.label.localeCompare(b.label));
-}
-function _filterByComp(gameLog, comp) {
-  return comp ? (gameLog || []).filter(g => String(g.competition_id) === String(comp)) : gameLog;
-}
-function _compOptions(comps, selected = "", allLabel = "Todas las competencias") {
-  return `<option value="">${allLabel}</option>` +
+// Por id de competencia (F-11): el texto de FIBA puede renombrarse o fusionarse. `comps` = [{id, label}]
+// (de /api/competitions o del campo `competitions` del perfil). El navegador NO recalcula promedios al
+// filtrar: pide el perfil al servidor con `competition`/`last` (C-02 RF-5, Constitución regla 4).
+// `allValue`: valor de la opción "Todas las competencias": "all" en las vistas con promedio de liga (el
+// servidor no calcula `Ø` sin una competencia, RF-7); "" en el catálogo de Datos y en Buscar.
+function _compOptions(comps, selected = "", allLabel = "Todas las competencias", allValue = "") {
+  return `<option value="${allValue}"${String(selected) === allValue ? " selected" : ""}>${allLabel}</option>` +
     comps.map(c => `<option value="${c.id}"${String(c.id) === String(selected) ? " selected" : ""}>${esc(c.label)}</option>`).join("");
 }
+
+// Aviso bajo los selectores: de qué población sale el `Ø` y, si la selección no tiene partidos, un
+// estado vacío (C-02 RF-13). `kind`: [singular, plural] de la entidad de la población.
+function _refLegend(data, kind) {
+  const c = data.context, m = data.league_meta;
+  return c.competition.id == null
+    ? "Ø no disponible: elegí una competencia para ver el promedio de liga."
+    : `Ø = promedio de ${m.size} ${m.size === 1 ? kind[0] : kind[1]} de ${esc(c.competition.label)}.`;
+}
+function _selectionNote(data, kind) {
+  const empty = data.games === 0 ? '<p class="empty">Sin partidos en esta competencia</p>' : "";
+  return `<p class="td-muted" style="margin:0 0 8px">${_refLegend(data, kind)}</p>${empty}`;
+}
+
+// Radar sin promedio de liga (`Ø` nulo): no hay contra qué escalar.
+const _radarMsg = data => data.context.competition.id == null
+  ? "El radar compara contra el promedio de una competencia: elegí una."
+  : "Sin datos de la competencia para armar el radar.";
 
 // Escapa texto para insertarlo en HTML (nombres editables por el usuario, p. ej. competencias).
 function esc(v) {
   return String(v ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+// ── Exportación de tablas no migradas (T-D10) ────────────────────────────────
+// Lee el <table> ya renderizado con tableToData y monta el menú de exportación.
+// `meta` mínima: título, entidad, competencia del filtro activo, fecha.
+function _baseMeta({ title, section, entity, competitionLabel, entitySlug }) {
+  const slug = s => String(s || "").normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+  const today = new Date().toISOString().slice(0, 10);
+  const compLabel = competitionLabel || "todas";
+  const ent = entitySlug || (entity ? slug(entity) : "liga");
+  return {
+    title,
+    section: section || slug(title),
+    entity: { type: "team", id: "", name: entity || "" },
+    competition: { id: null, label: competitionLabel || "", season: "" },
+    filters: [],
+    base: null,
+    sort: null,
+    columns_visible: null,
+    generated_at: new Date().toISOString(),
+    generated_by: _authUser || "_open",
+    app_version: "smart-basket-v23",
+    file_name: `${slug(section || title)}_${ent}_${slug(compLabel)}_${today}`,
+  };
+}
+
+// Exportación de un panel estándar (ON/OFF compare, combinación grid): no hay un único
+// <table>. Serializa la primera tabla con encabezado si existe, o las parejas de stat-box.
+function _mountPanelExport(hostEl, panelFn, meta) {
+  if (!hostEl) return;
+  exportMenu(hostEl, {
+    getData: () => {
+      const panel = typeof panelFn === "function" ? panelFn() : panelFn;
+      if (panel) {
+        const tables = [...panel.querySelectorAll("table")];
+        if (tables.length) {
+          // ON/OFF: una tabla por grupo con el mismo encabezado; se unifican las filas.
+          const first = tableToData(tables[0], meta);
+          const rows = [];
+          for (const t of tables) rows.push(...tableToData(t, meta).rows);
+          return { meta, columns: first.columns, rows, footer: [], pageInfo: `${rows.length} filas` };
+        }
+        const boxes = [...panel.querySelectorAll(".stat-box")];
+        if (boxes.length) {
+          const columns = [{ key: "metrica", label: "Métrica", fmt: "text" }, { key: "valor", label: "Valor", fmt: "text" }];
+          const rows = boxes.map(b => [b.querySelector(".stat-label")?.textContent.trim() || "", b.querySelector(".stat-value, .mc-value")?.textContent.trim() || ""]);
+          return { meta, columns, rows, footer: [], pageInfo: `${rows.length} filas` };
+        }
+      }
+      return { meta, columns: [], rows: [], footer: [], pageInfo: "Sin filas" };
+    },
+    getNode: () => (typeof panelFn === "function" ? panelFn() : panelFn) || hostEl,
+  });
+}
+
+// Monta un botón "Exportar" en `hostEl` que serializa el <table> dentro de `tableElOrFn`.
+function _mountTableExport(hostEl, tableElOrFn, meta) {
+  if (!hostEl) return;
+  exportMenu(hostEl, {
+    getData: () => {
+      const tableEl = typeof tableElOrFn === "function" ? tableElOrFn() : tableElOrFn;
+      const d = tableEl ? tableToData(tableEl, meta) : { meta, columns: [], rows: [], footer: [] };
+      return { ...d, meta, pageInfo: `${d.rows.length} fila${d.rows.length === 1 ? "" : "s"}` };
+    },
+    getNode: () => {
+      const tableEl = typeof tableElOrFn === "function" ? tableElOrFn() : tableElOrFn;
+      return tableEl ? (tableEl.closest(".table-wrap") || tableEl) : hostEl;
+    },
+  });
 }
 
 // ── Four Factors card ──────────────────────────────────────────────────────
@@ -154,9 +196,12 @@ function _fourFactorsCard(av, teamName) {
 
   return `
     <div class="card">
-      <div class="card-title">Four Factors <span style="color:var(--muted2);font-weight:400;text-transform:none;letter-spacing:0">— ${teamName} vs Rival</span></div>
+      <div class="map-header">
+        <div class="card-title" style="margin:0">Four Factors <span style="color:var(--muted2);font-weight:400;text-transform:none;letter-spacing:0">— ${teamName} vs Rival</span></div>
+        <span class="xm-host" data-xm="four-factors"></span>
+      </div>
       <div class="table-wrap">
-        <table style="font-size:13px">
+        <table id="four-factors-table" style="font-size:13px">
           <thead><tr>
             <th>Factor</th>
             <th style="text-align:right;color:var(--accent)">${teamName}</th>
@@ -222,15 +267,20 @@ async function refreshCompareSelectors() {
   if (compSel) {
     const comps = await api.competitions().catch(() => []);
     compSel.style.display = comps.length > 1 ? "" : "none";
-    compSel.innerHTML = _compOptions(comps, compSel.value || "");
+    // por defecto, la competencia por defecto (C-02 RF-6); "Todas" solo si el usuario la eligió
+    const defaultId = comps.find(c => c.is_default)?.id ?? "";
+    const keep = comps.length > 1 ? compSel.value : "";
+    compSel.innerHTML = _compOptions(comps, keep || defaultId, "Todas las competencias", "all");
   }
 }
 
 // ── Nav ────────────────────────────────────────────────────────────────────
-const sections = ["import", "league", "team", "compare", "player", "search"];
+const sections = ["import", "league", "team", "compare", "player", "search", "partido", "config"];
 let activeSection = "import";
+let _lastSection = "import";
 
 function setSection(id) {
+  if (activeSection !== "config") _lastSection = activeSection;
   activeSection = id;
   document.querySelectorAll("nav button").forEach(b => b.classList.toggle("active", b.dataset.section === id));
   document.querySelectorAll(".section").forEach(s => s.style.display = s.id === `sec-${id}` ? "" : "none");
@@ -309,10 +359,61 @@ function _gamesTable(games, page, emptyMsg = "Sin partidos aún.") {
     ${pagination}`;
 }
 
+// ── Exportación masiva (T-D11) ────────────────────────────────────────────────
+async function _wireBulkExport(el, comps) {
+  const scopeSel = el.querySelector("#bulk-scope");
+  const compSel  = el.querySelector("#bulk-comp");
+  const teamSel  = el.querySelector("#bulk-team");
+  const teamField = el.querySelector("#bulk-team-field");
+  const btn = el.querySelector("#btn-bulk-export");
+  const status = el.querySelector("#bulk-status");
+  if (!scopeSel || !compSel || !btn) return;
+
+  // Competencias concretas (sin "Todas": la masiva requiere una competencia, plan §3.3).
+  const realComps = (comps || []).filter(c => c.status !== "borrador");
+  compSel.innerHTML = realComps.map(c => `<option value="${c.id}">${esc(c.label || c.name)}</option>`).join("");
+  if (!realComps.length) { btn.disabled = true; status.textContent = "No hay competencias para exportar."; return; }
+
+  const teams = await api.teams().catch(() => []);
+  teamSel.innerHTML = teams.map(t => `<option value="${esc(t.code)}">${esc(t.name || t.code)} (${t.code})</option>`).join("");
+
+  const syncScope = () => { teamField.style.display = scopeSel.value === "team" ? "" : "none"; };
+  scopeSel.addEventListener("change", syncScope);
+  syncScope();
+
+  btn.addEventListener("click", async () => {
+    const scope = scopeSel.value;
+    const competition = compSel.value;
+    const team = scope === "team" ? teamSel.value : null;
+    if (!competition) { status.textContent = "Elegí una competencia."; return; }
+    if (scope === "team" && !team) { status.textContent = "Elegí un equipo."; return; }
+    if (navigator.onLine === false) { status.textContent = "Sin conexión: la exportación masiva requiere conexión."; return; }
+
+    btn.disabled = true;
+    const prev = btn.textContent;
+    btn.innerHTML = '<span class="spinner"></span>Preparando…';
+    status.textContent = "Preparando exportación… puede tardar hasta un minuto.";
+    try {
+      const { blob, fileName } = await api.exportBulk({ scope, team, competition });
+      downloadBlob(blob, fileName || "exportacion.xlsx");
+      status.textContent = `Archivo generado: ${fileName || "exportacion.xlsx"}`;
+      toast(`Archivo generado: ${fileName || "exportacion.xlsx"}`);
+    } catch (e) {
+      if (navigator.onLine === false || e instanceof TypeError) status.textContent = "Sin conexión: la exportación masiva requiere conexión.";
+      else if (e.status === 404) status.textContent = "No hay datos para exportar en esta selección.";
+      else status.textContent = e.message || "No se pudo exportar.";
+      toast(status.textContent, "err");
+    } finally {
+      btn.disabled = false;
+      btn.textContent = prev;
+    }
+  });
+}
+
 // Tras un cambio de datos (importar, borrar, reprocesar, editar competencias) los
 // selectores y el buscador cacheado quedan viejos.
 function _afterDataChange() {
-  _searchData = null;
+  _searchPayload = null;
   refreshTeamSelector();
   refreshCompareSelectors();
 }
@@ -445,6 +546,7 @@ async function _renderImportTab(el) {
         <div class="games-header-actions">
           ${comps.length > 1 ? `<select id="catalog-comp" class="map-select">${_compOptions(
             comps.map(c => ({ id: c.id, label: _compLabel(c) })), _catalogComp)}</select>` : ""}
+          ${games && games.length ? '<span class="xm-host" data-xm="games"></span>' : ""}
           ${_isAdmin ? `<button class="btn btn-ghost btn-sm" id="btn-select-mode">${selectMode ? "Cancelar" : "Seleccionar partidos"}</button>` : ""}
         </div>
       </div>
@@ -457,9 +559,42 @@ async function _renderImportTab(el) {
       <div id="games-table">${games
         ? _gamesTable(games, importPage, _catalogComp ? "No hay partidos en esta competencia." : "Sin partidos aún.")
         : '<p class="empty below-avg">No se pudo cargar el catálogo de partidos.</p>'}</div>
+    </div>
+    <div class="card" id="bulk-export-card">
+      <div class="card-title">Exportar todo</div>
+      <p class="td-muted">Descargá todas las tablas de un equipo o de una competencia en un único XLSX (una hoja por apartado).</p>
+      <div class="bulk-export">
+        <div class="bulk-field">
+          <label for="bulk-scope">Alcance</label>
+          <select id="bulk-scope" class="map-select">
+            <option value="team">Equipo</option>
+            <option value="competition">Competencia</option>
+          </select>
+        </div>
+        <div class="bulk-field">
+          <label for="bulk-comp">Competencia</label>
+          <select id="bulk-comp" class="map-select"></select>
+        </div>
+        <div class="bulk-field" id="bulk-team-field">
+          <label for="bulk-team">Equipo</label>
+          <select id="bulk-team" class="map-select"></select>
+        </div>
+        <button class="btn" id="btn-bulk-export">Exportar XLSX</button>
+      </div>
+      <p class="td-muted" id="bulk-status" style="margin-top:8px"></p>
     </div>`;
 
   const refresh = () => renderImport();
+
+  _wireBulkExport(el, comps);
+
+  // Exportación del catálogo de partidos (T-D10).
+  const gamesHost = el.querySelector('[data-xm="games"]');
+  if (gamesHost) {
+    const compLabel = (comps.find(c => String(c.id) === String(_catalogComp)) || {}).label || "";
+    _mountTableExport(gamesHost, () => el.querySelector("#games-table table"),
+      _baseMeta({ title: "Catálogo de partidos", section: "partidos", entity: "", entitySlug: "liga", competitionLabel: compLabel }));
+  }
 
   document.getElementById("btn-import").addEventListener("click", async () => {
     const url = document.getElementById("url-input").value.trim();
@@ -522,6 +657,15 @@ async function _renderImportTab(el) {
   const page = delta => { importPage += delta; refresh(); };
   document.getElementById("pg-prev")?.addEventListener("click", () => page(-1));
   document.getElementById("pg-next")?.addEventListener("click", () => page(1));
+
+  // F-07: click en fila del catálogo abre vista partido
+  el.querySelectorAll("tr[data-game-id]").forEach(tr => {
+    tr.style.cursor = "pointer";
+    tr.addEventListener("click", e => {
+      if (e.target.closest("input")) return;
+      showGame(tr.dataset.gameId);
+    });
+  });
 
   document.getElementById("btn-delete-sel")?.addEventListener("click", () => {
     if (selectedGames.size) _showDeleteModal(selectedGames.size, [...selectedGames]);
@@ -591,10 +735,19 @@ function _qualityCheckCard(title, c, key) {
         <td>${i.label}</td><td style="text-align:right">${i.nulls} / ${i.total}</td>
         <td style="text-align:right" class="${i.nulls ? "" : "td-muted"}">${PCT(i.pct)}</td></tr>`).join("")}</tbody>
     </table></div>`;
+  } else if (key === "possible_duplicates") {
+    body = '<div id="dup-panel"></div>';   // lo dibuja identity-merge.js (C-08)
+  } else if (key === "possession_gaps" && c.status !== "no_disponible") {
+    const n = c.count || 0, pct = c.pct != null ? DEC1(c.pct) : "—";
+    const games = c.items ? c.items.length : 0;
+    body = n ? `<p>${n} posesiones incompletas (${pct} %) en ${games} partido(s).</p>` : "";
+    if (c.items && c.items.length) {
+      const line = i => `<li class="poss-gap-item" data-game="${i.game_id}">${_fmtDate(i.date)} · ${esc(i.label)} — <span class="td-muted">${i.incomplete || 0} incompleta(s)</span></li>`;
+      body += `<details${c.items.length <= 5 ? " open" : ""}><summary>Ver ${c.items.length}</summary>
+        <ul class="quality-items">${c.items.map(line).join("")}</ul></details>`;
+    }
   } else if (c.items.length) {
-    const line = key === "possible_duplicates"
-      ? i => `<li><b>${i.team_code}</b> · ${i.variants.map(v => `${esc(v.player_name)} (${v.games} PJ)`).join(" / ")}</li>`
-      : i => `<li>${_fmtDate(i.date)} · ${esc(i.label)}${i.team_code ? ` · <b>${i.team_code}</b>` : ""}${i.detail ? ` — <span class="td-muted">${esc(i.detail)}</span>` : ""}</li>`;
+    const line = i => `<li>${_fmtDate(i.date)} · ${esc(i.label)}${i.team_code ? ` · <b>${i.team_code}</b>` : ""}${i.detail ? ` — <span class="td-muted">${esc(i.detail)}</span>` : ""}</li>`;
     body = `<details${c.items.length <= 5 ? " open" : ""}><summary>Ver ${c.items.length}</summary>
       <ul class="quality-items">${c.items.map(line).join("")}</ul></details>`;
   }
@@ -640,7 +793,20 @@ async function _renderQualityTab(el) {
         <span>${s.games} partidos · ${s.incomplete_games} incompletos · ${isDraft ? "en borrador (oculta fuera de Datos)" : "publicada"}</span>
       </div>` : '<p class="empty">Esta competencia no tiene partidos.</p>'}
     </div>
-    ${s.games ? QUALITY_CHECKS.map(([k, t]) => _qualityCheckCard(t, rep.checks[k], k)).join("") : ""}`;
+    ${s.games ? QUALITY_CHECKS.map(([k, t]) => _qualityCheckCard(t, rep.checks[k], k)).join("") : ""}
+    <div id="poss-conciliation"></div>`;
+
+  renderDuplicateItems(document.getElementById("dup-panel"), rep.checks.possible_duplicates, {
+    isAdmin: _isAdmin, toast,
+    onMerged: () => { _afterDataChange(); _renderQualityTab(el); },
+  });
+
+  if (s.games) _renderConciliation(document.getElementById("poss-conciliation"), requested);
+
+  el.querySelectorAll(".poss-gap-item[data-game]").forEach(li => {
+    li.style.cursor = "pointer";
+    li.addEventListener("click", () => _openPossInspection(li.dataset.game));
+  });
 
   document.getElementById("quality-comp").addEventListener("change", e => {
     _qualityComp = e.target.value;
@@ -668,6 +834,120 @@ async function _renderQualityTab(el) {
       : { title: "Pasar a borrador", text: "Sus partidos dejan de verse en Liga, Equipo, Jugador, Comparar y Buscar hasta que la publiques.",
           confirm: "Pasar a borrador", onSubmit: () => setStatus("borrador") });
   });
+}
+
+// ── Conciliación de posesiones (A-01, T-D1) ───────────────────────────────
+async function _renderConciliation(el, compId) {
+  el.innerHTML = '<p class="empty"><span class="spinner"></span>Conciliando posesiones…</p>';
+  let rc;
+  try { rc = await api.possessionsReconcile({ competition: compId }); }
+  catch { el.innerHTML = '<p class="empty td-muted">No se pudo cargar la conciliación de posesiones.</p>'; return; }
+  if (!el.isConnected) return;
+  const teams = rc.teams || [], totals = rc.totals || {}, over = rc.games_over_5pct || [];
+  const row = t => `<tr>
+    <td class="td-team">${esc(t.team_name || t.team_code)}</td>
+    <td style="text-align:right">${t.games}</td>
+    <td style="text-align:right">${t.counted}</td>
+    <td style="text-align:right">${DEC1(t.formula)}</td>
+    <td style="text-align:right" class="${t.diff_pct != null && Math.abs(t.diff_pct) > 2 ? "poss-alert" : ""}">${t.diff_pct != null ? DEC1(t.diff_pct) + " %" : "—"}</td>
+    <td style="text-align:right">${t.incomplete}</td></tr>`;
+  const csvData = [["Equipo", "Partidos", "Reconstruidas", "Fórmula", "Diferencia %", "Incompletas"],
+    ...teams.map(t => [t.team_name || t.team_code, t.games, t.counted, t.formula, t.diff_pct, t.incomplete])];
+  el.innerHTML = `
+    <div class="card">
+      <div class="games-header">
+        <div class="card-title" style="margin:0">Conciliación de posesiones</div>
+        <button class="btn btn-ghost btn-sm" id="btn-poss-csv">CSV</button>
+      </div>
+      <p class="td-muted" style="font-size:12px;margin:var(--sp-2) 0">Reconstruidas una por una vs fórmula del glosario. Diferencia admitida: 2 % por equipo.</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Equipo</th><th style="text-align:right">PJ</th><th style="text-align:right">Reconstruidas</th><th style="text-align:right">Fórmula</th><th style="text-align:right">Dif %</th><th style="text-align:right">Incompletas</th></tr></thead>
+        <tbody>${teams.map(row).join("")}</tbody>
+        <tfoot><tr class="td-muted"><td>Total</td><td></td><td style="text-align:right">${totals.counted || 0}</td><td style="text-align:right">${DEC1(totals.formula)}</td><td style="text-align:right">${totals.diff_pct != null ? DEC1(totals.diff_pct) + " %" : "—"}</td><td style="text-align:right">${totals.incomplete || 0}</td></tr></tfoot>
+      </table></div>
+      ${over.length ? `<div style="margin-top:var(--sp-3)">
+        <div class="card-title" style="font-size:13px">Partidos con diferencia mayor al 5 %</div>
+        <ul class="quality-items">${over.map(o => `<li class="poss-gap-item" data-game="${o.game_id}" style="cursor:pointer">${esc(o.team_code)} · ${DEC1(o.diff_pct)} % · ${o.counted} reconstruidas / ${DEC1(o.formula)} fórmula</li>`).join("")}</ul>
+      </div>` : '<p class="td-muted" style="font-size:12px;margin-top:var(--sp-2)">Ningún partido supera el 5 %.</p>'}
+    </div>`;
+  document.getElementById("btn-poss-csv")?.addEventListener("click", () => {
+    const sep = ";", dec = v => typeof v === "number" ? String(v).replace(".", ",") : (v ?? "");
+    const csv = csvData.map(r => r.map(dec).join(sep)).join("\r\n");
+    downloadBlob(new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" }), "conciliacion_posesiones.csv");
+  });
+  el.querySelectorAll(".poss-gap-item[data-game]").forEach(li => {
+    li.addEventListener("click", () => _openPossInspection(li.dataset.game));
+  });
+}
+
+// ── Inspección de posesiones de un partido (A-01, T-D2) ────────────────────
+async function _openPossInspection(gameId) {
+  const backdrop = document.createElement("div");
+  backdrop.className = "modal-backdrop";
+  backdrop.innerHTML = '<div class="modal" style="max-width:900px;width:95vw"><p class="empty"><span class="spinner"></span>Cargando posesiones…</p></div>';
+  document.body.appendChild(backdrop);
+  backdrop.addEventListener("click", e => { if (e.target === backdrop) backdrop.remove(); });
+
+  let data;
+  try { data = await api.gamePossessions(gameId, { detail: 1 }); }
+  catch (e) {
+    backdrop.querySelector(".modal").innerHTML = `<h3>Error</h3><p>${esc(e.message || "No se pudieron cargar las posesiones.")}</p>
+      <div class="modal-actions"><button class="btn btn-ghost btn-sm" data-cancel>Cerrar</button></div>`;
+    backdrop.querySelector("[data-cancel]").addEventListener("click", () => backdrop.remove());
+    return;
+  }
+
+  const poss = data.possessions || [], rec = data.reconcile || {};
+  const teams = Object.keys(rec);
+  let filter = null;
+
+  function render() {
+    const filtered = filter ? poss.filter(p => p.team === filter) : poss;
+    const recSummary = teams.map(t => {
+      const r = rec[t];
+      if (!r) return "";
+      const cls = r.diff_pct != null && Math.abs(r.diff_pct) > 2 ? " poss-alert" : "";
+      return `<span>${t}: ${r.counted} reconstruidas · ${DEC1(r.formula_pbp)} fórmula · <span class="${cls}">${DEC1(r.diff_pct)} %</span></span>`;
+    }).join(" · ");
+
+    const endTypes = { t2c: "2P conv.", t2f: "2P errado", t3c: "3P conv.", t3f: "3P errado",
+      falta: "Falta", perdida: "Pérdida", fin_periodo: "Fin período" };
+    const fmtClock = s => s != null ? `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}` : "—";
+
+    const row = p => {
+      const cls = p.incomplete ? ' class="poss-incomplete"' : "";
+      const status = p.incomplete ? (p.incomplete_reason || "incompleta") : "OK";
+      return `<tr${cls}${p.incomplete && p.incomplete_reason ? ` title="${esc(p.incomplete_reason)}"` : ""}>
+        <td>${p.poss_id}</td><td>${esc(p.team)}</td><td>${p.period}${p.period_type === "OVERTIME" ? " OT" : ""}</td>
+        <td>${fmtClock(p.start_clock)}</td><td>${fmtClock(p.end_clock)}</td>
+        <td>${p.duration != null ? p.duration + "s" : "—"}</td>
+        <td>${p.chances ? p.chances.length : 1}</td>
+        <td>${endTypes[p.end_type] || p.end_type || "—"}</td>
+        <td style="text-align:right">${p.pts}</td>
+        <td>${status}</td></tr>`;
+    };
+
+    backdrop.querySelector(".modal").innerHTML = `
+      <div class="games-header" style="margin-bottom:var(--sp-3)">
+        <h3 style="margin:0">Posesiones · ${esc(data.game_id || gameId)}</h3>
+        <button class="btn btn-ghost btn-sm" data-cancel>Cerrar</button>
+      </div>
+      <div class="poss-summary">${recSummary}</div>
+      <div class="poss-filters">
+        <button class="filter-pill${!filter ? " active" : ""}" data-team="">Todos</button>
+        ${teams.map(t => `<button class="filter-pill${filter === t ? " active" : ""}" data-team="${t}">${t}</button>`).join("")}
+      </div>
+      <div class="poss-sheet"><div class="table-wrap table-sticky"><table>
+        <thead><tr><th>#</th><th>Equipo</th><th>Per.</th><th>Inicio</th><th>Fin</th><th>Dur.</th><th>Op.</th><th>Final.</th><th style="text-align:right">Pts</th><th>Estado</th></tr></thead>
+        <tbody>${filtered.map(row).join("")}</tbody>
+      </table></div></div>`;
+
+    backdrop.querySelector("[data-cancel]").addEventListener("click", () => backdrop.remove());
+    backdrop.querySelectorAll(".poss-filters .filter-pill").forEach(btn => {
+      btn.addEventListener("click", () => { filter = btn.dataset.team || null; render(); });
+    });
+  }
+  render();
 }
 
 async function _renderCompetitionsTab(el) {
@@ -735,10 +1015,9 @@ async function _renderCompetitionsTab(el) {
 
 // ── League section — sortable table ───────────────────────────────────────
 let _leagueTeams    = [];
-let _leagueSortKey  = "oer";
-let _leagueSortDir  = -1; // -1 desc, 1 asc
+let _leagueSummary  = null;  // {avg, leaders, population} de include=summary (T-01), alimenta el mapa
 let _leagueMap      = "ef";
-let _leagueComp     = ""; // "" = todas las competencias
+let _leagueComp     = null; // null = la competencia por defecto (se resuelve al cargar); "all" = todas
 
 // Scatter map presets — each defines the X/Y axes for el mapa de liga.
 // Cada eje declara la dirección de su métrica (`higher` | `lower` | `neutral`) y el título se arma
@@ -784,123 +1063,6 @@ function _mapAxis(a) {
   };
 }
 
-const LEAGUE_COLS = [
-  { key: null,           label: "#" },
-  { key: "team_name",    label: "Equipo" },
-  { key: "games",        label: "PJ",    title: "Partidos" },
-  { key: "oer",          label: "OER",   title: "Eficiencia Ofensiva" },
-  { key: "der",          label: "DER",   title: "Eficiencia Defensiva" },
-  { key: "net_rating",   label: "NRtg",  title: "Rating Neto" },
-  { key: "efg_pct",      label: "eFG%",  title: "Effective FG%" },
-  { key: "ts_pct",       label: "TS%",   title: "True Shooting%" },
-  { key: "or_pct",       label: "OR%",   title: "Rebote Ofensivo%" },
-  { key: "dr_pct",       label: "DR%",   title: "Rebote Defensivo%" },
-  { key: "to_pct",       label: "TO%",   title: "Turnover%" },
-  { key: "pace",         label: "Pace",  title: "Pace" },
-  { key: "pts",          label: "Pts",   title: "Puntos por partido" },
-];
-
-// C-09 — tabla de posiciones clásica. Se alimenta del mismo `_leagueTeams` que el ranking:
-// sin fetch adicional. Puntos, orden y desempate los decide el backend (`table_points`,
-// `standings_pos`; DA-31). Con varias competencias y "Todas" elegido no se muestra: sumaría
-// partidos de torneos distintos. `compSelHTML` = selector de competencia de la vista.
-function _standingsCardHTML(teams, compSelHTML, pickComp) {
-  const header = `
-    <div class="map-header">
-      <div class="card-title" style="margin:0">Tabla general</div>
-      ${compSelHTML}
-    </div>`;
-  if (pickComp) {
-    return `<div class="card">${header}<p class="empty">Elegí una competencia para ver la tabla general.</p></div>`;
-  }
-  const rows = [...teams].sort((a, b) => a.standings_pos - b.standings_pos);
-  const th = ["Equipo", "PJ", "PG", "PP", "Pts", "PF", "PC"]
-    .map((h, i) => `<th${i ? ' style="text-align:right"' : ""}>${h}</th>`).join("");
-  const body = rows.map(t => `
-    <tr data-code="${t.team_code}">
-      <td>${t.team_name}</td>
-      <td style="text-align:right">${t.games ?? "—"}</td>
-      <td style="text-align:right">${t.wins ?? "—"}</td>
-      <td style="text-align:right">${t.losses ?? "—"}</td>
-      <td style="text-align:right;font-weight:700">${t.table_points ?? "—"}</td>
-      <td style="text-align:right">${t.pts_for ?? "—"}</td>
-      <td style="text-align:right">${t.pts_against ?? "—"}</td>
-    </tr>`).join("");
-  return `
-    <div class="card">
-      ${header}
-      <p class="td-muted">Solo partidos importados, no el fixture completo.</p>
-      <div class="table-wrap">
-        <table id="standings-table" class="search-table">
-          <thead><tr>${th}</tr></thead>
-          <tbody>${body}</tbody>
-        </table>
-      </div>
-    </div>`;
-}
-
-function _sortedLeague() {
-  return [..._leagueTeams].sort((a, b) =>
-    _cmpNullsLast(a[_leagueSortKey], b[_leagueSortKey], _leagueSortDir));
-}
-
-function _leagueTableHTML(teams) {
-  const sorted = teams;
-  const headers = LEAGUE_COLS.map(c => {
-    const cls = c.key === _leagueSortKey
-      ? (_leagueSortDir === -1 ? "sort-desc" : "sort-asc")
-      : "";
-    const attrs = c.key ? `data-key="${c.key}"` : "";
-    return `<th class="${cls}" ${attrs} title="${c.title || ""}">${c.label}</th>`;
-  }).join("");
-
-  const rows = sorted.map((t, i) => `
-    <tr style="cursor:pointer" data-code="${t.team_code}">
-      <td class="td-muted">${i + 1}</td>
-      <td class="td-team">${t.team_name}</td>
-      <td>${t.games}</td>
-      <td>${DEC2(t.oer)}</td>
-      <td>${DEC2(t.der)}</td>
-      <td class="${t.net_rating == null ? '' : t.net_rating >= 0 ? 'above-avg' : 'below-avg'}">${DEC2(t.net_rating)}</td>
-      <td>${PCT(t.efg_pct)}</td>
-      <td>${PCT(t.ts_pct)}</td>
-      <td>${PCT(t.or_pct)}</td>
-      <td>${PCT(t.dr_pct)}</td>
-      <td>${PCT(t.to_pct)}</td>
-      <td>${DEC2(t.pace)}</td>
-      <td>${DEC2(t.pts)}</td>
-    </tr>`).join("");
-
-  return `<thead><tr>${headers}</tr></thead><tbody>${rows}</tbody>`;
-}
-
-function _bindLeagueTableEvents(tableEl) {
-  tableEl.querySelectorAll("th[data-key]").forEach(th => {
-    th.addEventListener("click", () => {
-      const key = th.dataset.key;
-      if (_leagueSortKey === key) {
-        _leagueSortDir *= -1;
-      } else {
-        _leagueSortKey = key;
-        _leagueSortDir = key === "team_name" ? 1 : -1;
-      }
-      tableEl.innerHTML = _leagueTableHTML(_sortedLeague());
-      _bindLeagueTableEvents(tableEl);
-      _bindLeagueRowClicks(tableEl);
-    });
-  });
-}
-
-function _bindLeagueRowClicks(tableEl) {
-  tableEl.querySelectorAll("tbody tr").forEach(tr => {
-    tr.addEventListener("click", () => {
-      document.getElementById("team-select").value = tr.dataset.code;
-      setSection("team");
-      renderTeam(tr.dataset.code);
-    });
-  });
-}
-
 function _drawLeagueMap() {
   const map = LEAGUE_MAPS.find(m => m.id === _leagueMap) || LEAGUE_MAPS[0];
   const hintEl = document.getElementById("map-hint");
@@ -909,7 +1071,22 @@ function _drawLeagueMap() {
       &nbsp;&nbsp;·&nbsp;&nbsp;
       <span style="color:var(--muted)">🖱 rueda = zoom &nbsp;·&nbsp; arrastrar = mover &nbsp;·&nbsp; pellizcar = zoom táctil</span>`;
   }
-  drawLeagueScatter("chart-scatter", _leagueTeams, _mapAxis(map.axis));
+  const axis = _mapAxis(map.axis);
+  const avg = _leagueSummary?.avg;
+  if (avg) {
+    if (avg[axis.xKey] != null) axis.avgX = avg[axis.xKey];
+    if (avg[axis.yKey] != null) axis.avgY = avg[axis.yKey];
+  }
+  drawLeagueScatter("chart-scatter", _leagueTeams, axis);
+}
+
+// T-06: abre el equipo al hacer clic en una fila del ranking (conserva el comportamiento previo).
+function _openTeamFromRow(row) {
+  const code = String(row.id ?? "").split(":").pop() || row.id;
+  const sel = document.getElementById("team-select");
+  if (sel) sel.value = code;
+  setSection("team");
+  renderTeam(code);
 }
 
 async function renderLeague() {
@@ -917,28 +1094,53 @@ async function renderLeague() {
   sec.innerHTML = '<p class="empty"><span class="spinner"></span>Cargando...</p>';
   try {
     const comps = await api.competitions().catch(() => []);
-    if (!comps.some(c => String(c.id) === String(_leagueComp))) _leagueComp = "";
-    _leagueTeams = await api.league(_leagueComp);
+    // Abre en la competencia por defecto (RF-12); "Todas" solo si el usuario la eligió y sigue vigente
+    if (_leagueComp !== "all" && !comps.some(c => String(c.id) === String(_leagueComp))) {
+      const def = comps.find(c => c.is_default);
+      _leagueComp = def ? String(def.id) : null;
+    }
+    // El mapa de liga sigue con /api/league (no migra, T-D7).
+    const res = await api.league(_leagueComp, { summary: true });
+    _leagueTeams = res.teams || [];
+    _leagueSummary = { avg: res.avg || {}, leaders: res.leaders || {}, population: res.population || null };
     if (!_leagueTeams.length) { sec.innerHTML = '<p class="empty">Sin datos. Importa partidos primero.</p>'; return; }
 
     const compSelHTML = comps.length > 1
-      ? `<select id="league-comp" class="map-select">${_compOptions(comps, _leagueComp)}</select>`
+      ? `<select id="league-comp" class="map-select">${_compOptions(comps, _leagueComp, "Todas las competencias", "all")}</select>`
       : "";
     sec.innerHTML = `
-      ${_standingsCardHTML(_leagueTeams, compSelHTML, comps.length > 1 && !_leagueComp)}
       <div class="card">
         <div class="map-header">
-          <div class="card-title" style="margin:0">Ranking de equipos — Liga <span style="color:var(--muted);font-size:10px;font-weight:400;margin-left:8px">Click en columna para ordenar</span></div>
+          <div class="card-title" style="margin:0">Tabla general</div>
+          ${compSelHTML}
         </div>
-        <div class="table-wrap">
-          <table id="league-table" class="table-sticky"></table>
+        <p class="td-muted">Solo partidos importados, no el fixture completo.</p>
+        <div id="league-standings-dt"></div>
+      </div>
+      <div class="card">
+        <div class="map-header">
+          <div class="card-title" style="margin:0">Ranking de equipos — Liga</div>
         </div>
+        <div id="league-ranking-dt"></div>
       </div>`;
 
-    const tableEl = document.getElementById("league-table");
-    tableEl.innerHTML = _leagueTableHTML(_sortedLeague());
-    _bindLeagueTableEvents(tableEl);
-    _bindLeagueRowClicks(tableEl);
+    // Parámetros de tabla: "all" (todas) se envía como sin competencia.
+    const compParam = (_leagueComp && _leagueComp !== "all") ? _leagueComp : null;
+
+    // Tabla general (league_standings): el backend responde 400 con el mensaje de C-09
+    // cuando hay varias competencias y no se eligió una.
+    const standEl = document.getElementById("league-standings-dt");
+    mountTable(standEl, () => api.table("league_standings", { competition: compParam }), {
+      tableId: "league_standings",
+      onRowClick: _openTeamFromRow,
+    });
+
+    // Ranking (league_teams): clic de fila → abre el equipo.
+    const rankEl = document.getElementById("league-ranking-dt");
+    mountTable(rankEl, () => api.table("league_teams", { competition: compParam }), {
+      tableId: "league_teams",
+      onRowClick: _openTeamFromRow,
+    });
 
     const compSel = document.getElementById("league-comp");
     if (compSel) compSel.addEventListener("change", e => { _leagueComp = e.target.value; renderLeague(); });
@@ -975,26 +1177,8 @@ async function renderLeague() {
 // ── Clutch por equipo (últimos N min, dif ≤ `margin`) — dentro de Equipo (Feat 05 v2) ──
 // Umbral y ventana salen siempre de la respuesta (`margin`, `window_secs`): nunca escribir
 // esos números acá (C-06). Antes de la respuesta el título dice solo "Cierres".
-let _clutchData = null;
-let _clutchSort = { key: "date", dir: -1 };
+let _clutchData = null;   // se mantiene para resetear al cambiar de equipo/competencia
 let _clutchReq  = 0;   // descarta respuestas viejas al cambiar de equipo o competencia
-
-const CLUTCH_COLS = [
-  { key: "date", label: "Fecha", date: true },
-  { key: "opponent_code", label: "Rival", txt: true }, { key: "home_away", label: "L/V", txt: true },
-  { key: "entry_margin", label: d => `Δ@${_clock(d.window_secs)}`, int: true },
-  { key: "overtime_periods", label: "PR", title: "Prórrogas", ot: true },
-  { key: "point_diff", label: "Dif", diff: true }, { key: "pts", label: "Pts", int: true },
-  { key: "off_rating", label: "Off" }, { key: "def_rating", label: "Def" },
-  { key: "efg_pct", label: "eFG%", pct: true }, { key: "ts_pct", label: "TS%", pct: true },
-  { key: "tov", label: "TOV", int: true }, { key: "ast", label: "AST", int: true },
-  { key: "reb", label: "REB", int: true },
-  { key: "fouls_drawn", label: "FR", int: true }, { key: "fouls_committed", label: "FC", int: true },
-  { key: "top_finisher", label: "Finaliza", leader: "pts" }, { key: "top_creator", label: "Crea", leader: "ast" },
-];
-
-// Segundos → reloj de juego "m:ss" (300 → "5:00").
-const _clock = s => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 
 function _clutchTitle(d) {
   if (!d) return `<div class="card-title">Cierres</div>`;
@@ -1024,76 +1208,62 @@ async function renderTeamClutch(teamCode) {
     return;
   }
   if (req !== _clutchReq) return;   // llegó tarde: otro equipo o competencia elegidos
-  _clutchData = d;
   const title = _clutchTitle(d);
   if (!d.games_qualified) {
     box.innerHTML = `<div class="card">${title}<p class="empty">Sin cierres apretados: ${_clutchCount(d)}.</p></div>`;
     return;
   }
-  const a = d.aggregate;
   box.innerHTML = `
     <div class="card">
       ${title}
       <p class="td-muted">Agregado del equipo en cierres apretados — récord <strong>${d.clutch_record}</strong> · ${_clutchCount(d)}</p>
-      <div class="stat-grid">
-        ${statBox("Dif", a.point_diff, (a.point_diff > 0 ? "+" : "") + a.point_diff, null, null)}
-        ${statBox("Off", a.off_rating, DEC2(a.off_rating), null, null)}
-        ${statBox("Def", a.def_rating, DEC2(a.def_rating), null, null, false)}
-        ${statBox("eFG%", a.efg_pct, PCT(a.efg_pct), null, null)}
-        ${statBox("TS%", a.ts_pct, PCT(a.ts_pct), null, null)}
-      </div>
-      <div class="stat-grid" style="margin-top:8px">
-        <div class="stat-box"><div class="stat-label">Pts F / C</div><div class="stat-value neutral">${a.pts_for} / ${a.pts_against}</div></div>
-        <div class="stat-box"><div class="stat-label">REB</div><div class="stat-value neutral">${a.reb}</div></div>
-        <div class="stat-box"><div class="stat-label">AST</div><div class="stat-value neutral">${a.ast}</div></div>
-        <div class="stat-box"><div class="stat-label">TOV</div><div class="stat-value neutral">${a.tov}</div></div>
-        <div class="stat-box"><div class="stat-label">Robos / Tapones</div><div class="stat-value neutral">${a.stl} / ${a.blk}</div></div>
-      </div>
-      <div class="card-title" style="margin-top:16px">Por partido <span style="color:var(--muted);font-size:10px;font-weight:400;margin-left:8px">Click en columna para ordenar</span></div>
-      <div class="table-wrap"><table id="clutch-table" class="search-table"></table></div>
+      <div id="team-clutch-standard-panel"></div>
+      <div class="card-title" style="margin-top:16px">Por partido</div>
+      <div id="team-clutch-dt"></div>
     </div>`;
-  _drawClutchTable();
+  // Tabla por partido migrada a createDataTable (T-06). Conserva competencia y recuento (C-06).
+  const compParam = (_teamComp && _teamComp !== "all") ? _teamComp : null;
+  mountTable(document.getElementById("team-clutch-dt"),
+    () => api.table("clutch_games", { team: teamCode, competition: compParam }),
+    { tableId: "clutch_games" });
+  _loadClutchStandard(teamCode, d.margin, d.window_secs);
 }
 
-function _drawClutchTable() {
-  const t = document.getElementById("clutch-table");
-  if (!t || !_clutchData) return;
-  const k = _clutchSort.key;
-  const _val = v => (v && typeof v === "object") ? (v.pts ?? v.ast ?? null) : v;
-  const sorted = [..._clutchData.per_game].sort((a, b) =>
-    _cmpNullsLast(_val(a[k]), _val(b[k]), _clutchSort.dir));
-  const cell = (c, r) => {
-    const v = r[c.key];
-    if (c.leader) return v ? `${v.name} (${v[c.leader]})` : "—";
-    if (c.ot)     return v || "";   // sin prórroga: celda vacía
-    if (c.date)   return _fmtDate(v);
-    if (c.diff)   { if (v == null) return "—";   // sin dato: ni color ni valor crudo (RF-3/RF-4)
-                    const cls = v > 0 ? "above-avg" : v < 0 ? "below-avg" : ""; return `<span class="${cls}">${v > 0 ? "+" : ""}${v}</span>`; }
-    if (c.txt)    return v || "—";
-    if (c.int)    return v == null ? "—" : v;
-    if (c.pct)    return PCT(v);
-    return DEC2(v);
-  };
-  t.innerHTML = `
-    <thead><tr>${CLUTCH_COLS.map(c => `<th data-key="${c.key}"${c.title ? ` title="${c.title}"` : ""}>${typeof c.label === "function" ? c.label(_clutchData) : c.label}</th>`).join("")}</tr></thead>
-    <tbody>${sorted.map(r => `<tr>${CLUTCH_COLS.map(c => `<td>${cell(c, r)}</td>`).join("")}</tr>`).join("")}</tbody>`;
-  t.querySelectorAll("th").forEach(th => th.addEventListener("click", () => {
-    const key = th.dataset.key;
-    if (_clutchSort.key === key) _clutchSort.dir *= -1;
-    else _clutchSort = { key, dir: ["date","opponent_code","home_away","top_finisher","top_creator"].includes(key) ? 1 : -1 };
-    _drawClutchTable();
-  }));
+// ── Conjunto estándar de métricas — card "Cierres" (T-05, T-E5) ─────────────
+let _clutchStdReq = 0;
+
+async function _loadClutchStandard(teamCode, margin, windowSecs) {
+  const el = document.getElementById("team-clutch-standard-panel");
+  if (!el) return;
+  const req = ++_clutchStdReq;
+  renderStandardPanel(el, null, { layout: "grid" });
+  try {
+    await loadCatalog();
+    const payload = await api.metrics("clutch", { id: teamCode, competition: _teamComp, margin, window_secs: windowSecs });
+    if (req !== _clutchStdReq) return;
+    renderStandardPanel(el, payload, { layout: "grid" });
+    bindMetricCards(el, { entityType: "clutch", contextQuery: { competition: _teamComp, margin, window_secs: windowSecs, id: teamCode } });
+  } catch (e) {
+    if (req !== _clutchStdReq) return;
+    renderStandardPanel(el, { error: e.message || "No se pudo cargar el conjunto estándar" }, { layout: "grid" });
+  }
 }
 
-// ── Team section — with last-N filter ─────────────────────────────────────
+// ── Team section — competencia y últimos N resueltos en el servidor (C-02) ─────
 let _teamData  = null;
-let _teamLastN = 0; // 0 = all
-let _teamComp  = ""; // "" = todas las competencias
+let _teamLastN = 0;      // 0 = todos los partidos de la competencia
+let _teamComp  = null;   // id de competencia (string) o "all"; null = todavía sin resolver (la elige el servidor)
+let _teamReq   = 0;      // descarta respuestas viejas al cambiar de equipo, de competencia o de filtro
 
-function _filteredLog(gameLog, n) {
-  if (!n) return gameLog;
-  const sorted = [...gameLog].sort((a, b) => (b.date || "").localeCompare(a.date || ""));
-  return sorted.slice(0, n);
+// Parámetros de la selección activa; `api.js` omite los nulos (sin `competition` el servidor usa la
+// competencia del partido más reciente del equipo).
+const _teamParams = () => ({ competition: _teamComp, last: _teamLastN || null });
+
+// Jugador elegido en el select de Equipo: la ficha (value) y su nombre visible (C-08)
+function _selectedPlayer() {
+  const sel = document.getElementById("player-select");
+  const opt = sel.selectedOptions[0];
+  return sel.value && opt ? { id: Number(sel.value), name: opt.dataset.name } : null;
 }
 
 // ── Usage ranking card ──────────────────────────────────────────────────────
@@ -1107,8 +1277,8 @@ function _renderUsageRanking(players) {
     const bar = p.uso_pct != null ? Math.round((p.uso_pct / maxUso) * 100) : 0;
     const pts = DEC1(p.pts);
     return `
-      <tr class="clickable-row" data-player="${p.name}">
-        <td style="font-weight:600">${p.name}</td>
+      <tr class="clickable-row" data-player-id="${p.player_id ?? ""}" data-player="${esc(p.name)}">
+        <td style="font-weight:600">${esc(p.name)}</td>
         <td style="width:120px">
           <div style="background:var(--border);border-radius:3px;height:8px;overflow:hidden">
             <div style="width:${bar}%;height:100%;background:var(--accent);border-radius:3px"></div>
@@ -1121,8 +1291,11 @@ function _renderUsageRanking(players) {
   }).join("");
   el.innerHTML = `
     <div class="card" style="margin-top:8px">
-      <div class="card-title">Jugadores más influyentes — USO%</div>
-      <table class="game-log" style="width:100%">
+      <div class="map-header">
+        <div class="card-title" style="margin:0">Jugadores más influyentes — USO%</div>
+        <span class="xm-host" data-xm="usage"></span>
+      </div>
+      <table class="game-log" id="usage-table" style="width:100%">
         <thead><tr>
           <th>Jugador</th><th></th>
           <th style="text-align:right">USO%</th>
@@ -1134,280 +1307,347 @@ function _renderUsageRanking(players) {
     </div>`;
   el.querySelectorAll(".clickable-row").forEach(tr => {
     tr.addEventListener("click", () => {
-      const pName = tr.dataset.player;
-      document.getElementById("player-select").value = pName;
+      document.getElementById("player-select").value = tr.dataset.playerId;
       document.getElementById("player-select").dispatchEvent(new Event("change"));
     });
   });
+  const uHost = el.querySelector('[data-xm="usage"]');
+  if (uHost) {
+    const tname = _teamData?.team_name || document.getElementById("team-select")?.value || "equipo";
+    _mountTableExport(uHost, () => el.querySelector("#usage-table"),
+      _baseMeta({ title: `Ranking de uso — ${tname}`, section: "ranking-uso", entity: tname, entitySlug: _teamData?.team_code, competitionLabel: _teamCompLabel() }));
+  }
 }
 
-function _renderTeamContent(main, data, n) {
-  const byComp   = _filterByComp(data.game_log, _teamComp);
-  const filtered = _filteredLog(byComp, n);
-  // sin filtro alguno → usar los promedios/record ya calculados por el backend
-  const unfiltered = !n && !_teamComp;
-  const av  = unfiltered ? { ...data.averages, null_reasons: data.null_reasons } : _computeAvg(filtered);
-  const rs  = av.null_reasons || {};   // razón de cada nulo (C-11 RF-4)
-  // Promedio de liga de la COMPETENCIA activa, no del subconjunto en pantalla:
-  // el filtro de últimos N no participa de esta selección (Feature 14 RF-1/RF-2).
-  const lg  = data.leagues?.[_teamComp || ""] ?? data.league;
-  const rec = unfiltered ? data.record : null;
-
-  main.innerHTML = `
-    ${_recordCard(rec, data.team_name)}
-    <div class="card">
-      <div class="card-title">Eficiencia</div>
-      <div class="stat-grid">
-        ${statBox("OER", av.oer, DEC2(av.oer), "oer", lg, true, rs.oer)}
-        ${statBox("DER", av.der, DEC2(av.der), "der", lg, false, rs.der)}
-        ${statBox("Net Rating", av.net_rating, DEC2(av.net_rating), "net_rating", lg, true, rs.net_rating)}
-        ${statBox("Pace", av.pace, DEC2(av.pace), "pace", lg, true, rs.pace)}
-        ${statBox("PPT", av.pps, DEC2(av.pps), "pps", lg, true, rs.pps)}
-        ${statBox("FT Rate", av.ft_rate, DEC2(av.ft_rate), "ft_rate", lg, true, rs.ft_rate)}
-      </div>
-    </div>
-    ${_fourFactorsCard(av, data.team_name)}
-    <div class="card">
-      <div class="card-title">Tiro</div>
-      <div class="stat-grid">
-        ${statBox("eFG%", av.efg_pct, PCT(av.efg_pct), "efg_pct", lg, true, rs.efg_pct)}
-        ${statBox("TS%", av.ts_pct, PCT(av.ts_pct), "ts_pct", lg, true, rs.ts_pct)}
-        ${statBox("FG2%", av.fg2_pct, PCT(av.fg2_pct), "fg2_pct", lg, true, rs.fg2_pct)}
-        ${statBox("FG3%", av.fg3_pct, PCT(av.fg3_pct), "fg3_pct", lg, true, rs.fg3_pct)}
-        ${statBox("FT%", av.ft_pct, PCT(av.ft_pct), "ft_pct", lg, true, rs.ft_pct)}
-        ${statBox("Uso 3P", av.fg3_uso, PCT(av.fg3_uso), "fg3_uso", lg, true, rs.fg3_uso)}
-      </div>
-      ${_shotDetailGrid(av, data.totals, lg)}
-    </div>
-    <div class="card">
-      <div class="card-title">Rebotes & Misc</div>
-      <div class="stat-grid">
-        ${statBox("OR%", av.or_pct, PCT(av.or_pct), "or_pct", lg, true, rs.or_pct)}
-        ${statBox("DR%", av.dr_pct, PCT(av.dr_pct), "dr_pct", lg, true, rs.dr_pct)}
-        ${statBox("Reb%", av.trb_pct, PCT(av.trb_pct), "trb_pct", lg, true, rs.trb_pct)}
-        ${statBox("TO", av.tov, DEC2(av.tov), "to_ratio", lg, false, rs.tov)}
-        ${statBox("AS", av.ast, DEC2(av.ast), "ast_ratio", lg, true, rs.ast)}
-      </div>
-    </div>
-    <div class="card">
-      <div class="card-title">Defensa avanzada</div>
-      <div class="stat-grid">
-        ${statBox("Robos", av.stl, DEC2(av.stl), "stl", lg, true, rs.stl)}
-        ${statBox("Tapones", av.blk, DEC2(av.blk), "blk", lg, true, rs.blk)}
-        ${statBox("Stops", av.stocks, DEC2(av.stocks), "stocks", lg, true, rs.stocks)}
-        ${statBox("Def Playmaking", av.def_playmaking, DEC2(av.def_playmaking), "def_playmaking", lg, true, rs.def_playmaking)}
-        ${statBox("DEF/TO Ratio", av.def_to_ratio, DEC2(av.def_to_ratio), "def_to_ratio", lg, true, rs.def_to_ratio)}
-      </div>
-    </div>
-    <div class="card">
-      <div class="card-title">Desglose ofensivo</div>
-      <div class="stat-grid">
-        ${statBox("PtsEnPint",       av.paint_pts,         DEC2(av.paint_pts),         null, null, false, rs.paint_pts)}
-        ${statBox("Seg. Op.",  av.second_chance_pts,  DEC2(av.second_chance_pts), null, null, false, rs.second_chance_pts)}
-        ${statBox("Ptos/PER",  av.pts_from_tov,       DEC2(av.pts_from_tov),      null, null, false, rs.pts_from_tov)}
-        ${statBox("Banca",     av.bench_pts,          DEC2(av.bench_pts),         null, null, false, rs.bench_pts)}
-        ${statBox("PCA",       av.fast_break_pts,     DEC2(av.fast_break_pts),    null, null, false, rs.fast_break_pts)}
-      </div>
-    </div>
-    <div class="card">
-      <div class="card-title">Game log</div>
-      <div class="table-wrap">
-        <table>
-          <thead><tr>
-            <th>Fecha</th><th>Rival</th><th>L/V</th>
-            <th>Pts</th><th>OER</th><th>DER</th><th>eFG%</th><th>TS%</th>
-            <th>OR%</th><th>DR%</th><th>TO%</th>
-          </tr></thead>
-          <tbody>
-            ${filtered.map(g => {
-              const c = (k, f) => fmtOrNull(g[k], f, g.null_reasons?.[k]);
-              return `
-              <tr>
-                <td class="td-muted">${_fmtDate(g.date)}</td>
-                <td>${g.opponent}</td>
-                <td class="td-muted">${g.home_away}</td>
-                <td class="td-result">${g.pts}</td>
-                <td>${c("oer", DEC2)}</td>
-                <td>${c("der", DEC2)}</td>
-                <td>${c("efg_pct", PCT)}</td>
-                <td>${c("ts_pct", PCT)}</td>
-                <td>${c("or_pct", PCT)}</td>
-                <td>${c("dr_pct", PCT)}</td>
-                <td>${c("to_pct", PCT)}</td>
-              </tr>`; }).join("")}
-          </tbody>
-        </table>
-      </div>
-    </div>`;
-
-  if (filtered.length >= 1) {
-    main.insertAdjacentHTML("afterbegin", `
+function _renderTeamContent(main, data) {
+  const av  = { ...data.averages, null_reasons: data.null_reasons };
+  const rs  = av.null_reasons;   // razón de cada nulo (C-11 RF-4)
+  // Promedio de liga de la COMPETENCIA elegida, no del subconjunto en pantalla: lo calcula el servidor y
+  // el filtro de últimos N no lo altera (C-02 RF-1). "Todas": `Ø —` con razón `sin_universo`.
+  const lg  = data.league;
+  const radarOk = lg?.oer?.avg != null;
+  const charts = !data.game_log.length ? "" : `
       <div class="chart-grid">
         <div class="card">
           <div class="card-title">Perfil de equipo</div>
-          <div class="radar-wrap">
-            <canvas id="chart-radar"></canvas>
-          </div>
+          ${radarOk ? '<div class="radar-wrap"><canvas id="chart-radar"></canvas></div>'
+                    : `<p class="empty">${_radarMsg(data)}</p>`}
         </div>
         <div class="card">
           <div class="card-title">Evolución por partido</div>
           <canvas id="chart-evo" height="200"></canvas>
         </div>
-      </div>`);
-    drawRadar("chart-radar", av, lg, data.team_name);
-    drawEvolution("chart-evo", filtered, lg?.oer?.avg);
+      </div>`;
+
+  // Definición de las cards con ficha (T-01): etiqueta, clave (legada o canónica),
+  // valor promedio y display de respaldo para cuando no hay conjunto estándar.
+  const TEAM_CARD_GROUPS = [
+    { title: "Eficiencia", metrics: [
+      ["OER", "oer", av.oer, DEC2(av.oer)], ["DER", "der", av.der, DEC2(av.der)],
+      ["Net Rating", "net_rating", av.net_rating, DEC2(av.net_rating)],
+      ["Pace", "pace", av.pace, DEC2(av.pace)], ["PPT", "ppt", av.ppt, DEC2(av.ppt)],
+      ["FT Rate", "ft_rate", av.ft_rate, DEC2(av.ft_rate)] ] },
+    { title: "Tiro", extra: _shotDetailGrid(av, data.totals), metrics: [
+      ["eFG%", "efg_pct", av.efg_pct, PCT(av.efg_pct)], ["TS%", "ts_pct", av.ts_pct, PCT(av.ts_pct)],
+      ["FG2%", "fg2_pct", av.fg2_pct, PCT(av.fg2_pct)], ["FG3%", "fg3_pct", av.fg3_pct, PCT(av.fg3_pct)],
+      ["FT%", "ft_pct", av.ft_pct, PCT(av.ft_pct)], ["Uso 3P", "fg3_uso", av.fg3_uso, PCT(av.fg3_uso)] ] },
+    { title: "Rebotes & Misc", trailing: _astPerBox(av, data.totals), metrics: [
+      ["OR%", "or_pct", av.or_pct, PCT(av.or_pct)], ["DR%", "dr_pct", av.dr_pct, PCT(av.dr_pct)],
+      ["Reb%", "trb_pct", av.trb_pct, PCT(av.trb_pct)], ["PER", "tov", av.tov, DEC2(av.tov)],
+      ["AS", "ast", av.ast, DEC2(av.ast)] ] },
+    { title: "Defensa avanzada", metrics: [
+      ["Robos", "stl", av.stl, DEC2(av.stl)], ["Tapones", "blk", av.blk, DEC2(av.blk)],
+      ["Stops", "stocks", av.stocks, DEC2(av.stocks)],
+      ["Def Playmaking", "def_playmaking", av.def_playmaking, DEC2(av.def_playmaking)],
+      ["DEF/TO Ratio", "def_to_ratio", av.def_to_ratio, DEC2(av.def_to_ratio)] ] },
+    { title: "Desglose ofensivo", metrics: [
+      ["PtsEnPint", "paint_pts", av.paint_pts, DEC2(av.paint_pts)],
+      ["Seg. Op.", "second_chance_pts", av.second_chance_pts, DEC2(av.second_chance_pts)],
+      ["Ptos/PER", "pts_from_tov", av.pts_from_tov, DEC2(av.pts_from_tov)],
+      ["Banca", "bench_pts", av.bench_pts, DEC2(av.bench_pts)],
+      ["PCA", "fast_break_pts", av.fast_break_pts, DEC2(av.fast_break_pts)] ] },
+  ];
+
+  main.innerHTML = `
+    ${_selectionNote(data, ["equipo", "equipos"])}
+    ${charts}
+    ${_recordCard(data.record, data.team_name)}
+    ${TEAM_CARD_GROUPS.map((g, i) => `
+    <div class="card">
+      <div class="card-title">${g.title}</div>
+      <div class="stat-grid metric-card-grid" data-mc-group="${i}">${_fichaGridHTML(g.metrics, "team", null, data.team_code)}</div>
+      ${g.trailing ? `<div class="stat-grid">${g.trailing}</div>` : ""}
+      ${g.extra || ""}
+    </div>${i === 0 ? _fourFactorsCard(av, data.team_name) : ""}`).join("")}
+    <div class="card">
+      <div class="card-title">Conjunto estándar</div>
+      <div id="team-standard-panel"></div>
+    </div>
+    <div class="card">
+      <div class="card-title">Game log</div>
+      <div id="team-gamelog-dt"></div>
+    </div>`;
+
+  if (data.game_log.length) {
+    if (radarOk) drawRadar("chart-radar", av, lg, data.team_name);
+    drawEvolution("chart-evo", data.game_log, lg?.oer?.avg);
   }
+  _teamCardGroups = TEAM_CARD_GROUPS;
+  _loadTeamStandard(data.team_code);
+  _loadTeamGameLog(data.team_code);
+
+  // Exportación de las tablas no migradas de Equipo (T-D10): Four Factors y detalle de tiro.
+  const ffHost = main.querySelector('[data-xm="four-factors"]');
+  if (ffHost) _mountTableExport(ffHost, () => main.querySelector("#four-factors-table"),
+    _baseMeta({ title: `Four Factors — ${data.team_name}`, section: "four-factors", entity: data.team_name, entitySlug: data.team_code, competitionLabel: _teamCompLabel() }));
+  _mountShotDetailExports(main, data.team_name, data.team_code, _teamCompLabel());
+}
+
+// Monta exportación en cada grilla de detalle de tiro (T-D10). No es un <table>, así que
+// se serializan las parejas etiqueta/valor de los stat-box.
+function _mountShotDetailExports(container, entityName, entitySlug, compLabel) {
+  container.querySelectorAll("[data-shot-detail]").forEach(grid => {
+    const host = grid.querySelector("[data-xm-shot]");
+    if (!host) return;
+    const meta = _baseMeta({ title: `Detalle de tiro — ${entityName}`, section: "detalle-tiro", entity: entityName, entitySlug, competitionLabel: compLabel });
+    exportMenu(host, {
+      getData: () => {
+        const boxes = [...grid.querySelectorAll(".stat-box")];
+        const columns = [{ key: "metrica", label: "Métrica", fmt: "text" }, { key: "valor", label: "Valor", fmt: "text" }];
+        const rows = boxes.map(b => [b.querySelector(".stat-label")?.textContent.trim() || "", b.querySelector(".stat-value")?.textContent.trim() || ""]);
+        return { meta, columns, rows, footer: [], pageInfo: `${rows.length} filas` };
+      },
+      getNode: () => grid,
+    });
+  });
+}
+
+// Etiqueta de la competencia activa de Equipo (para la cabecera de exportación).
+function _teamCompLabel() {
+  const sel = document.getElementById("team-comp");
+  if (sel && sel.selectedOptions[0] && _teamComp !== "all") return sel.selectedOptions[0].textContent;
+  return "";
+}
+
+// Game log de equipo migrado a createDataTable (team_game_log). Respeta competencia,
+// "Últ. N" y base elegida en la vista (T-D8).
+function _loadTeamGameLog(teamCode) {
+  const el = document.getElementById("team-gamelog-dt");
+  if (!el) return;
+  const compParam = (_teamComp && _teamComp !== "all") ? _teamComp : null;
+  mountTable(el,
+    () => api.table("team_game_log", { team: teamCode, competition: compParam, last: _teamLastN || null, base: _teamStdBase }),
+    { tableId: "team_game_log" });
+}
+
+// Re-dibuja las grillas de fichas de Equipo/Jugador con el conjunto estándar ya
+// cargado (`std`), y engancha el ranking al hover/tap. `sectionEl` acota el bind.
+function _fillFichaGrids(container, groups, entityType, std, entityId) {
+  if (!container || !groups) return;
+  groups.forEach((g, i) => {
+    const grid = container.querySelector(`.metric-card-grid[data-mc-group="${i}"]`);
+    if (grid) grid.innerHTML = _fichaGridHTML(g.metrics, entityType, std, entityId);
+  });
+}
+
+// ── Conjunto estándar de métricas — card "Equipo" (T-05, T-E1) ──────────────
+let _teamStdReq = 0;
+let _teamStdBase = "partido";
+let _teamCardGroups = null;
+
+async function _loadTeamStandard(teamCode) {
+  const el = document.getElementById("team-standard-panel");
+  const main = document.getElementById("team-main");
+  if (!el) return;
+  const req = ++_teamStdReq;
+  renderStandardPanel(el, null, { layout: "grid", base: _teamStdBase });
+  const ctxQuery = { competition: _teamComp, last: _teamLastN || null };
+  try {
+    await loadCatalog();
+    // El conjunto estándar que alimenta las cards de ficha va siempre por partido
+    // (base del ranking, RF-18); el panel usa la base elegida por el usuario.
+    const fichaStd = await api.metrics("team", { id: teamCode, ...ctxQuery, base: "partido" });
+    if (req !== _teamStdReq) return;
+    _fillFichaGrids(main, _teamCardGroups, "team", fichaStd, teamCode);
+    const payload = _teamStdBase === "partido"
+      ? fichaStd
+      : await api.metrics("team", { id: teamCode, ...ctxQuery, base: _teamStdBase });
+    if (req !== _teamStdReq) return;
+    renderStandardPanel(el, payload, {
+      layout: "grid",
+      base: _teamStdBase,
+      onBaseChange: newBase => { _teamStdBase = newBase; _loadTeamStandard(teamCode); _loadTeamGameLog(teamCode); },
+    });
+    if (main) bindMetricCards(main, { entityType: "team", contextQuery: { ...ctxQuery, id: teamCode } });
+  } catch (e) {
+    if (req !== _teamStdReq) return;
+    // Sin conjunto estándar las cards ya muestran el valor; aviso discreto en el panel.
+    _fillFichaGrids(main, _teamCardGroups, "team", null, teamCode);
+    renderStandardPanel(el, { error: e.message || "No se pudo cargar el conjunto estándar" }, { layout: "grid", base: _teamStdBase });
+  }
+}
+
+// Aplica una respuesta de perfil de equipo: guarda la selección que el servidor resolvió (el eco de
+// `context`), sincroniza pills y selector de competencia y dibuja.
+function _applyTeamData(main, data) {
+  _teamData  = data;
+  _teamComp  = String(data.context.competition.id ?? "all");
+  _teamLastN = data.context.applied.last || 0;
+  const pills = document.getElementById("team-filter-pills");
+  if (pills) {
+    pills.style.display = data.context.games_total > 3 ? "" : "none";
+    pills.querySelectorAll(".filter-pill").forEach(p => p.classList.toggle("active", Number(p.dataset.n) === _teamLastN));
+  }
+  const compWrap = document.getElementById("team-comp-wrap");
+  const compSel  = document.getElementById("team-comp");
+  if (compWrap && compSel) {
+    compWrap.style.display = data.competitions.length > 1 ? "" : "none";
+    compSel.innerHTML = _compOptions(data.competitions, _teamComp, "Todas las competencias", "all");
+  }
+  _renderTeamContent(main, data);
+}
+
+// Cambió la competencia o el filtro de últimos N: se pide el perfil de nuevo al servidor (no se recalcula
+// en el navegador, C-02 RF-5). `clutch`: los cierres dependen solo de la competencia.
+async function _reloadTeam({ clutch = false } = {}) {
+  if (!_teamData) return;
+  const main = document.getElementById("team-main");
+  const code = document.getElementById("team-select").value || _teamData.team_code;
+  const req = ++_teamReq;
+  main.innerHTML = '<p class="empty"><span class="spinner"></span>Cargando...</p>';
+  let data;
+  try {
+    data = await api.team(code, _teamParams());
+  } catch (e) {
+    if (req !== _teamReq) return;
+    toast(e.message, "err");
+    try {
+      // La competencia elegida dejó de existir o de estar publicada: volver a la por defecto (RF-14);
+      // cualquier otro error (p. ej. sin conexión): se conserva la selección anterior.
+      data = /competencia/i.test(e.message) ? await api.team(code) : _teamData;
+    } catch (e2) {
+      if (req === _teamReq) main.innerHTML = `<p class="empty below-avg">${e2.message}</p>`;
+      return;
+    }
+    if (req !== _teamReq) return;
+    clutch = true;
+  }
+  if (req !== _teamReq) return;
+  _applyTeamData(main, data);
+  if (clutch) renderTeamClutch(code);
 }
 
 async function renderTeam(teamCode) {
   const main = document.getElementById("team-main");
   main.innerHTML = '<p class="empty"><span class="spinner"></span>Cargando...</p>';
   _teamLastN = 0;
-  _teamComp  = "";
+  _teamComp  = null;   // sin competencia: el servidor usa la del partido más reciente del equipo (RF-6)
+  const req = ++_teamReq;
 
   try {
-    _teamData = await api.team(teamCode);
-
-    // Filter pills
-    const filterWrap = document.getElementById("team-filter-pills");
-    if (filterWrap) {
-      filterWrap.style.display = _teamData.games > 3 ? "" : "none";
-    }
-
-    // Selector de competencia (solo si el equipo tiene >1 competencia)
-    const comps    = _logComps(_teamData.game_log);
-    const compWrap = document.getElementById("team-comp-wrap");
-    const compSel  = document.getElementById("team-comp");
-    if (compWrap && compSel) {
-      compWrap.style.display = comps.length > 1 ? "" : "none";
-      compSel.innerHTML = _compOptions(comps);
-    }
-
-    _renderTeamContent(main, _teamData, 0);
+    const data = await api.team(teamCode);
+    if (req !== _teamReq) return;
+    _applyTeamData(main, data);
 
     const players = await api.players(teamCode);
+    if (req !== _teamReq) return;
     const pSel = document.getElementById("player-select");
     pSel.innerHTML = '<option value="">— Seleccionar jugador —</option>' +
-      players.map(p => `<option value="${p.name}">${p.name}</option>`).join("");
+      players.map(p => `<option value="${p.player_id ?? ""}" data-name="${esc(p.name)}">${esc(p.name)}</option>`).join("");
     _renderUsageRanking(players);
 
     const lineupCard = document.getElementById("team-lineup-card");
     const picker = document.getElementById("team-lineup-picker");
     if (players.length >= 3) {
       picker.innerHTML = players.map(p => `
-        <label class="lineup-check"><input type="checkbox" value="${p.name}">${p.name}</label>`).join("");
+        <label class="lineup-check"><input type="checkbox" value="${p.name}" data-player-id="${p.player_id ?? ""}">${p.name}</label>`).join("");
       lineupCard.style.display = "";
     } else {
       lineupCard.style.display = "none";
     }
 
     renderTeamShotmapTeam(teamCode);   // mapa de tiro del equipo (Feature 10)
-    renderTeamClutch(teamCode);        // cierres del equipo (Feature 05 v2)
+    renderTeamClutch(teamCode);        // cierres del equipo, de la competencia elegida (Feature 05 v2)
   } catch (e) {
-    main.innerHTML = `<p class="empty below-avg">${e.message}</p>`;
+    if (req === _teamReq) main.innerHTML = `<p class="empty below-avg">${e.message}</p>`;
   }
 }
 
-// Mapa de tiro AGREGADO del equipo (Feature 10) — reusa api.teamShots + _shotChartSVG
+// Mapa de tiro AGREGADO del equipo (C-03) — usa api.shotZones + shotChart
 function renderTeamShotmapTeam(teamCode) {
   const box = document.getElementById("team-teamshot");
   if (!box) return;
   box.innerHTML = '<div class="card"><p class="empty"><span class="spinner"></span>Cargando mapa de tiro del equipo...</p></div>';
-  api.teamShots(teamCode).then(shots => {
-    if (!shots || !shots.total_shots) { box.innerHTML = ""; return; }
+  api.shotZones({ entity: 'team', id: teamCode, competition: _teamComp }).then(shots => {
+    if (!shots || !shots.summary?.total_shots) {
+      box.innerHTML = '<div class="card"><p class="empty">Sin tiros registrados para este equipo.</p></div>';
+      return;
+    }
     box.innerHTML = `
       <div class="card">
         <div class="card-title">Mapa de tiro del equipo <span style="color:var(--muted2);font-weight:400;text-transform:none;letter-spacing:0">— ${teamCode}</span></div>
-        ${_shotChartSVG(shots.zones, shots.total_shots, shots.summary, shots.has_coordinates)}
+        ${shotChart(shots)}
       </div>`;
+    bindZoneTooltips(box, shots);
   }).catch(() => { box.innerHTML = ""; });
 }
 
-// Shot chart del jugador DENTRO de la vista Equipo (reusa api.playerShots + _shotChartSVG)
+// Shot chart del jugador DENTRO de la vista Equipo (C-03) — usa api.shotZones + shotChart
 function renderTeamShotmap(teamCode, playerName) {
   const box = document.getElementById("team-shotmap");
   if (!box) return;
   box.innerHTML = '<div class="card"><p class="empty"><span class="spinner"></span>Cargando mapa de tiro...</p></div>';
-  api.playerShots(teamCode, playerName).then(shots => {
-    if (!shots || !shots.total_shots) {
-      box.innerHTML = "";
-      toast("Sin datos de tiro para este jugador", "err");
+  const playerId = _selectedPlayer()?.id;
+  if (!playerId) { box.innerHTML = ""; return; }
+  api.shotZones({ entity: 'player', id: playerId, competition: _teamComp }).then(shots => {
+    if (!shots || !shots.summary?.total_shots) {
+      box.innerHTML = '<div class="card"><p class="empty">Sin tiros registrados para este jugador.</p></div>';
       return;
     }
     box.innerHTML = `
       <div class="card">
         <div class="card-title">Shot chart por zonas <span style="color:var(--muted2);font-weight:400;text-transform:none;letter-spacing:0">— ${playerName}</span></div>
-        ${_shotChartSVG(shots.zones, shots.total_shots, shots.summary, shots.has_coordinates)}
+        ${shotChart(shots)}
       </div>`;
+    bindZoneTooltips(box, shots);
     box.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }).catch(() => { box.innerHTML = ""; });
 }
 
 // ON/OFF: rendimiento del equipo con un jugador en cancha vs en el banco (Feature 04)
-async function renderTeamOnOff(teamCode, playerName) {
+// T-05/T-E4: las dos tablas (Eficiencia y Producción del equipo) se retiran; el conjunto
+// estándar completo lo monta `renderStandardPanel(..., {layout:"compare"})` con
+// `api.metrics("onoff", ...)`. El badge de confiabilidad de muestra (T-02) ya lo aporta
+// el panel en su cabecera: no se duplica una línea propia de "ON: N pos"/"sin muestra".
+async function renderTeamOnOff(teamCode, playerName, playerId = null) {
   const box = document.getElementById("team-onoff");
   box.innerHTML = '<div class="card"><p class="empty"><span class="spinner"></span>Calculando ON/OFF...</p></div>';
   try {
     const r = await api.onoff(teamCode, playerName);
-    // Fila de tasas: Δ viene del backend (comparable ON vs OFF)
-    const row = (label, key, lowerBetter = false, fmt = DEC2) => {
-      const on = r.on[key], off = r.off[key], d = r.diff[key];
-      const cls = d == null ? "neutral" : (lowerBetter ? d <= 0 : d >= 0) ? "above-avg" : "below-avg";
-      return `<tr>
-        <td>${on != null ? fmt(on) : "—"}</td>
-        <td class="lbl">${label}</td>
-        <td>${off != null ? fmt(off) : "—"}</td>
-        <td class="${cls}">${d != null ? (d >= 0 ? "+" : "") + fmt(d) : "—"}</td>
-      </tr>`;
-    };
-    // Fila de conteos crudos: Δ = ON − OFF calculado acá (escala con minutos, no comparable directo)
-    const rawRow = (label, key, lowerBetter = false) => {
-      const on = r.on[key], off = r.off[key];
-      const d = (on != null && off != null) ? on - off : null;
-      const cls = d == null ? "neutral" : (lowerBetter ? d <= 0 : d >= 0) ? "above-avg" : "below-avg";
-      return `<tr>
-        <td>${on != null ? on : "—"}</td>
-        <td class="lbl">${label}</td>
-        <td>${off != null ? off : "—"}</td>
-        <td class="${cls}">${d != null ? (d >= 0 ? "+" : "") + d : "—"}</td>
-      </tr>`;
-    };
-    const sample = (side, data) => data.possessions
-      ? `${side}: ${DEC1(data.possessions)} pos · ${Math.round(data.seconds / 60)}' en cancha`
-      : `${side}: sin muestra`;
 
     box.innerHTML = `
       <div class="card">
-        <div class="card-title">ON / OFF <span style="color:var(--muted2);font-weight:400;text-transform:none;letter-spacing:0">— ${playerName} · Uso ${r.usg_pct != null ? PCT(r.usg_pct) : "—"}</span></div>
-        <div class="table-wrap">
-          <table class="onoff-table">
-            <thead><tr><th>ON</th><th>Eficiencia</th><th>OFF</th><th>Δ</th></tr></thead>
-            <tbody>
-              ${row("OER", "oer")}
-              ${row("DER", "der", true)}
-              ${row("Net Rating", "net_rating")}
-              ${row("eFG%", "efg_pct", false, PCT)}
-              ${row("TS%", "ts_pct", false, PCT)}
-            </tbody>
-          </table>
+        <div class="map-header">
+          <div class="card-title" style="margin:0">ON / OFF <span style="color:var(--muted2);font-weight:400;text-transform:none;letter-spacing:0">— ${playerName} · Uso ${r.usg_pct != null ? PCT(r.usg_pct) : "—"}</span></div>
+          <span class="xm-host" data-xm="onoff"></span>
         </div>
-        <div class="table-wrap" style="margin-top:12px">
-          <table class="onoff-table">
-            <thead><tr><th>ON</th><th>Producción del equipo</th><th>OFF</th><th>Δ</th></tr></thead>
-            <tbody>
-              ${rawRow("Pts a favor", "pts_for")}
-              ${rawRow("Pts en contra", "pts_against", true)}
-              ${rawRow("REB", "reb")}
-              ${rawRow("AST", "ast")}
-              ${rawRow("Pérdidas", "tov", true)}
-              ${rawRow("Robos", "stl")}
-              ${rawRow("Tapones", "blk")}
-            </tbody>
-          </table>
-        </div>
-        <p class="td-muted" style="margin-top:8px">${sample("ON", r.on)} &nbsp;|&nbsp; ${sample("OFF", r.off)}<br><span style="font-size:11px">Los conteos crudos escalan con los minutos de cada tramo; las tasas de arriba son comparables directas.</span></p>
+        <div id="team-onoff-standard-panel" style="margin-top:8px"></div>
       </div>`;
     box.scrollIntoView({ behavior: "smooth", block: "nearest" });
+
+    const panelEl = document.getElementById("team-onoff-standard-panel");
+    _mountPanelExport(box.querySelector('[data-xm="onoff"]'), () => panelEl,
+      _baseMeta({ title: `ON/OFF — ${playerName}`, section: "on-off", entity: playerName, entitySlug: `${teamCode}-${playerName}`, competitionLabel: _teamCompLabel() }));
+    if (playerId != null) {
+      renderStandardPanel(panelEl, null, { layout: "compare" });
+      try {
+        await loadCatalog();
+        const payload = await api.metrics("onoff", { id: `${teamCode}:${playerId}`, competition: _teamComp, last: _teamLastN || null });
+        renderStandardPanel(panelEl, payload, { layout: "compare" });
+      } catch (e) {
+        renderStandardPanel(panelEl, { error: e.message || "No se pudo cargar el conjunto estándar" }, { layout: "compare" });
+      }
+    }
   } catch (e) {
     box.innerHTML = "";
     toast(e.message || "Sin datos ON/OFF para este jugador", "err");
@@ -1415,55 +1655,49 @@ async function renderTeamOnOff(teamCode, playerName) {
 }
 
 // Lineups: rendimiento del equipo con una combinación de 3-5 jugadores en cancha (Feature 03)
-async function renderTeamLineup(teamCode, players) {
+// T-05/T-E3: el resumen (statBox/tabla de 18 columnas) se retira; se conservan líderes y el
+// recuento de partidos usados/excluidos de `api.lineup`. El conjunto estándar lo monta
+// `renderStandardPanel` con `api.metrics("lineup", ...)`.
+async function renderTeamLineup(teamCode, players, playerIds = []) {
   const box = document.getElementById("team-lineup");
   box.innerHTML = '<div class="card"><p class="empty"><span class="spinner"></span>Calculando combinación...</p></div>';
   try {
     const r = await api.lineup(teamCode, players);
-    const m = r.metrics;
     const lead = (l, key) => l ? `${l.name} (${l[key]})` : "—";
-    const smallSample = r.sample.possessions < 10
-      ? `<p class="empty below-avg" style="margin-top:8px">Muestra chica (${DEC1(r.sample.possessions)} posesiones) — tomar con cuidado</p>`
-      : "";
     box.innerHTML = `
       <div class="card">
-        <div class="card-title">Combinación <span style="color:var(--muted2);font-weight:400;text-transform:none;letter-spacing:0">— ${players.join(" · ")}</span></div>
-        <div class="stat-grid">
-          ${statBox("OER", m.oer, DEC2(m.oer), null, null)}
-          ${statBox("DER", m.der, DEC2(m.der), null, null, false)}
-          ${statBox("Net Rating", m.net_rating, DEC2(m.net_rating), null, null)}
-          ${statBox("eFG%", m.efg_pct, PCT(m.efg_pct), null, null)}
-          ${statBox("TS%", m.ts_pct, PCT(m.ts_pct), null, null)}
+        <div class="map-header">
+          <div class="card-title" style="margin:0">Combinación <span style="color:var(--muted2);font-weight:400;text-transform:none;letter-spacing:0">— ${players.join(" · ")}</span></div>
+          <span class="xm-host" data-xm="lineup"></span>
         </div>
         <p class="td-muted" style="margin-top:8px">
           ${DEC1(r.sample.possessions)} posesiones · ${Math.round(r.sample.seconds / 60)}' en cancha ·
           ${r.games_used} partido(s) usado(s)${r.games_excluded ? ` (${r.games_excluded} excluido(s) por datos inconsistentes)` : ""}
         </p>
-        ${smallSample}
-        <div class="table-wrap" style="margin-top:12px">
-          <table class="search-table">
-            <thead><tr>
-              <th>Off</th><th>Def</th><th>Net</th><th>eFG%</th><th>TS%</th><th>Pos</th>
-              <th>Pts</th><th>Pts-C</th><th>REB</th><th>OR</th><th>DR</th><th>AST</th>
-              <th>TOV</th><th>ROB</th><th>TAP</th><th>FGA</th><th>3PA</th><th>FTA</th>
-            </tr></thead>
-            <tbody><tr>
-              <td>${DEC2(m.oer)}</td><td>${DEC2(m.der)}</td><td>${DEC2(m.net_rating)}</td>
-              <td>${PCT(m.efg_pct)}</td><td>${PCT(m.ts_pct)}</td><td>${DEC1(r.sample.possessions)}</td>
-              <td>${r.raw.pts}</td><td>${r.raw.pts_against}</td><td>${r.raw.reb}</td>
-              <td>${r.raw.orb}</td><td>${r.raw.drb}</td><td>${r.raw.ast}</td>
-              <td>${r.raw.tov}</td><td>${r.raw.stl}</td><td>${r.raw.blk}</td>
-              <td>${r.raw.fga}</td><td>${r.raw.fga3}</td><td>${r.raw.fta}</td>
-            </tr></tbody>
-          </table>
-        </div>
         <div class="stat-grid" style="margin-top:8px">
           <div class="stat-box"><div class="stat-label">Anota más</div><div class="stat-value neutral">${lead(r.leaders.scorer, "pts")}</div></div>
           <div class="stat-box"><div class="stat-label">Asiste más</div><div class="stat-value neutral">${lead(r.leaders.assister, "ast")}</div></div>
           <div class="stat-box"><div class="stat-label">Rebota más</div><div class="stat-value neutral">${lead(r.leaders.rebounder, "trb")}</div></div>
         </div>
+        <div id="team-lineup-standard-panel" style="margin-top:12px"></div>
       </div>`;
     box.scrollIntoView({ behavior: "smooth", block: "nearest" });
+
+    const panelEl = document.getElementById("team-lineup-standard-panel");
+    _mountPanelExport(box.querySelector('[data-xm="lineup"]'), () => panelEl,
+      _baseMeta({ title: `Combinación — ${players.join(" · ")}`, section: "combinacion", entity: players.join("-"), entitySlug: teamCode, competitionLabel: _teamCompLabel() }));
+    if (playerIds.length >= 3) {
+      renderStandardPanel(panelEl, null, { layout: "grid" });
+      try {
+        await loadCatalog();
+        const id = `${teamCode}:${[...playerIds].sort((a, b) => a - b).join("-")}`;
+        const payload = await api.metrics("lineup", { id, competition: _teamComp, last: _teamLastN || null });
+        renderStandardPanel(panelEl, payload, { layout: "grid" });
+        bindMetricCards(panelEl, { entityType: "lineup", contextQuery: { competition: _teamComp, last: _teamLastN || null, id } });
+      } catch (e) {
+        renderStandardPanel(panelEl, { error: e.message || "No se pudo cargar el conjunto estándar" }, { layout: "grid" });
+      }
+    }
   } catch (e) {
     box.innerHTML = "";
     toast(e.message || "Sin datos para esta combinación", "err");
@@ -1489,11 +1723,13 @@ async function renderCompare() {
     btnCompare.innerHTML = '<span class="spinner"></span>Comparando...';
 
     try {
-      const [dataA, dataB] = await Promise.all([api.team(codeA), api.team(codeB)]);
+      // Misma competencia para ambos equipos y para el `Ø` (RF-11): los promedios los calcula el servidor
       const comp = document.getElementById("compare-comp")?.value || "";
-      const avA = comp ? _computeAvg(_filterByComp(dataA.game_log, comp)) : dataA.averages;
-      const avB = comp ? _computeAvg(_filterByComp(dataB.game_log, comp)) : dataB.averages;
+      const params = comp ? { competition: comp } : {};
+      const [dataA, dataB] = await Promise.all([api.team(codeA, params), api.team(codeB, params)]);
+      const avA = dataA.averages, avB = dataB.averages;
       const lg  = dataA.league;
+      const radarOk = lg?.oer?.avg != null;
 
       const a = avA, b = avB;
       // Sin dato → "—", nunca 0 (Feature 12 RF-4)
@@ -1513,10 +1749,10 @@ async function renderCompare() {
           <td class="${winCls(pctB, pctA)}">${shot(madeB, attB, pctB)}</td>
         </tr>`;
       };
-      const rawRow = (label, va, vb, lowerBetter = false) => `<tr>
-          <td class="${winCls(va, vb, lowerBetter)}">${DEC1(va)}</td>
+      const rawRow = (label, va, vb, lowerBetter = false, fmt = DEC1) => `<tr>
+          <td class="${winCls(va, vb, lowerBetter)}">${fmt(va)}</td>
           <td class="lbl">${label}</td>
-          <td class="${winCls(vb, va, lowerBetter)}">${DEC1(vb)}</td>
+          <td class="${winCls(vb, va, lowerBetter)}">${fmt(vb)}</td>
         </tr>`;
 
       const pfA = a.pf, pfB = b.pf, oppPfA = a.opp_pf, oppPfB = b.opp_pf;
@@ -1530,6 +1766,7 @@ async function renderCompare() {
         rawRow("ST",        a.stl,  b.stl),
         rawRow("Blq",       a.blk,  b.blk),
         rawRow("PER",       a.tov,  b.tov,  true),
+        rawRow("AS/PER",    a.ast_to, b.ast_to, false, DEC2),   // acumulado ΣAS/ΣPER (C-04)
         `<tr>
           <td class="${winCls(pfA, pfB, true)}">${N1(pfA)} (${N1(oppPfA)})</td>
           <td class="lbl">FP</td>
@@ -1552,18 +1789,30 @@ async function renderCompare() {
         <td>${PCT(av.as_pct)}</td><td>${DEC2(av.pts)}</td><td>${DEC2(av.possessions)}</td>
       </tr>`;
 
+      // Fila "Ø liga": el promedio de la competencia, con los mismos valores que Equipo (RF-4, RF-11)
+      const lgCell = (k, f) => `<td>${fmtOrNull(lg?.[k]?.avg, f, lg?.[k]?.reason)}</td>`;
+      const lgRow = `<tr>
+        <td style="color:var(--muted);font-weight:600;text-align:left">Ø liga</td>
+        ${lgCell("oer", DEC2)}${lgCell("der", DEC2)}${lgCell("net_rating", DEC2)}
+        ${lgCell("efg_pct", PCT)}${lgCell("ts_pct", PCT)}${lgCell("pace", DEC2)}
+        ${lgCell("or_pct", PCT)}${lgCell("dr_pct", PCT)}${lgCell("to_pct", PCT)}
+        ${lgCell("as_pct", PCT)}${lgCell("pts", DEC2)}${lgCell("possessions", DEC2)}
+      </tr>`;
+
       document.getElementById("compare-result").innerHTML = `
         <div class="chart-grid">
           <div class="card">
             <div class="card-title">Radar comparativo</div>
-            <div class="radar-wrap">
-              <canvas id="chart-compare-radar"></canvas>
-            </div>
+            ${radarOk ? '<div class="radar-wrap"><canvas id="chart-compare-radar"></canvas></div>'
+                      : `<p class="empty">${_radarMsg(dataA)}</p>`}
           </div>
           <div class="card">
-            <div class="card-title">${dataA.team_name} vs ${dataB.team_name}</div>
+            <div class="map-header">
+              <div class="card-title" style="margin:0">${dataA.team_name} vs ${dataB.team_name}</div>
+              <span class="xm-host" data-xm="compare-box"></span>
+            </div>
             <div class="table-wrap">
-              <table class="compare-table fiba-box">
+              <table class="compare-table fiba-box" id="compare-box-table">
                 <thead><tr>
                   <th style="color:var(--accent)">${dataA.team_name}</th>
                   <th class="lbl"></th>
@@ -1575,9 +1824,12 @@ async function renderCompare() {
           </div>
         </div>
         <div class="card">
-          <div class="card-title">Métricas avanzadas</div>
+          <div class="map-header">
+            <div class="card-title" style="margin:0">Métricas avanzadas</div>
+            <span class="xm-host" data-xm="compare-adv"></span>
+          </div>
           <div class="table-wrap">
-            <table class="search-table">
+            <table class="search-table" id="compare-adv-table">
               <thead><tr>
                 <th style="text-align:left">Equipo</th>
                 <th>Off</th><th>Def</th><th>Net</th><th>eFG%</th><th>TS%</th><th>Pace</th>
@@ -1586,12 +1838,22 @@ async function renderCompare() {
               <tbody>
                 ${advRow(dataA.team_name, avA, "var(--accent)")}
                 ${advRow(dataB.team_name, avB, "var(--blue)")}
+                ${lgRow}
               </tbody>
             </table>
           </div>
+          <p class="td-muted" style="margin:8px 0 0">${_refLegend(dataA, ["equipo", "equipos"])}</p>
         </div>`;
 
-      drawCompareRadar("chart-compare-radar", avA, avB, lg, dataA.team_name, dataB.team_name);
+      const cmpResult = document.getElementById("compare-result");
+      const cmpComp = document.getElementById("compare-comp");
+      const cmpLabel = cmpComp && cmpComp.value ? cmpComp.selectedOptions[0]?.textContent : "";
+      _mountTableExport(cmpResult.querySelector('[data-xm="compare-box"]'), () => cmpResult.querySelector("#compare-box-table"),
+        _baseMeta({ title: `Comparación — ${dataA.team_name} vs ${dataB.team_name}`, section: "comparar", entity: `${dataA.team_name}-${dataB.team_name}`, competitionLabel: cmpLabel }));
+      _mountTableExport(cmpResult.querySelector('[data-xm="compare-adv"]'), () => cmpResult.querySelector("#compare-adv-table"),
+        _baseMeta({ title: `Comparación avanzada — ${dataA.team_name} vs ${dataB.team_name}`, section: "comparar-avanzadas", entity: `${dataA.team_name}-${dataB.team_name}`, competitionLabel: cmpLabel }));
+
+      if (radarOk) drawCompareRadar("chart-compare-radar", avA, avB, lg, dataA.team_name, dataB.team_name);
     } catch (e) {
       toast(e.message, "err");
     } finally {
@@ -1601,39 +1863,9 @@ async function renderCompare() {
   });
 }
 
-// ── Shot chart SVG — half court, estilo "El Metro" (cancha clara, heatmap por P/F) ──
-// Geometría y paleta compartidas entre el modo 11 zonas (coords reales) y el modo
-// simplificado de 3 zonas (fallback: partido sin array `shot` de FIBA → x=0,y=0).
-const SC_W = 340, SC_H = 320;
-const SC_cx = 170, SC_cy = 256;
-const SC_cL = 20, SC_cR = 320, SC_cT = 8, SC_cB = 288;
-const SC_r3 = 135, SC_rP = 50;
-const SC_pbX1 = 121, SC_pbX2 = 219, SC_pbTop = 140;
-const SC_c3xL = 38, SC_c3xR = 302;
-const SC_c3yJoin = Math.round(SC_cy - Math.sqrt(SC_r3 * SC_r3 - (SC_cx - SC_c3xL) ** 2));
-
-const SC_courtBg = "#f3f6fa", SC_paintBg = "#c7d8ec", SC_restrictBg = "#b4c8e6",
-      SC_cornerBg = "#efe9c4", SC_line = "#46566a", SC_boxText = "#1f2937";
-
-// Heatmap por PPT (puntos por tiro), umbrales calcados de la imagen de referencia.
-// La fórmula no cambió con C-03 — solo el nombre —, así que los colores son idénticos.
-const _scBoxFill = ppt => ppt >= 1.00 ? "#79b13f" : ppt >= 0.85 ? "#ef8b3a" : "#df574c";
-
-function _scHCirc(r) {
-  return `M${SC_cx - r},${SC_cy} A${r},${r} 0 0,0 ${SC_cx + r},${SC_cy} Z`;
-}
-
-// Spokes (líneas que abren desde el aro separando los sectores del modo 11 zonas)
-function _scSpoke(deg) {
-  const t = deg * Math.PI / 180;
-  const x1 = SC_cx + SC_rP * Math.cos(t),  y1 = SC_cy - SC_rP * Math.sin(t);
-  const x2 = SC_cx + 250 * Math.cos(t),    y2 = SC_cy - 250 * Math.sin(t);
-  return `<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="${SC_line}" stroke-width="1.2" clip-path="url(#sc-clip)"/>`;
-}
-
 // C-07 — detalle de tiro: intentos/convertidos de las 3 categorías (promedio por
 // partido + total de temporada) y los 4 PPT. Compartido por Equipo y Jugador.
-function _shotDetailGrid(av, totals, lg) {
+function _shotDetailGrid(av, totals) {
   const t = totals || {};
   const rs = av?.null_reasons || {};
   // "promedio (total)" — el promedio ya viene del backend; el total también, para no
@@ -1642,229 +1874,180 @@ function _shotDetailGrid(av, totals, lg) {
     const a = av?.[avgKey], n = t[totKey];
     // Total ausente → "—", nunca "(0)" (C-11 RF-4)
     const disp = `${DEC2(a)}<span style="font-size:9px;color:var(--muted)"> (${n ?? "—"})</span>`;
-    return statBox(label, a, disp, null, null, true, rs[avgKey]);
+    return statBox(label, a, disp, rs[avgKey]);
   };
   return `
-    <div class="card-title" style="margin-top:14px;font-size:11px;color:var(--muted)">Detalle de tiro — promedio (total temporada)</div>
-    <div class="stat-grid">
-      ${cell("T2i", "fga2", "fga2")}
-      ${cell("T2c", "fgm2", "fgm2")}
-      ${cell("T3i", "fga3", "fga3")}
-      ${cell("T3c", "fgm3", "fgm3")}
-      ${cell("TLi", "fta",  "fta")}
-      ${cell("TLc", "ftm",  "ftm")}
-    </div>
-    <div class="card-title" style="margin-top:14px;font-size:11px;color:var(--muted)">Puntos por tiro</div>
-    <div class="stat-grid">
-      ${statBox("PPT",    av.pps,    DEC2(av.pps),    "pps",    lg, true, rs.pps)}
-      ${statBox("PPT 2",  av.ppt_2,  DEC2(av.ppt_2),  "ppt_2",  lg, true, rs.ppt_2)}
-      ${statBox("PPT 3",  av.ppt_3,  DEC2(av.ppt_3),  "ppt_3",  lg, true, rs.ppt_3)}
-      ${statBox("PPT TL", av.ppt_ft, DEC2(av.ppt_ft), "ppt_ft", lg, true, rs.ppt_ft)}
+    <div data-shot-detail>
+      <div class="map-header" style="margin-top:14px">
+        <div class="card-title" style="margin:0;font-size:11px;color:var(--muted)">Detalle de tiro — promedio (total temporada)</div>
+        <span class="xm-host" data-xm-shot></span>
+      </div>
+      <div class="stat-grid">
+        ${cell("T2i", "fga2", "fga2")}
+        ${cell("T2c", "fgm2", "fgm2")}
+        ${cell("T3i", "fga3", "fga3")}
+        ${cell("T3c", "fgm3", "fgm3")}
+        ${cell("TLi", "fta",  "fta")}
+        ${cell("TLc", "ftm",  "ftm")}
+      </div>
+      <div class="card-title" style="margin-top:14px;font-size:11px;color:var(--muted)">Puntos por tiro</div>
+      <div class="stat-grid">
+        ${statBox("PPT",    av.ppt,    DEC2(av.ppt),    rs.ppt)}
+        ${statBox("PPT 2",  av.ppt_2,  DEC2(av.ppt_2),  rs.ppt_2)}
+        ${statBox("PPT 3",  av.ppt_3,  DEC2(av.ppt_3),  rs.ppt_3)}
+        ${statBox("PPT TL", av.ppt_ft, DEC2(av.ppt_ft), rs.ppt_ft)}
+      </div>
     </div>`;
 }
 
-function _scLbl(zones, totalShots, key, lx, ly) {
-  const z = zones?.[key];
-  if (!z?.attempts) return '';
-  // C-03: cada zona muestra % de acierto, eFG% y PPT. El indicador "P/F" se retiró:
-  // era esta misma fórmula (puntos de la zona / intentos) mal etiquetada.
-  const share = DEC1((z.attempts / totalShots) * 100);
-  const ppt   = z.ppt != null ? DEC2(z.ppt) : '—';
-  const fg    = DEC1(z.pct * 100) + '%';
-  const efg   = z.efg != null ? DEC1(z.efg * 100) + '%' : '—';
-  const bg    = _scBoxFill(z.ppt);
-  const w = 54, h = 44, r = 4;
-  const x0 = lx - w / 2, y0 = ly - h / 2;
-  return `
-    <rect x="${x0}" y="${y0}" width="${w}" height="${h}" rx="${r}" fill="${bg}" stroke="rgba(0,0,0,0.25)" stroke-width="0.8"/>
-    <text x="${lx - 5}" y="${ly - 11}" text-anchor="end"   fill="rgba(0,0,0,0.70)" font-size="7.5" font-family="Inter,sans-serif">${share}%</text>
-    <text x="${lx + 4}" y="${ly - 11}" text-anchor="start" fill="rgba(0,0,0,0.70)" font-size="7.5" font-family="Inter,sans-serif">PPT ${ppt}</text>
-    <text x="${lx}"     y="${ly + 5}"  text-anchor="middle" fill="${SC_boxText}" font-size="14" font-weight="800" font-family="Inter,sans-serif">${fg}</text>
-    <text x="${lx}"     y="${ly + 16}" text-anchor="middle" fill="rgba(0,0,0,0.70)" font-size="7.5" font-family="Inter,sans-serif">eFG ${efg}</text>`;
-}
-
-function _scBadge(summary) {
-  if (!summary) return '';
-  const pf  = summary.ppt     != null ? DEC2(summary.ppt) : '—';   // C-03: era "P/F"
-  const efg = summary.efg_pct != null ? DEC1(summary.efg_pct * 100) + ' %' : '—';
-  const cw = 70, ch = 38, bx = SC_cR - 2 * cw, by = SC_cT + 2;
-  return `
-    <rect x="${bx}"      y="${by}" width="${cw}" height="${ch}" rx="4" fill="#ef8b3a"/>
-    <rect x="${bx + cw}" y="${by}" width="${cw}" height="${ch}" rx="4" fill="#9aa83a"/>
-    <text x="${bx + cw/2}"        y="${by + 14}" text-anchor="middle" fill="rgba(0,0,0,0.65)" font-size="9"  font-family="Inter,sans-serif">PPT</text>
-    <text x="${bx + cw/2}"        y="${by + 31}" text-anchor="middle" fill="${SC_boxText}" font-size="15" font-weight="800" font-family="Inter,sans-serif">${pf}</text>
-    <text x="${bx + cw + cw/2}"   y="${by + 14}" text-anchor="middle" fill="rgba(0,0,0,0.65)" font-size="9"  font-family="Inter,sans-serif">eFG%</text>
-    <text x="${bx + cw + cw/2}"   y="${by + 31}" text-anchor="middle" fill="${SC_boxText}" font-size="15" font-weight="800" font-family="Inter,sans-serif">${efg}</text>`;
-}
-
-function _courtLinesSVG() {
-  return `
-    <rect width="${SC_W}" height="${SC_H}" fill="${SC_courtBg}" rx="8"/>
-    <rect x="${SC_cL}" y="${SC_cT}" width="${SC_cR-SC_cL}" height="${SC_cB-SC_cT}" fill="${SC_courtBg}" rx="3"/>
-    <!-- Esquinas amarillas (fuera de la línea de 3 lateral) -->
-    <rect x="${SC_cL}"   y="${SC_c3yJoin}" width="${SC_c3xL-SC_cL}" height="${SC_cB-SC_c3yJoin}" fill="${SC_cornerBg}" clip-path="url(#sc-clip)"/>
-    <rect x="${SC_c3xR}" y="${SC_c3yJoin}" width="${SC_cR-SC_c3xR}" height="${SC_cB-SC_c3yJoin}" fill="${SC_cornerBg}" clip-path="url(#sc-clip)"/>
-    <!-- Pintura + zona restringida (azul) -->
-    <rect x="${SC_pbX1}" y="${SC_pbTop}" width="${SC_pbX2-SC_pbX1}" height="${SC_cB-SC_pbTop}" fill="${SC_paintBg}" clip-path="url(#sc-clip)"/>
-    <path d="${_scHCirc(SC_rP)}" fill="${SC_restrictBg}" clip-path="url(#sc-clip)"/>
-    <!-- Spokes (sectores) -->
-    ${_scSpoke(150)}${_scSpoke(108)}${_scSpoke(72)}${_scSpoke(30)}
-    <!-- Líneas de cancha -->
-    <rect x="${SC_cL}" y="${SC_cT}" width="${SC_cR-SC_cL}" height="${SC_cB-SC_cT}" fill="none" stroke="${SC_line}" stroke-width="1.5" rx="3"/>
-    <rect x="${SC_pbX1}" y="${SC_pbTop}" width="${SC_pbX2-SC_pbX1}" height="${SC_cB-SC_pbTop}" fill="none" stroke="${SC_line}" stroke-width="1.5"/>
-    <path d="M${SC_pbX1},${SC_pbTop} A49,49 0 0,0 ${SC_pbX2},${SC_pbTop}" fill="none" stroke="${SC_line}" stroke-width="1.5" stroke-dasharray="4,3"/>
-    <path d="M${SC_c3xL},${SC_cB} L${SC_c3xL},${SC_c3yJoin} A${SC_r3},${SC_r3} 0 0,0 ${SC_c3xR},${SC_c3yJoin} L${SC_c3xR},${SC_cB}" fill="none" stroke="${SC_line}" stroke-width="1.5"/>
-    <path d="M${SC_cx-SC_rP},${SC_cy} A${SC_rP},${SC_rP} 0 0,0 ${SC_cx+SC_rP},${SC_cy}" fill="none" stroke="${SC_line}" stroke-width="1.2"/>
-    <circle cx="${SC_cx}" cy="${SC_cy}" r="9" fill="none" stroke="#c2611f" stroke-width="2"/>
-    <line x1="${SC_cx-26}" y1="${SC_cB-3}" x2="${SC_cx+26}" y2="${SC_cB-3}" stroke="${SC_line}" stroke-width="3"/>`;
-}
-
-function _scSvgWrap(inner) {
-  return `<svg viewBox="0 0 ${SC_W} ${SC_H}" xmlns="http://www.w3.org/2000/svg"
-    style="width:100%;max-width:440px;margin:0 auto;display:block;border-radius:8px">
-    <defs>
-      <clipPath id="sc-clip"><rect x="${SC_cL}" y="${SC_cT}" width="${SC_cR-SC_cL}" height="${SC_cB-SC_cT}"/></clipPath>
-    </defs>
-    ${inner}
-  </svg>`;
-}
-
-// 11 zonas — requiere coordenadas reales de tiro (array `shot` de FIBA con x/y)
-function _shotChart11SVG(zones, totalShots, summary) {
-  return _scSvgWrap(`
-    ${_courtLinesSVG()}
-    <!-- Cajas de estadística por zona (heatmap) -->
-    ${_scLbl(zones, totalShots, 'top_key_3',       SC_cx,          70)}
-    ${_scLbl(zones, totalShots, 'left_wing_3',     SC_cL + 34,    150)}
-    ${_scLbl(zones, totalShots, 'right_wing_3',    SC_cR - 34,    150)}
-    ${_scLbl(zones, totalShots, 'mid_top',         SC_cx,         162)}
-    ${_scLbl(zones, totalShots, 'mid_left_far',    SC_cx - 64,    206)}
-    ${_scLbl(zones, totalShots, 'mid_right_far',   SC_cx + 64,    206)}
-    ${_scLbl(zones, totalShots, 'restricted_area', SC_cx,         236)}
-    ${_scLbl(zones, totalShots, 'mid_left_close',  SC_cx - 64,    263)}
-    ${_scLbl(zones, totalShots, 'mid_right_close', SC_cx + 64,    263)}
-    ${_scLbl(zones, totalShots, 'left_corner_3',   SC_cL + 30,    263)}
-    ${_scLbl(zones, totalShots, 'right_corner_3',  SC_cR - 30,    263)}
-    ${_scBadge(summary)}`);
-}
-
-// 3 zonas — fallback honesto cuando el partido no trae coordenadas de tiro
-// (Feature 01: sdd/specs/01-shot-chart-fallback-visual). Solo `top_key_3`,
-// `mid_top` y `restricted_area` pueden tener attempts>0 en este caso.
-function _shotChart3SVG(zones, totalShots, summary) {
-  return _scSvgWrap(`
-    ${_courtLinesSVG()}
-    <!-- Cajas de estadística: Triple / Media / Pintura -->
-    ${_scLbl(zones, totalShots, 'top_key_3',       SC_cx, 70)}
-    ${_scLbl(zones, totalShots, 'mid_top',         SC_cx, 162)}
-    ${_scLbl(zones, totalShots, 'restricted_area', SC_cx, 236)}
-    ${_scBadge(summary)}`);
-}
-
-// Dispatcher: `hasCoordinates` viene de `GET /api/shots/...` (`has_coordinates`).
-function _shotChartSVG(zones, totalShots, summary, hasCoordinates) {
-  return hasCoordinates === false
-    ? _shotChart3SVG(zones, totalShots, summary)
-    : _shotChart11SVG(zones, totalShots, summary);
-}
-
-// ── Player section ─────────────────────────────────────────────────────────
+// ── Player section — competencia resuelta en el servidor (C-02) ────────────
 let _playerData = null;
-let _playerComp = "";
+let _playerComp = null;   // id de competencia (string) o "all"; null = la elige el servidor
 let _playerCtx  = { teamCode: "", playerName: "" };
+let _playerReq  = 0;      // descarta respuestas viejas
 
-async function renderPlayer(teamCode, playerName) {
+async function renderPlayer(teamCode, playerName, playerId = null) {
   const main = document.getElementById("player-main");
   main.innerHTML = '<p class="empty"><span class="spinner"></span>Cargando...</p>';
-  _playerComp = "";
+  _playerComp = null;   // sin competencia: la del partido más reciente del jugador (RF-6)
   _playerCtx  = { teamCode, playerName };
+  const req = ++_playerReq;
 
   try {
-    _playerData = await api.player(teamCode, playerName);
-    _renderPlayerContent(main, _playerData, "");
+    const data = playerId != null ? await api.playerById(playerId) : await api.player(teamCode, playerName);
+    if (req !== _playerReq) return;
+    _applyPlayerData(main, data);
   } catch (e) {
-    main.innerHTML = `<p class="empty below-avg">${e.message}</p>`;
+    if (req === _playerReq) main.innerHTML = `<p class="empty below-avg">${e.message}</p>`;
   }
 }
 
-function _renderPlayerContent(main, data, comp) {
+function _applyPlayerData(main, data) {
+  _playerData = data;
+  _playerComp = String(data.context.competition.id ?? "all");
+  _playerCtx  = { teamCode: data.team_code, playerName: data.player };   // grafía de la ficha
+  _renderPlayerContent(main, data);
+  _loadPlayerStandard(data.player_id);
+}
+
+// ── Conjunto estándar de métricas — card "Jugador" (T-05, T-E2) ─────────────
+let _playerStdReq = 0;
+let _playerStdBase = "partido";
+let _playerCardGroups = null;
+
+async function _loadPlayerStandard(playerId) {
+  const el = document.getElementById("player-standard-panel");
+  const main = document.getElementById("player-main");
+  if (!el) return;
+  const req = ++_playerStdReq;
+  renderStandardPanel(el, null, { layout: "grid", base: _playerStdBase });
+  const ctxQuery = { competition: _playerComp };
+  try {
+    await loadCatalog();
+    const fichaStd = await api.metrics("player", { id: playerId, ...ctxQuery, base: "partido" });
+    if (req !== _playerStdReq) return;
+    _fillFichaGrids(main, _playerCardGroups, "player", fichaStd, playerId);
+    const payload = _playerStdBase === "partido"
+      ? fichaStd
+      : await api.metrics("player", { id: playerId, ...ctxQuery, base: _playerStdBase });
+    if (req !== _playerStdReq) return;
+    renderStandardPanel(el, payload, {
+      layout: "grid",
+      base: _playerStdBase,
+      onBaseChange: newBase => { _playerStdBase = newBase; _loadPlayerStandard(playerId); _loadPlayerGameLog(playerId); },
+    });
+    if (main) bindMetricCards(main, { entityType: "player", contextQuery: { ...ctxQuery, id: playerId } });
+  } catch (e) {
+    if (req !== _playerStdReq) return;
+    _fillFichaGrids(main, _playerCardGroups, "player", null, playerId);
+    renderStandardPanel(el, { error: e.message || "No se pudo cargar el conjunto estándar" }, { layout: "grid", base: _playerStdBase });
+  }
+}
+
+// Cambió la competencia: se pide el perfil de nuevo al servidor (no se recalcula en el navegador)
+async function _reloadPlayer() {
+  if (!_playerData) return;
+  const main = document.getElementById("player-main");
+  const id = _playerData.player_id;
+  const req = ++_playerReq;
+  main.innerHTML = '<p class="empty"><span class="spinner"></span>Cargando...</p>';
+  let data;
+  try {
+    data = await api.playerById(id, { competition: _playerComp });
+  } catch (e) {
+    if (req !== _playerReq) return;
+    toast(e.message, "err");
+    try {
+      // competencia inexistente o sin publicar: volver a la por defecto; otro error: conservar la anterior
+      data = /competencia/i.test(e.message) ? await api.playerById(id) : _playerData;
+    } catch (e2) {
+      if (req === _playerReq) main.innerHTML = `<p class="empty below-avg">${e2.message}</p>`;
+      return;
+    }
+  }
+  if (req === _playerReq) _applyPlayerData(main, data);
+}
+
+function _renderPlayerContent(main, data) {
   const { teamCode, playerName } = _playerCtx;
-  const log  = _filterByComp(data.game_log, comp);
-  const av   = comp ? _computeAvg(log) : { ...data.averages, null_reasons: data.null_reasons };
-  const rs   = av.null_reasons || {};   // razón de cada nulo (C-11 RF-4)
-  // Promedio de liga de la COMPETENCIA activa (Feature 14 RF-1/RF-2)
-  const lg   = data.leagues?.[comp || ""] ?? data.league;
-  const comps = _logComps(data.game_log);
+  const log  = data.game_log;
+  const av   = { ...data.averages, null_reasons: data.null_reasons };
+  const rs   = av.null_reasons;   // razón de cada nulo (C-11 RF-4)
+  // Promedio de liga de la COMPETENCIA elegida, calculado por el servidor (C-02 RF-1)
+  const lg   = data.league;
+  const comps = data.competitions;
+  const radarOk = lg?.oer?.avg != null;
 
   {
+    const PLAYER_CARD_GROUPS = [
+      { title: "Producción ofensiva", metrics: [
+        ["OER", "oer", av.oer, DEC2(av.oer)], ["USO%", "uso_pct", av.uso_pct, PCT(av.uso_pct)],
+        ["PPP", "ppp", av.ppp, DEC2(av.ppp)], ["PPT", "ppt", av.ppt, DEC2(av.ppt)],
+        ["eFG%", "efg_pct", av.efg_pct, PCT(av.efg_pct)], ["TS%", "ts_pct", av.ts_pct, PCT(av.ts_pct)],
+        ["FT Rate", "ft_rate", av.ft_rate, DEC2(av.ft_rate)] ] },
+      { title: "Por posesión y por minuto", metrics: [
+        [_hint("AS/pos", "Asistencias por posesión propia (posesión = T2i + T3i + 0,44 × TLi + PER − RO)"), "as_pos", av.as_pos, DEC2(av.as_pos)],
+        [_hint("PER/pos", "Pérdidas por posesión propia (PER = pérdidas)"), "tov_pos", av.tov_pos, DEC2(av.tov_pos)],
+        [_hint("PTS/pos", "Puntos por posesión propia (igual al OER del jugador)"), "pts_pos", av.pts_pos, DEC2(av.pts_pos)],
+        [_hint("RO/min", "Rebotes ofensivos por minuto disputado"), "orb_min", av.orb_min, DEC2(av.orb_min)],
+        [_hint("RD/min", "Rebotes defensivos por minuto disputado"), "drb_min", av.drb_min, DEC2(av.drb_min)] ] },
+      { title: "Tiro", extra: _shotDetailGrid(av, data.totals), metrics: [
+        ["FG2%", "fg2_pct", av.fg2_pct, PCT(av.fg2_pct)], ["FG3%", "fg3_pct", av.fg3_pct, PCT(av.fg3_pct)],
+        ["FT%", "ft_pct", av.ft_pct, PCT(av.ft_pct)], ["Uso 2P", "fg2_uso", av.fg2_uso, PCT(av.fg2_uso)],
+        ["Uso 3P", "fg3_uso", av.fg3_uso, PCT(av.fg3_uso)] ] },
+      { title: "Rebotes & distribución", trailing: _astPerBox(av, data.totals), metrics: [
+        [_hint("OR%", "Porción de los rebotes ofensivos disponibles que capturó mientras estuvo en cancha, " + _PCT_REB_HINT.replace("%s", "OR%")), "or_pct", av.or_pct, PCT(av.or_pct)],
+        [_hint("DR%", "Porción de los rebotes defensivos disponibles que capturó mientras estuvo en cancha, " + _PCT_REB_HINT.replace("%s", "DR%")), "dr_pct", av.dr_pct, PCT(av.dr_pct)],
+        ["TO", "tov", av.tov, DEC2(av.tov)], ["AS", "ast", av.ast, DEC2(av.ast)],
+        ["% Reb Equipo", "reb_share", av.reb_share, PCT(av.reb_share)],
+        ["% RebOf Equipo", "oreb_share", av.oreb_share, PCT(av.oreb_share)],
+        ["% RebDef Equipo", "dreb_share", av.dreb_share, PCT(av.dreb_share)] ] },
+      { title: "Defensa avanzada", metrics: [
+        ["Robos", "stl", av.stl, DEC2(av.stl)], ["Tapones", "blk", av.blk, DEC2(av.blk)],
+        ["Stops", "stocks", av.stocks, DEC2(av.stocks)],
+        ["Def Playmaking", "def_playmaking", av.def_playmaking, DEC2(av.def_playmaking)],
+        ["DEF/TO Ratio", "def_to_ratio", av.def_to_ratio, DEC2(av.def_to_ratio)],
+        ["Impacto Físico", "physical_impact", av.physical_impact, DEC2(av.physical_impact)] ] },
+    ];
+    _playerCardGroups = PLAYER_CARD_GROUPS;
     main.innerHTML = `
       ${comps.length > 1 ? `
       <div class="card">
-        <select id="player-comp" class="map-select">${_compOptions(comps, comp)}</select>
+        <select id="player-comp" class="map-select">${_compOptions(comps, _playerComp, "Todas las competencias", "all")}</select>
       </div>` : ""}
+      ${_selectionNote(data, ["jugador", "jugadores"])}
+      ${PLAYER_CARD_GROUPS.map((g, i) => `
       <div class="card">
-        <div class="card-title">Producción ofensiva</div>
-        <div class="stat-grid">
-          ${statBox("OER", av.oer, DEC2(av.oer), "oer", lg, true, rs.oer)}
-          ${statBox("USO%", av.uso_pct, PCT(av.uso_pct), "uso_pct", lg, true, rs.uso_pct)}
-          ${statBox("PPP", av.ppp, DEC2(av.ppp), "ppp", lg, true, rs.ppp)}
-          ${statBox("PPT", av.pps, DEC2(av.pps), "pps", lg, true, rs.pps)}
-          ${statBox("eFG%", av.efg_pct, PCT(av.efg_pct), "efg_pct", lg, true, rs.efg_pct)}
-          ${statBox("TS%", av.ts_pct, PCT(av.ts_pct), "ts_pct", lg, true, rs.ts_pct)}
-          ${statBox("FT Rate", av.ft_rate, DEC2(av.ft_rate), "ft_rate", lg, true, rs.ft_rate)}
-        </div>
-      </div>
-      <div class="card">
-        <div class="card-title">Por posesión y por minuto</div>
-        <div class="stat-grid">
-          ${statBox("AS/pos",  av.as_pos,  DEC2(av.as_pos),  "as_pos",  lg, true, rs.as_pos)}
-          ${statBox("PER/pos", av.tov_pos, DEC2(av.tov_pos), "tov_pos", lg, false, rs.tov_pos)}
-          ${statBox("PTS/pos", av.pts_pos, DEC2(av.pts_pos), "pts_pos", lg, true, rs.pts_pos)}
-          ${statBox("RO/min",  av.orb_min, DEC2(av.orb_min), "orb_min", lg, true, rs.orb_min)}
-          ${statBox("RD/min",  av.drb_min, DEC2(av.drb_min), "drb_min", lg, true, rs.drb_min)}
-        </div>
-      </div>
-      <div class="card">
-        <div class="card-title">Tiro</div>
-        <div class="stat-grid">
-          ${statBox("FG2%", av.fg2_pct, PCT(av.fg2_pct), "fg2_pct", lg, true, rs.fg2_pct)}
-          ${statBox("FG3%", av.fg3_pct, PCT(av.fg3_pct), "fg3_pct", lg, true, rs.fg3_pct)}
-          ${statBox("FT%", av.ft_pct, PCT(av.ft_pct), "ft_pct", lg, true, rs.ft_pct)}
-          ${statBox("Uso 2P", av.fg2_uso, PCT(av.fg2_uso), "fg2_uso", lg, true, rs.fg2_uso)}
-          ${statBox("Uso 3P", av.fg3_uso, PCT(av.fg3_uso), "fg3_uso", lg, true, rs.fg3_uso)}
-        </div>
-        ${_shotDetailGrid(av, data.totals, lg)}
-      </div>
-      <div class="card">
-        <div class="card-title">Rebotes & distribución</div>
-        <div class="stat-grid">
-          ${statBox("OR%", av.or_pct, PCT(av.or_pct), "or_pct", lg, true, rs.or_pct)}
-          ${statBox("DR%", av.dr_pct, PCT(av.dr_pct), "dr_pct", lg, true, rs.dr_pct)}
-          ${statBox("TO", av.tov, DEC2(av.tov), "to_ratio", lg, false, rs.tov)}
-          ${statBox("AS", av.ast, DEC2(av.ast), "ast_ratio", lg, true, rs.ast)}
-          ${statBox("AST/TO", av.ast_to, DEC2(av.ast_to), "ast_ratio", lg, true, rs.ast_to)}
-          ${statBox("% Reb Equipo", av.reb_share, PCT(av.reb_share), "reb_share", lg, true, rs.reb_share)}
-          ${statBox("% RebOf Equipo", av.oreb_share, PCT(av.oreb_share), "oreb_share", lg, true, rs.oreb_share)}
-          ${statBox("% RebDef Equipo", av.dreb_share, PCT(av.dreb_share), "dreb_share", lg, true, rs.dreb_share)}
-        </div>
-      </div>
-      <div class="card">
-        <div class="card-title">Defensa avanzada</div>
-        <div class="stat-grid">
-          ${statBox("Robos", av.stl, DEC2(av.stl), "stl", lg, true, rs.stl)}
-          ${statBox("Tapones", av.blk, DEC2(av.blk), "blk", lg, true, rs.blk)}
-          ${statBox("Stops", av.stocks, DEC2(av.stocks), "stocks", lg, true, rs.stocks)}
-          ${statBox("Def Playmaking", av.def_playmaking, DEC2(av.def_playmaking), "def_playmaking", lg, true, rs.def_playmaking)}
-          ${statBox("DEF/TO Ratio", av.def_to_ratio, DEC2(av.def_to_ratio), "def_to_ratio", lg, true, rs.def_to_ratio)}
-          ${statBox("Impacto Físico", av.physical_impact, DEC2(av.physical_impact), "physical_impact", lg, true, rs.physical_impact)}
-        </div>
-      </div>
+        <div class="card-title">${g.title}</div>
+        <div class="stat-grid metric-card-grid" data-mc-group="${i}">${_fichaGridHTML(g.metrics, "player", null, data.player_id)}</div>
+        ${g.trailing ? `<div class="stat-grid">${g.trailing}</div>` : ""}
+        ${g.extra || ""}
+      </div>`).join("")}
       <div class="chart-grid">
         <div class="card">
           <div class="card-title">Perfil de jugador</div>
-          <div class="radar-wrap">
-            <canvas id="chart-player-radar"></canvas>
-          </div>
+          ${radarOk ? '<div class="radar-wrap"><canvas id="chart-player-radar"></canvas></div>'
+                    : `<p class="empty">${_radarMsg(data)}</p>`}
         </div>
         <div class="card">
           <div class="card-title">Evolución por partido</div>
@@ -1872,76 +2055,77 @@ function _renderPlayerContent(main, data, comp) {
         </div>
       </div>
       <div class="card">
+        <div class="card-title">Conjunto estándar</div>
+        <div id="player-standard-panel"></div>
+      </div>
+      <div class="card">
         <div class="card-title">Game log — ${playerName}</div>
-        <div class="table-wrap">
-          <table>
-            <thead><tr>
-              <th>Fecha</th><th>Rival</th><th>Pts</th>
-              <th>FGM/A</th><th>3PM/A</th><th>FTM/A</th>
-              <th>OR</th><th>DR</th><th>Ast</th><th>TOV</th>
-              <th>OER</th><th>eFG%</th><th>TS%</th>
-            </tr></thead>
-            <tbody>
-              ${log.map(g => {
-                // DNP: el partido figura, pero sin números — no jugó, no son ceros (C-11 RF-10)
-                if (g.played === false) return `
-                <tr>
-                  <td class="td-muted">${_fmtDate(g.date)}</td>
-                  <td>${g.opponent}</td>
-                  <td colspan="11" class="td-muted null-val" title="No jugó (DNP)">DNP</td>
-                </tr>`;
-                const c = (k, f) => fmtOrNull(g[k], f, g.null_reasons?.[k]);
-                return `
-                <tr>
-                  <td class="td-muted">${_fmtDate(g.date)}</td>
-                  <td>${g.opponent}</td>
-                  <td class="td-result">${g.pts}</td>
-                  <td>${g.fgm}/${g.fga}</td>
-                  <td>${g.fgm3}/${g.fga3}</td>
-                  <td>${g.ftm}/${g.fta}</td>
-                  <td>${g.orb}</td>
-                  <td>${g.drb}</td>
-                  <td>${g.ast}</td>
-                  <td>${g.tov}</td>
-                  <td>${c("oer", DEC2)}</td>
-                  <td>${c("efg_pct", PCT)}</td>
-                  <td>${c("ts_pct", PCT)}</td>
-                </tr>`; }).join("")}
-            </tbody>
-          </table>
-        </div>
+        <div id="player-gamelog-dt"></div>
       </div>`;
-    drawRadar("chart-player-radar", av, lg, playerName);
-    drawPlayerEvolution("chart-player-evo", log);
+    if (radarOk) drawRadar("chart-player-radar", av, lg, playerName);
+    drawPlayerEvolution("chart-player-evo", log, lg?.oer?.avg);
+    _loadPlayerGameLog(data.player_id);
+    _mountShotDetailExports(main, playerName, String(data.player_id ?? ""), _playerCompLabel());
 
     if (comps.length > 1) {
       document.getElementById("player-comp").addEventListener("change", e => {
         _playerComp = e.target.value;
-        _renderPlayerContent(main, data, _playerComp);
+        _reloadPlayer();
       });
     }
 
-    // Shot chart — async, non-blocking (global del jugador, no filtrado por competencia)
-    api.playerShots(teamCode, playerName).then(shots => {
-      if (!shots || !shots.total_shots) return;
+    // Shot chart — async, non-blocking (C-03: usa api.shotZones + shotChart)
+    api.shotZones({ entity: 'player', id: data.player_id, competition: _playerComp }).then(shots => {
+      if (!shots || !shots.summary?.total_shots) return;
       const shotCard = document.createElement("div");
       shotCard.className = "card";
       shotCard.innerHTML = `
         <div class="card-title">Shot chart por zonas <span style="color:var(--muted2);font-weight:400;text-transform:none;letter-spacing:0">— ${playerName}</span></div>
-        ${_shotChartSVG(shots.zones, shots.total_shots, shots.summary, shots.has_coordinates)}`;
+        ${shotChart(shots)}`;
       main.insertBefore(shotCard, main.querySelector(".chart-grid"));
+      bindZoneTooltips(shotCard, shots);
     }).catch(() => {});
   }
 }
 
-// ── Search section ───────────────────────────────────────────────────────────
-let _searchData = null;
-let _searchSort = { key: "player", dir: 1 };
+// Game log de jugador migrado a createDataTable (player_game_log). Respeta competencia
+// y base elegida (T-D8); los DNP vienen como filas con métricas nulas razón `dnp`.
+function _loadPlayerGameLog(playerId) {
+  const el = document.getElementById("player-gamelog-dt");
+  if (!el || playerId == null) return;
+  const compParam = (_playerComp && _playerComp !== "all") ? _playerComp : null;
+  mountTable(el,
+    () => api.table("player_game_log", { player_id: playerId, competition: compParam, base: _playerStdBase }),
+    { tableId: "player_game_log" });
+}
+
+function _playerCompLabel() {
+  const sel = document.getElementById("player-comp");
+  if (sel && sel.selectedOptions[0] && _playerComp !== "all") return sel.selectedOptions[0].textContent;
+  return "";
+}
+
+// ── Search section (T-06: migrada a createDataTable con rowFilter) ─────────────
+let _searchComp = "";   // id de competencia del último fetch ("" = todas)
+let _searchTable = null;        // handle de createDataTable
+let _searchPayload = null;      // payload actual (para el mapa de índices de columnas)
+let _searchColIdx = {};         // key → índice en payload.columns
+
+// Grupos de posición del filtro: PG/SG/G → G, SF/PF/F → F, C → C.
+const POSITION_GROUPS = [["G", "Base/Escolta (G)"], ["F", "Alero/Ala-pívot (F)"], ["C", "Pívot (C)"]];
+function _posGroup(pos) {
+  const p = String(pos || "").toUpperCase();
+  if (!p) return null;
+  if (p === "C") return "C";
+  if (p.includes("F")) return "F";
+  if (p.includes("G")) return "G";
+  return null;
+}
 
 const SEARCH_METRICS = [
   { key: "efg_pct", label: "eFG%", pct: true }, { key: "ts_pct", label: "TS%", pct: true },
   { key: "oer", label: "OER" }, { key: "uso_pct", label: "USO%", pct: true },
-  { key: "ppp", label: "PPP" }, { key: "pps", label: "PPT" },
+  { key: "ppp", label: "PPP" }, { key: "ppt", label: "PPT" },
   { key: "fg2_pct", label: "FG2%", pct: true }, { key: "fg3_pct", label: "FG3%", pct: true },
   { key: "ft_pct", label: "FT%", pct: true },
   { key: "pts", label: "Pts/g" }, { key: "ast", label: "Ast/g" }, { key: "tov", label: "Pérd/g" },
@@ -1951,28 +2135,36 @@ const SEARCH_METRICS = [
   { key: "minutes", label: "Min" }, { key: "plus_minus", label: "+/-" },
 ];
 
-const SEARCH_COLS = [
-  { key: "player", label: "Jugador", txt: true }, { key: "team_code", label: "Eq", txt: true },
-  { key: "position", label: "Pos", txt: true }, { key: "games", label: "G", int: true },
-  { key: "minutes", label: "Min" }, { key: "plus_minus", label: "+/-" },
-  { key: "efg_pct", label: "eFG%", pct: true }, { key: "ts_pct", label: "TS%", pct: true },
-  { key: "oer", label: "OER" }, { key: "uso_pct", label: "USO%", pct: true },
-  { key: "pts", label: "Pts" }, { key: "ast", label: "Ast" }, { key: "tov", label: "TOV" },
-  { key: "stl", label: "ST" }, { key: "blk", label: "Blq" },
-];
+// Equipos del plantel (para el select de equipo): se leen de la columna _team del payload.
+function _searchTeams() {
+  if (!_searchPayload) return [];
+  const idx = _searchColIdx["_team"];
+  if (idx == null) return [];
+  return [...new Set(_searchPayload.rows.map(r => r.values[idx]).filter(Boolean))].sort();
+}
+
+async function _loadSearchPayload() {
+  _searchPayload = await api.table("search_players", { competition: _searchComp || null });
+  _searchColIdx = {};
+  _searchPayload.columns.forEach((c, i) => { _searchColIdx[c.key] = i; });
+  return _searchPayload;
+}
 
 async function renderSearch() {
   const main = document.getElementById("search-main");
-  if (!_searchData) {
+  if (!_searchPayload) {
     main.innerHTML = '<p class="empty"><span class="spinner"></span>Cargando buscador...</p>';
-    try { _searchData = await api.searchPlayers(); }
-    catch (e) { main.innerHTML = `<p class="empty below-avg">No se pudo cargar el buscador</p>`; return; }
+    try { await _loadSearchPayload(); }
+    catch (e) {
+      if (navigator.onLine === false || e instanceof TypeError) main.innerHTML = `<p class="empty below-avg">Sin conexión. No se pudo cargar el buscador.</p>`;
+      else main.innerHTML = `<p class="empty below-avg">${e.message || "No se pudo cargar el buscador"}</p>`;
+      return;
+    }
   }
-  if (!_searchData.length) { main.innerHTML = `<p class="empty">No hay jugadores importados todavía</p>`; return; }
+  if (!_searchPayload.rows.length && !_searchComp) { main.innerHTML = `<p class="empty">No hay jugadores importados todavía</p>`; return; }
 
-  const teams     = [...new Set(_searchData.map(p => p.team_code))].sort();
-  const comps     = [...new Set(_searchData.flatMap(p => p.competitions))].sort();
-  const positions = [...new Set(_searchData.map(p => p.position).filter(Boolean))].sort();
+  const comps = await api.competitions().catch(() => []);
+  const teams = _searchTeams();
 
   main.innerHTML = `
     <div class="card">
@@ -1980,8 +2172,8 @@ async function renderSearch() {
       <div class="search-filters">
         <input type="text" id="sf-name" placeholder="Nombre contiene...">
         <select id="sf-team"><option value="">Equipo (todos)</option>${teams.map(t=>`<option>${t}</option>`).join("")}</select>
-        <select id="sf-comp"><option value="">Competencia (todas)</option>${comps.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join("")}</select>
-        <select id="sf-pos"><option value="">Posición (todas)</option>${positions.map(p=>`<option>${p}</option>`).join("")}</select>
+        <select id="sf-comp"><option value="">Competencia (todas)</option>${comps.map(c=>`<option value="${c.id}"${String(c.id) === _searchComp ? " selected" : ""}>${esc(c.label)}</option>`).join("")}</select>
+        <select id="sf-pos"><option value="">Posición (todas)</option>${POSITION_GROUPS.map(([v, l])=>`<option value="${v}">${l}</option>`).join("")}</select>
       </div>
       <div class="search-ranges">
         ${SEARCH_METRICS.map(m => `
@@ -1999,19 +2191,46 @@ async function renderSearch() {
     </div>
     <div id="search-results"></div>`;
 
+  const box = document.getElementById("search-results");
+  _searchTable = createDataTable(box, {
+    tableId: "search_players",
+    payload: _searchPayload,
+    onRowClick: row => {
+      // id del payload = player_id; el nombre/equipo salen de las columnas de texto.
+      const name = row.values[_searchColIdx["_name"]];
+      const team = row.values[_searchColIdx["_team"]];
+      setSection("player");
+      renderPlayer(team, name, Number(row.id) || null);
+    },
+  });
+
   document.getElementById("sf-apply").addEventListener("click", _applySearch);
-  document.getElementById("sf-clear").addEventListener("click", () => {
+  // Cambiar de competencia recalcula los promedios en el backend (RF-7)
+  document.getElementById("sf-comp").addEventListener("change", async e => {
+    _searchComp = e.target.value;
+    box.innerHTML = '<p class="empty"><span class="spinner"></span>Cargando buscador...</p>';
+    try { await _loadSearchPayload(); }
+    catch { box.innerHTML = '<p class="empty below-avg">No se pudo cargar el buscador</p>'; return; }
+    renderSearch();
+  });
+  document.getElementById("sf-clear").addEventListener("click", async () => {
     main.querySelectorAll(".search-filters input, .search-ranges input").forEach(i => i.value = "");
     main.querySelectorAll(".search-filters select").forEach(s => s.value = "");
+    if (_searchComp) {   // volver a "todas las competencias"
+      _searchComp = "";
+      try { await _loadSearchPayload(); } catch { return; }
+      renderSearch();
+      return;
+    }
     _applySearch();
   });
   _applySearch();
 }
 
 function _applySearch() {
+  if (!_searchTable) return;
   const name = document.getElementById("sf-name").value.trim().toLowerCase();
   const team = document.getElementById("sf-team").value;
-  const comp = document.getElementById("sf-comp").value;
   const pos  = document.getElementById("sf-pos").value;
   const ranges = [];
   document.querySelectorAll(".sf-min").forEach(inp => {
@@ -2025,57 +2244,35 @@ function _applySearch() {
     ranges.push({ key: inp.dataset.key, op: "max", val: pct ? parseFloat(inp.value)/100 : parseFloat(inp.value) });
   });
 
-  const filtered = _searchData.filter(p => {
-    if (name && !p.player.toLowerCase().includes(name)) return false;
-    if (team && p.team_code !== team) return false;
-    if (comp && !p.competitions.includes(comp)) return false;
-    if (pos  && p.position !== pos) return false;
+  const nameIdx = _searchColIdx["_name"], teamIdx = _searchColIdx["_team"], posIdx = _searchColIdx["_position"];
+  const rowFilter = row => {
+    const v = row.values;
+    if (name && !String(v[nameIdx] || "").toLowerCase().includes(name)) return false;
+    if (team && v[teamIdx] !== team) return false;
+    if (pos && _posGroup(v[posIdx]) !== pos) return false;   // sin posición no entra en ninguno
     for (const r of ranges) {
-      const v = p[r.key];
-      if (v == null) return false;               // null no matchea rango (Feature 08)
-      if (r.op === "min" && v < r.val) return false;
-      if (r.op === "max" && v > r.val) return false;
+      const idx = _searchColIdx[r.key];
+      const val = idx != null ? v[idx] : null;
+      if (val == null) return false;               // null no matchea rango (Feature 08)
+      if (r.op === "min" && val < r.val) return false;
+      if (r.op === "max" && val > r.val) return false;
     }
     return true;
-  });
-  document.getElementById("sf-count").textContent = `${filtered.length} jugadores`;
-  _renderSearchResults(filtered);
-}
-
-function _renderSearchResults(rows) {
-  const box = document.getElementById("search-results");
-  if (!rows.length) { box.innerHTML = `<p class="empty">Ningún jugador cumple los filtros</p>`; return; }
-  const k = _searchSort.key;
-  const sorted = [...rows].sort((a, b) => _cmpNullsLast(a[k], b[k], _searchSort.dir));
-  const fmt = (c, p) => {
-    const v = p[c.key];
-    if (c.txt) return v || "—";
-    return fmtOrNull(v, c.int ? String : c.pct ? PCT : DEC2, p.null_reasons?.[c.key]);
   };
-  box.innerHTML = `
-    <div class="card">
-      <div class="table-wrap">
-        <table class="search-table">
-          <thead><tr>${SEARCH_COLS.map(c => `<th data-key="${c.key}">${c.label}</th>`).join("")}</tr></thead>
-          <tbody>
-            ${sorted.map(p => `
-              <tr data-team="${p.team_code}" data-player="${p.player.replace(/"/g,'&quot;')}">
-                ${SEARCH_COLS.map(c => `<td>${fmt(c, p)}</td>`).join("")}
-              </tr>`).join("")}
-          </tbody>
-        </table>
-      </div>
-    </div>`;
-  box.querySelectorAll("th").forEach(th => th.addEventListener("click", () => {
-    const key = th.dataset.key;
-    if (_searchSort.key === key) _searchSort.dir *= -1;
-    else _searchSort = { key, dir: ["player","team_code","position"].includes(key) ? 1 : -1 };
-    _renderSearchResults(rows);
-  }));
-  box.querySelectorAll("tbody tr").forEach(tr => tr.addEventListener("click", () => {
-    setSection("player");
-    renderPlayer(tr.dataset.team, tr.dataset.player);
-  }));
+
+  // Etiquetas de filtros locales para la cabecera de exportación.
+  const labels = [];
+  if (name) labels.push({ label: "Nombre contiene", value: name });
+  if (team) labels.push({ label: "Equipo", value: team });
+  if (pos) labels.push({ label: "Posición", value: (POSITION_GROUPS.find(g => g[0] === pos) || [, pos])[1] });
+  for (const r of ranges) {
+    const m = SEARCH_METRICS.find(x => x.key === r.key);
+    labels.push({ label: `${m ? m.label : r.key} ${r.op === "min" ? "≥" : "≤"}`, value: m?.pct ? `${(r.val * 100).toFixed(1)}%` : r.val });
+  }
+
+  _searchTable.setRowFilter(rowFilter, labels);
+  const count = _searchTable.getState().rows.length;
+  document.getElementById("sf-count").textContent = `${count} jugadores`;
 }
 
 // ── Bootstrap ──────────────────────────────────────────────────────────────
@@ -2086,17 +2283,26 @@ const NAV_ITEMS = {
   compare: { icon: "⚡", label: "Comparar" },
   player:  { icon: "👤", label: "Jugador" },
   search:  { icon: "🔎", label: "Buscar" },
+  partido: { icon: "🏀", label: "Partido" },
 };
 
+// ── F-07: Analizar partido ──────────────────────────────────────────────────
+function showGame(gameId) {
+  setSection("partido");
+  renderGameView(document.getElementById("partido-main"), gameId);
+}
+
 function renderApp() {
+  loadPopulationMinSize();   // para el copy "la población tiene menos de N entidades" (T-01)
   document.getElementById("app").innerHTML = `
     <header>
       <span class="header-logo">🏀 Smart-Basket</span>
       <span class="header-sub">Basketball Advanced Analytics</span>
+      <button class="header-gear" id="btn-config" aria-label="Configuración" title="Configuración">⚙</button>
       ${_authRequired ? `<span class="header-user">${_authUser || ""} · <button class="header-logout" id="btn-logout">Salir</button></span>` : ""}
     </header>
     <nav>
-      ${sections.map(s => `
+      ${sections.filter(s => s !== "config" && s !== "partido").map(s => `
         <button data-section="${s}">
           <span class="nav-icon">${NAV_ITEMS[s].icon}</span>
           ${NAV_ITEMS[s].label}
@@ -2164,6 +2370,14 @@ function renderApp() {
       <div class="section" id="sec-search">
         <div id="search-main"><p class="empty"><span class="spinner"></span>Cargando buscador...</p></div>
       </div>
+
+      <!-- Partido (F-07) -->
+      <div class="section" id="sec-partido">
+        <div id="partido-main"><p class="empty">Selecciona un partido desde el catálogo.</p></div>
+      </div>
+
+      <!-- Config (F-13) -->
+      <div class="section" id="sec-config"></div>
     </main>`;
 
   // Nav clicks
@@ -2192,37 +2406,37 @@ function renderApp() {
   // Player button
   document.getElementById("btn-show-player").addEventListener("click", () => {
     const team   = document.getElementById("team-select").value;
-    const player = document.getElementById("player-select").value;
+    const player = _selectedPlayer();
     if (!team || !player) return toast("Selecciona equipo y jugador", "err");
     setSection("player");
-    renderPlayer(team, player);
+    renderPlayer(team, player.name, player.id);
   });
 
   // Shot map button — muestra el mapa de tiro DENTRO de Equipo
   document.getElementById("btn-show-shotmap").addEventListener("click", () => {
     const team   = document.getElementById("team-select").value;
-    const player = document.getElementById("player-select").value;
+    const player = _selectedPlayer();
     if (!team || !player) return toast("Selecciona equipo y jugador", "err");
-    renderTeamShotmap(team, player);
+    renderTeamShotmap(team, player.name);
   });
 
   // ON/OFF button
   document.getElementById("btn-show-onoff").addEventListener("click", () => {
     const team   = document.getElementById("team-select").value;
-    const player = document.getElementById("player-select").value;
+    const player = _selectedPlayer();
     if (!team || !player) return toast("Selecciona equipo y jugador", "err");
-    renderTeamOnOff(team, player);
+    renderTeamOnOff(team, player.name, player.id);
   });
 
   // Lineup (combinación) button
   document.getElementById("btn-analyze-lineup").addEventListener("click", () => {
     const team = document.getElementById("team-select").value;
     if (!team) return toast("Selecciona un equipo", "err");
-    const checked = Array.from(
-      document.querySelectorAll("#team-lineup-picker input:checked")
-    ).map(el => el.value);
+    const checkedEls = Array.from(document.querySelectorAll("#team-lineup-picker input:checked"));
+    const checked = checkedEls.map(el => el.value);
+    const checkedIds = checkedEls.map(el => Number(el.dataset.playerId)).filter(id => Number.isFinite(id));
     if (checked.length < 3 || checked.length > 5) return toast("Elegí entre 3 y 5 jugadores", "err");
-    renderTeamLineup(team, checked);
+    renderTeamLineup(team, checked, checkedIds);
   });
 
   // Last-N filter pills
@@ -2231,16 +2445,14 @@ function renderApp() {
     if (!pill || !_teamData) return;
     const n = parseInt(pill.dataset.n, 10);
     _teamLastN = n;
-    document.querySelectorAll(".filter-pill").forEach(p => p.classList.toggle("active", p === pill));
-    _renderTeamContent(document.getElementById("team-main"), _teamData, n);
+    _reloadTeam();   // el servidor recalcula la selección; el `Ø` de liga no cambia (C-02 RF-1)
   });
 
   // Competition filter (compone con las pills Últ. N)
   document.getElementById("team-comp").addEventListener("change", e => {
     if (!_teamData) return;
     _teamComp = e.target.value;
-    _renderTeamContent(document.getElementById("team-main"), _teamData, _teamLastN);
-    renderTeamClutch(_teamData.team_code);   // los cierres se calculan en el backend por competencia
+    _reloadTeam({ clutch: true });   // los cierres también dependen de la competencia
   });
 
   const logoutBtn = document.getElementById("btn-logout");
@@ -2251,9 +2463,138 @@ function renderApp() {
     });
   }
 
+  document.getElementById("btn-config").addEventListener("click", () => {
+    setSection("config");
+    renderConfig();
+  });
+
   setSection("import");
   renderImport();
 }
+
+// ── Config screen (F-13) ─────────────────────────────────────────────────────
+
+async function renderConfig() {
+  const sec = document.getElementById("sec-config");
+  sec.innerHTML = `<div class="card"><div class="card-title">Configuración
+    <button class="btn btn-ghost btn-back-config" id="btn-config-back">← Volver</button></div>
+    <div id="config-body"><p class="empty"><span class="spinner"></span>Cargando configuración…</p></div>
+  </div>
+  <div id="config-calibrate-card"></div>`;
+  document.getElementById("btn-config-back").addEventListener("click", () => {
+    setSection(_lastSection !== "config" ? _lastSection : "import");
+  });
+  try {
+    const data = await api.settings();
+    renderSettingsForm(document.getElementById("config-body"), data, {
+      onSave: async (values) => {
+        const result = await api.saveSettings(values);
+        toast("Configuración guardada. Los cálculos ya usan los valores nuevos.");
+        _teamData = null; _clutchData = null;
+        renderSettingsForm(document.getElementById("config-body"), result, { onSave: arguments.callee, onReset: arguments[1] });
+        renderConfig();
+      },
+      onReset: async (body) => {
+        const result = await api.resetSettings(body);
+        toast("Valores restablecidos.");
+        _teamData = null; _clutchData = null;
+        renderConfig();
+      },
+    });
+    renderCalibrationCard(document.getElementById("config-calibrate-card"));
+  } catch (e) {
+    const msg = e.message && e.message.includes("fetch") ? "Sin conexión: la configuración no está disponible."
+      : `No se pudo cargar la configuración. ${e.message}`;
+    document.getElementById("config-body").innerHTML = `<p class="empty">${msg}</p>
+      <button class="btn btn-ghost" id="btn-config-retry">Reintentar</button>`;
+    document.getElementById("btn-config-retry").addEventListener("click", () => renderConfig());
+  }
+}
+
+// ── Calibración de K (T-02) ──────────────────────────────────────────────────
+// Sección extra fuera del formulario genérico de settings-form.js (que renderiza
+// solo desde el catálogo F-13): solo admins la ven. Decisión de diseño: un único
+// selector de entidad (lineup/onoff) + un selector de competencia propio (no hay
+// selector de competencia reusable en la vista Configuración), en vez de dos
+// botones separados — más simple de mantener y de usar.
+async function renderCalibrationCard(el) {
+  if (!el) return;
+  if (!_isAdmin) { el.innerHTML = ""; return; }
+
+  let comps = [];
+  try { comps = await api.competitions(true); } catch { comps = []; }
+
+  el.innerHTML = `
+    <div class="card">
+      <div class="card-title">Calibrar K con los datos cargados</div>
+      <p class="td-muted">Sugiere el factor de regresión (K) a partir de la correlación entre mitades de temporada de la competencia elegida.</p>
+      <div class="modal-field">
+        <label for="calib-entity">Entidad</label>
+        <select id="calib-entity">
+          <option value="lineup">Combinación (lineup)</option>
+          <option value="onoff">ON/OFF</option>
+        </select>
+      </div>
+      <div class="modal-field">
+        <label for="calib-comp">Competencia</label>
+        <select id="calib-comp">${_compOptions(comps, comps.find(c => c.is_default)?.id ?? "", "Elegí una competencia", "")}</select>
+      </div>
+      <button class="btn" id="btn-calibrate">Calibrar con los datos cargados</button>
+      <div id="calib-result" style="margin-top:8px"></div>
+    </div>`;
+
+  document.getElementById("btn-calibrate").addEventListener("click", async () => {
+    const entity = document.getElementById("calib-entity").value;
+    const compId = document.getElementById("calib-comp").value;
+    const resultEl = document.getElementById("calib-result");
+    if (!compId) { resultEl.innerHTML = `<p class="empty below-avg">Elegí una competencia.</p>`; return; }
+
+    const btn = document.getElementById("btn-calibrate");
+    btn.disabled = true;
+    resultEl.innerHTML = `<p class="empty"><span class="spinner"></span>Calibrando…</p>`;
+    try {
+      const r = await api.calibrate(entity, Number(compId));
+      const warnings = r.warnings || [];
+      if (warnings.includes("muestra_insuficiente")) {
+        resultEl.innerHTML = `<p class="empty below-avg">No hay unidades suficientes para calibrar en esta competencia</p>`;
+      } else if (warnings.includes("correlacion_no_positiva")) {
+        resultEl.innerHTML = `<p class="empty below-avg">La correlación entre mitades no es positiva: no se sugiere K</p>`;
+      } else if (r.k_suggested != null) {
+        resultEl.innerHTML = `
+          <p class="td-muted">K sugerido: ${r.k_suggested} (r = ${r.r} · ${r.units} unidades · ${r.n_half_mean} pos por mitad)</p>
+          <button class="btn btn-sm" id="btn-calibrate-apply">Aplicar</button>`;
+        document.getElementById("btn-calibrate-apply").addEventListener("click", async () => {
+          const applyBtn = document.getElementById("btn-calibrate-apply");
+          applyBtn.disabled = true;
+          try {
+            await api.saveSettings({ [r.config_key]: Math.round(r.k_suggested) });
+            toast("K actualizado");
+            _teamData = null; _clutchData = null;
+            renderConfig();
+          } catch (e) {
+            toast(e.message || "No se pudo aplicar el valor sugerido", "err");
+            applyBtn.disabled = false;
+          }
+        });
+      } else {
+        resultEl.innerHTML = `<p class="empty">No se pudo sugerir un valor de K para esta selección.</p>`;
+      }
+    } catch (e) {
+      if (e.status === 403 || e.code === "requiere_admin") {
+        resultEl.innerHTML = `<p class="empty below-avg">Necesitás permisos de administrador</p>`;
+      } else if (e.status === 401) {
+        resultEl.innerHTML = `<p class="empty below-avg">Sesión expirada. Iniciá sesión de nuevo.</p>`;
+      } else if (e.status === 400) {
+        resultEl.innerHTML = `<p class="empty below-avg">${e.message || "No se pudo calibrar con los parámetros elegidos"}</p>`;
+      } else {
+        resultEl.innerHTML = `<p class="empty below-avg">${e.message || "No se pudo calibrar"}</p>`;
+      }
+    } finally {
+      btn.disabled = false;
+    }
+  });
+}
+
 
 // ── Login screen ─────────────────────────────────────────────────────────────
 function showLogin(message = "") {

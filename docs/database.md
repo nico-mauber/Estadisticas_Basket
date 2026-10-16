@@ -96,12 +96,32 @@ Stats de box score por equipo por partido. Incluye stats del rival pre-calculada
 | `pts_from_tov` | INTEGER | Puntos tras pérdida rival (PtPer) |
 | `bench_pts` | INTEGER | Puntos del banco |
 | `fast_break_pts` | INTEGER | Puntos de contraataque (PCA) |
+| `blk_received` | INTEGER | Tapones recibidos por el equipo (`tot_sBlocksReceived`, T-05). `NULL` = no importado todavía |
+| `fouls_drawn` | INTEGER | Faltas recibidas por el equipo (`tot_sFoulsOn`, T-05). `NULL` = no importado todavía |
 
 **Restricción única:** `(game_id, team_code)`
 
 > Las 6 columnas de desglose (`opp_pf` … `fast_break_pts`) provienen del box score FIBA. Partidos importados antes de su incorporación las muestran en `0` hasta reimportar.
 >
 > `paint_pts`, `second_chance_pts`, `pts_from_tov`, `bench_pts` y `fast_break_pts` se guardan **`NULL`** si FIBA no manda la clave (la competencia no publica el dato) y `0` solo si FIBA informa 0 (C-11). El `DEFAULT 0` de la columna solo aplica a filas viejas; reimportar un partido reescribe el valor.
+
+---
+
+### `players`
+Ficha persistente de cada jugador **en un equipo** (C-08). Es la identidad: todas las filas de `player_game_stats` de una misma persona apuntan a una ficha por `player_id`.
+
+| Columna | Tipo | Descripción |
+|---------|------|-------------|
+| `id` | INTEGER PK AUTOINCREMENT | Identificador estable del jugador (se usa en URLs y filtros) |
+| `team_code` | TEXT NOT NULL | |
+| `norm_key` | TEXT NOT NULL | Nombre normalizado: minúsculas, sin tildes, espacios colapsados |
+| `display_name` | TEXT NOT NULL | Grafía real del partido más reciente (nunca la clave normalizada) |
+| `first_name` / `family_name` | TEXT | Nombre completo de FIBA (`firstName` / `familyName`); `NULL` hasta reprocesar el partido |
+| `photo_url` | TEXT | Foto de FIBA (`photoT`/`photoS`); `NULL` si no la publica |
+| `merged_into` | INTEGER FK → players | Ficha que absorbió a esta (fusión manual). `NULL` = ficha vigente |
+| `created_at` | TEXT | ISO-8601 |
+
+**Restricción única:** `(team_code, norm_key)`. La competencia **no** forma parte de la clave: es un filtro.
 
 ---
 
@@ -120,6 +140,9 @@ Stats individuales por jugador por partido.
 | `position` | TEXT DEFAULT `''` | Posición FIBA (`playingPosition`: G/F/C/PG/PF...). Vacío en partidos importados antes de su incorporación hasta reimportar |
 | `plus_minus` | INTEGER DEFAULT 0 | Plus/Minus del partido (`sPlusMinusPoints` FIBA; puede ser negativo). `NULL` si FIBA no manda la clave (C-11) |
 | `starter` | INTEGER DEFAULT 0 | 1=titular en ese partido (`starter` FIBA). Base para reconstruir el quinteto inicial (lineups/on-off) |
+| `player_id` | INTEGER | Ficha del jugador (`players.id`). La completa `identity.assign_game` al importar/reprocesar y `identity.backfill_player_ids` al arrancar. Índice `ix_pgs_player_id` |
+| `first_name` / `family_name` | TEXT | Nombre completo de FIBA. `NULL` en partidos anteriores a `INGEST_VERSION` 3 hasta reprocesar |
+| `photo_url` | TEXT | Foto de FIBA. `NULL` si no la publica |
 | `pts` | INTEGER | |
 | `fgm` / `fga` | INTEGER | |
 | `fgm2` / `fga2` | INTEGER | |
@@ -127,10 +150,12 @@ Stats individuales por jugador por partido.
 | `ftm` / `fta` | INTEGER | |
 | `orb` / `drb` / `trb` | INTEGER | |
 | `ast` / `tov` / `stl` / `blk` / `pf` | INTEGER | |
+| `blk_received` | INTEGER | Tapones recibidos (`sBlocksReceived`, T-05). `NULL` = no importado todavía |
+| `fouls_drawn`  | INTEGER | Faltas recibidas (`sFoulsOn`, T-05). `NULL` = no importado todavía |
 
 **Restricción única:** `(game_id, team_code, player_name)` — sobre el nombre **crudo**, tal como llega de FIBA.
 
-> **Identidad vs unicidad.** La restricción de arriba no define quién es un jugador: solo impide dos filas idénticas en un mismo partido. La **identidad** se resuelve al leer, por nombre normalizado + equipo (`norm_name()` en `stats_engine.py`), de modo que dos grafías del mismo nombre (`"C. Zinaich"` / `"C.  ZINAICH"`) se unifican en una sola ficha sin tocar los datos. Esto cubre todo el histórico sin migración. Ver `sdd/specs/13-dedup-jugadores/`.
+> **Identidad vs unicidad.** La restricción de arriba no define quién es un jugador: solo impide dos filas idénticas en un mismo partido. La **identidad** es la ficha de `players`: clave `(team_code, nombre normalizado)` (`norm_name()` en `stats_engine.py`), de modo que dos grafías del mismo nombre (`"C. Zinaich"` / `"C.  ZINAICH"`) comparten `player_id` sin tocar el nombre crudo, que se conserva en `player_game_stats`, `shots` y `pbp_events`. Los nombres que la normalización no une (`"J. Feldeine"` / `"Jerome Feldeine"`) los fusiona un administrador (`POST /api/identity/merge`): la ficha absorbida queda con `merged_into` y sus filas pasan a `player_id` de la vigente. Ver `sdd/specs/v2/fase-1-confiabilidad/07-C-08-jugadores-duplicados/`.
 >
 > La columna `position` puede venir vacía en algunos partidos (FIBA no siempre carga `playingPosition`): al unificar gana la más frecuente entre las no vacías.
 
@@ -199,6 +224,31 @@ Play-by-play completo: un registro por evento de FIBA (`raw["pbp"]`). Base de li
 | `top_key_3` | 3 | Triple frontal / sin coordenadas |
 
 Constantes asociadas en `app.py`: `ZONE_KEYS_11`, `ZONE_POINTS`, `_2PT_ZONES`, `_3PT_ZONES`. Tiros sin coordenadas (`x=0, y=0`) caen en `top_key_3` (3PT) o `mid_top` (2PT sin keyword de pintura).
+
+### `app_config`
+Configuración global de la aplicación (F-13). Solo almacena **overrides**: si el valor coincide con el default se borra la fila.
+
+| Columna | Tipo | Descripción |
+|---------|------|-------------|
+| `key` | TEXT PK | Clave del catálogo (`CONFIG_SPEC` en `config.py`) |
+| `value` | TEXT NOT NULL | Valor serializado como texto |
+| `updated_at` | TEXT NOT NULL | ISO-8601 |
+| `updated_by` | TEXT | Usuario que lo modificó |
+
+---
+
+### `user_prefs`
+Preferencias por usuario (F-13). Clave compuesta `(owner, scope, key)`.
+
+| Columna | Tipo | Descripción |
+|---------|------|-------------|
+| `owner` | TEXT NOT NULL | Usuario de sesión o `"_open"` si no hay auth |
+| `scope` | TEXT NOT NULL | Alcance: `table.columns`, `table.sort`, `table.colorize`, `panel.collapsed`, `ui` |
+| `key` | TEXT NOT NULL | Clave dentro del scope |
+| `value` | TEXT NOT NULL | Valor serializado |
+| `updated_at` | TEXT NOT NULL | ISO-8601 |
+
+---
 
 ## Inicialización y migración
 

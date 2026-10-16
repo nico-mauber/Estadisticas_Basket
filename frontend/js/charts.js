@@ -44,7 +44,8 @@ function _norm(value, leagueKey, league, higherIsBetter = true) {
   const lg = league?.[leagueKey];
   // Sin dato → null, no 0: un 0 dibujaría el eje en el peor valor posible y se
   // leería como "rinde pésimo" en vez de "no hay dato" (Feature 12 RF-9).
-  if (!lg || value == null) return null;
+  // Sin promedio de liga (`Ø` nulo: "Todas las competencias" o sin datos, C-02) tampoco hay escala.
+  if (!lg || value == null || lg.avg == null || lg.best == null) return null;
   const best  = lg.best;
   const avg   = lg.avg;
   // Estimate "worst" symmetrically from avg
@@ -266,7 +267,7 @@ export function drawEvolution(canvasId, gameLog, leagueOerAvg) {
 }
 
 // ── Player line — pts + OER per game ───────────────────────────────────────
-export function drawPlayerEvolution(canvasId, gameLog) {
+export function drawPlayerEvolution(canvasId, gameLog, leagueOerAvg) {
   _applyDefaults();
   _destroy(canvasId);
   const canvas = document.getElementById(canvasId);
@@ -303,6 +304,17 @@ export function drawPlayerEvolution(canvasId, gameLog) {
           tension: 0.3,
           yAxisID: "y2",
         },
+        // Promedio de OER de los jugadores de la competencia: el mismo valor que la card OER (C-02 RF-10)
+        ...(leagueOerAvg != null ? [{
+          label: "OER liga Ø",
+          data: sorted.map(() => +leagueOerAvg.toFixed(3)),
+          borderColor: C.muted,
+          backgroundColor: "transparent",
+          borderWidth: 1,
+          borderDash: [5, 5],
+          pointRadius: 0,
+          yAxisID: "y2",
+        }] : []),
       ],
     },
     options: {
@@ -339,6 +351,149 @@ export function drawPlayerEvolution(canvasId, gameLog) {
 // ── Scatter de liga (ejes configurables) ───────────────────────────────────
 // `axis` lo arma app.js (`_mapAxis`): títulos con la flecha del mejor rendimiento y rótulos de las
 // líneas de promedio. Este archivo no escribe flechas (C-10).
+export function drawScoreTimeline(canvasId, timeline, { homeName = "Local", awayName = "Visitante" } = {}) {
+  _applyDefaults();
+  _destroy(canvasId);
+  const canvas = document.getElementById(canvasId);
+  if (!canvas || !timeline?.points?.length) return;
+
+  const { points, periods, timeouts, runs, duration } = timeline;
+  const data = points.map(p => ({ x: p.t, y: p.margin }));
+  data.unshift({ x: 0, y: 0 });
+
+  _instances[canvasId] = new Chart(canvas, {
+    type: "line",
+    data: {
+      datasets: [{
+        data,
+        borderColor: C.accent,
+        borderWidth: 2,
+        pointRadius: 0,
+        pointHitRadius: 6,
+        fill: {
+          target: { value: 0 },
+          above: "rgba(59,130,246,0.15)",
+          below: "rgba(249,115,22,0.15)",
+        },
+        stepped: "after",
+      }],
+    },
+    options: {
+      responsive: true,
+      aspectRatio: window.innerWidth <= 768 ? 1.5 : 3,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            title: ctx => {
+              const t = ctx[0]?.raw?.x;
+              const pt = points.find(p => p.t === t);
+              return pt ? `${pt.period_label} ${pt.clock}` : "";
+            },
+            label: ctx => {
+              const t = ctx.raw.x;
+              const pt = points.find(p => p.t === t);
+              if (!pt) return `Margen: ${ctx.raw.y}`;
+              return `${homeName} ${pt.home} – ${pt.away} ${awayName}`;
+            },
+          },
+        },
+      },
+      scales: {
+        x: {
+          type: "linear",
+          min: 0,
+          max: duration,
+          grid: { color: C.grid },
+          ticks: {
+            color: C.muted,
+            callback: v => {
+              const m = Math.floor(v / 60);
+              return m % 5 === 0 ? `${m}'` : "";
+            },
+            stepSize: 60,
+            maxRotation: 0,
+          },
+          title: { display: false },
+        },
+        y: {
+          grid: { color: C.grid },
+          ticks: { color: C.muted },
+          title: { display: false },
+        },
+      },
+    },
+    plugins: [{
+      afterDraw(chart) {
+        const ctx = chart.ctx;
+        const xScale = chart.scales.x;
+        const yScale = chart.scales.y;
+        const { top, bottom } = chart.chartArea;
+        ctx.save();
+
+        // period separators
+        if (periods) {
+          ctx.strokeStyle = "rgba(139,148,158,0.4)";
+          ctx.setLineDash([4, 3]);
+          ctx.lineWidth = 1;
+          for (const p of periods) {
+            if (p.start_t <= 0) continue;
+            const px = xScale.getPixelForValue(p.start_t);
+            ctx.beginPath(); ctx.moveTo(px, top); ctx.lineTo(px, bottom); ctx.stroke();
+            ctx.fillStyle = "rgba(139,148,158,0.6)";
+            ctx.font = "10px Inter, system-ui";
+            ctx.fillText(p.label, px + 3, top + 12);
+          }
+        }
+
+        // zero line
+        const zeroY = yScale.getPixelForValue(0);
+        ctx.strokeStyle = "rgba(139,148,158,0.3)";
+        ctx.setLineDash([]);
+        ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(chart.chartArea.left, zeroY);
+        ctx.lineTo(chart.chartArea.right, zeroY); ctx.stroke();
+
+        // runs (shaded bands)
+        if (runs) {
+          ctx.setLineDash([]);
+          for (const r of runs) {
+            const x1 = xScale.getPixelForValue(r.start_t);
+            const x2 = xScale.getPixelForValue(r.end_t);
+            ctx.fillStyle = "rgba(249,115,22,0.08)";
+            ctx.fillRect(x1, top, x2 - x1, bottom - top);
+          }
+        }
+
+        // timeout markers (small triangles at bottom)
+        if (timeouts) {
+          ctx.setLineDash([]);
+          for (const to of timeouts) {
+            const px = xScale.getPixelForValue(to.t);
+            ctx.fillStyle = "rgba(139,148,158,0.6)";
+            ctx.beginPath();
+            ctx.moveTo(px, bottom);
+            ctx.lineTo(px - 4, bottom + 8);
+            ctx.lineTo(px + 4, bottom + 8);
+            ctx.closePath();
+            ctx.fill();
+          }
+        }
+
+        // team name labels
+        ctx.font = "11px Inter, system-ui";
+        ctx.fillStyle = C.blue;
+        ctx.fillText(`▲ ${homeName}`, chart.chartArea.left + 4, top + 12);
+        ctx.fillStyle = C.accent;
+        ctx.fillText(`▼ ${awayName}`, chart.chartArea.left + 4, bottom - 6);
+
+        ctx.restore();
+      },
+    }],
+  });
+}
+
+
 export function drawLeagueScatter(canvasId, teams, axis) {
   _applyDefaults();
   _destroy(canvasId);
@@ -352,8 +507,10 @@ export function drawLeagueScatter(canvasId, teams, axis) {
   const valid = teams.filter(t => t[xKey] != null && t[yKey] != null);
   if (!valid.length) return;
 
-  const avgX = valid.reduce((s, t) => s + t[xKey], 0) / valid.length;
-  const avgY = valid.reduce((s, t) => s + t[yKey], 0) / valid.length;
+  // T-01: el promedio de la población (summary.avg) tiene prioridad sobre la media
+  // de las filas en pantalla, para que coincida con el "Ø" del pie de la tabla.
+  const avgX = axis.avgX != null ? axis.avgX : valid.reduce((s, t) => s + t[xKey], 0) / valid.length;
+  const avgY = axis.avgY != null ? axis.avgY : valid.reduce((s, t) => s + t[yKey], 0) / valid.length;
 
   const points = valid.map(t => ({
     x: t[xKey],

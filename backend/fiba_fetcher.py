@@ -329,6 +329,10 @@ def _parse_fiba_json(raw: dict, game_id: str) -> dict:
             "pts_from_tov":      ti(["PointsFromTurnovers"], default=None),
             "bench_pts":         ti(["BenchPoints"], default=None),
             "fast_break_pts":    ti(["PointsFastBreak", "FastBreakPoints"], default=None),
+            # T-05: tapones y faltas recibidas. Clave ausente → None ("no importado todavía",
+            # C-11); un 0 informado por FIBA queda 0.
+            "blk_received":      ti(["BlocksReceived"], default=None),
+            "fouls_drawn":       ti(["FoulsOn"], default=None),
         }
         team_row["fgm"] = team_row["fgm2"] + team_row["fgm3"]
         team_row["fga"] = team_row["fga2"] + team_row["fga3"]
@@ -366,6 +370,10 @@ def _parse_fiba_json(raw: dict, game_id: str) -> dict:
                     "position":    (p.get("playingPosition") or "").strip(),
                     "plus_minus":  _i(p, ["sPlusMinusPoints"], default=None),   # ausente → None (C-11 RF-11)
                     "starter":     int(p.get("starter") or 0),
+                    # C-08: datos de identidad (None si FIBA no los publica; nunca "")
+                    "first_name":  (p.get("firstName") or p.get("internationalFirstName") or "").strip() or None,
+                    "family_name": (p.get("familyName") or p.get("internationalFamilyName") or "").strip() or None,
+                    "photo_url":   (p.get("photoT") or p.get("photoS") or "").strip() or None,
                     "pts":  pi(["Points"]),
                     "fgm2": pi(["TwoPointersMade"]),
                     "fga2": pi(["TwoPointersAttempted"]),
@@ -381,6 +389,10 @@ def _parse_fiba_json(raw: dict, game_id: str) -> dict:
                     "stl":  pi(["Steals"]),
                     "blk":  pi(["Blocks"]),
                     "pf":   pi(["FoulsPersonal"]),
+                    # T-05: tapones y faltas recibidas. Clave ausente → None ("no importado
+                    # todavía", C-11); un 0 informado por FIBA queda 0.
+                    "blk_received": _i(p, ["sBlocksReceived", "BlocksReceived"], default=None),
+                    "fouls_drawn":  _i(p, ["sFoulsOn", "FoulsOn"], default=None),
                 }
                 player_row["fgm"] = player_row["fgm2"] + player_row["fgm3"]
                 player_row["fga"] = player_row["fga2"] + player_row["fga3"]

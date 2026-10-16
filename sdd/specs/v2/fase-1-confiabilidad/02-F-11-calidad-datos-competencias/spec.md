@@ -183,5 +183,3 @@ Mobile (< 768 px): pestañas como fila de pills con scroll horizontal dentro de 
 - [DECISIÓN PROPUESTA — confirmar] **Permiso de importar**: la arquitectura (§3.21) lista "importar/borrar partidos" entre las acciones de administrador, pero su tabla de endpoints (§6) no marca `POST /api/import` como admin. Se propone: borrar, reasignar, reprocesar y editar competencias = admin; importar = cualquier usuario autenticado (comportamiento actual; el seed ya está protegido por `SEED_ENABLED`).
 - [DECISIÓN PROPUESTA — confirmar] **Competencias archivadas**: visibles en los selectores al final como "<etiqueta> (archivada)", nunca elegidas automáticamente.
 - [DECISIÓN PROPUESTA — confirmar] **Duplicados por abreviatura** ("J. Feldeine" vs "Jerome Feldeine"): la normalización tipográfica no los une (decisión de `dev`); el panel los lista aparte como "posibles duplicados (revisar)" cuando coinciden apellido normalizado e inicial del nombre, sin unificarlos (la unificación manual es de C-08).
-</content>
-</invoke>
