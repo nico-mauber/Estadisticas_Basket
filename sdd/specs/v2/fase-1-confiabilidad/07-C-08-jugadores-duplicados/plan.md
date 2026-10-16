@@ -13,21 +13,25 @@ tabla `players` con `UNIQUE(team_code, norm_key)` y `player_game_stats.player_id
 `backend/identity.py` concentra toda la lógica (normalización, resolución, completado, fusión, candidatos); las rutas quedan
 finas y agrupan por `player_id` en vez de por nombre. Las rutas legado por nombre resuelven el nombre a ficha y usan **todas
 las grafías** de la ficha para `shots` y `pbp_events` (que no tienen `player_id`). La ingesta v2 de F-11 llama a identity
-al persistir cada partido; `upgrade_db()` completa el histórico de forma idempotente. El panel de calidad de F-11 recibe el
-check `possible_duplicates` con candidatos a fusión manual, y la fusión la hace un admin vía `POST /api/identity/merge`.
-Sin dependencias nuevas; sin tocar la restricción única existente; sin reescribir nombres.
+al persistir cada partido; el arranque de `app.py` completa el histórico de forma idempotente (junto a
+`competitions.backfill()`, patrón real de F-11: `database.py` no puede importar módulos que importan `database`). El panel
+de calidad de F-11 (`data_quality.report`) reemplaza su check `possible_duplicates` provisional por los candidatos a fusión
+manual, y la fusión la hace un admin vía `POST /api/identity/merge`. C-08 agrega las columnas de nombre completo y foto que
+F-11 difirió (las necesita para detectar fusiones incorrectas). Sin dependencias nuevas; sin tocar la restricción única
+existente; sin reescribir nombres.
 
 ## 2. Archivos (crear/editar)
 
 | Ruta | Tipo | Responsabilidad | RF |
 |---|---|---|---|
-| `backend/database.py` | model | Modelo `Player` (tabla `players`, NUEVO); columna `PlayerGameStats.player_id` (NUEVO); entrada en `upgrade_db().new_cols`; llamada a `identity.backfill_player_ids()` al final de `upgrade_db()` | RF-2 |
+| `backend/database.py` | model | Modelo `Player` (tabla `players`, NUEVO); columnas `PlayerGameStats.player_id`, `.first_name`, `.family_name`, `.photo_url` (NUEVO); entradas en `upgrade_db().new_cols` + índice `ix_pgs_player_id` | RF-2, RF-12 |
+| `backend/fiba_fetcher.py` | module | `_parse_fiba_json`: cada `player_row` agrega `first_name`, `family_name` (`firstName`/`internationalFirstName`, `familyName`/`internationalFamilyName`) y `photo_url` (`photoT`/`photoS`), `None` si FIBA no los trae | RF-12 |
 | `backend/identity.py` | module (NUEVO) | `norm_name`, `resolve_identity` (movidas de `stats_engine`), `resolve_player_id`, `backfill_player_ids`, `player_card`, `duplicate_candidates`, `merge_players` (Arquitectura §3.4) + PROPUESTAS `canonical_id`, `assign_game`, `aliases`, `name_index`, `canonicalize_pbp_games`, `position_group` | RF-1…RF-6, RF-10…RF-13 |
 | `backend/stats_engine.py` | service | `norm_name`/`resolve_identity` pasan a ser re-export de `identity` (compatibilidad con imports existentes) | RF-1 |
-| `backend/ingest.py` (F-11) | module | Tras upsert de `player_game_stats` en `persist_game`, llamar `identity.assign_game(game_id)` | RF-2 |
-| `backend/data_quality.py` (F-11) | module | `register_check("possible_duplicates", …)` pasa a usar `identity.duplicate_candidates` (reemplaza la versión con `norm_name` de F-11, I-15) | RF-12 |
-| `backend/app.py` | route | `team_players`, `player_stats`, `search_players` agrupan por `player_id`; ruta NUEVA `GET /api/player/<int:player_id>`; `player_shots`, `onoff_route`, `lineup_route` resuelven por ficha y alias; ruta NUEVA `POST /api/identity/merge`; helper `_player_payload(player_id)` y `_resolve_legacy_player(team_code, name)` | RF-7…RF-11, RF-13 |
-| `frontend/js/api.js` | js-api | `players(code, params)`, `playerById(id, params)`, `searchPlayers(params)`, `mergePlayers(targetId, sourceId)`; `qs()` si no existe todavía (ver §10) | RF-7…RF-9, RF-11, RF-14 |
+| `backend/ingest.py` (F-11) | module | `player_cols` suma `first_name`, `family_name`, `photo_url`; `INGEST_VERSION` 2 → 3 (los partidos ya importados quedan "pendientes de reproceso"); tras insertar `player_game_stats` en `persist_game`, llamar `identity.assign_game(game_id)` | RF-2, RF-12 |
+| `backend/data_quality.py` (F-11) | module | `report()` reemplaza `_duplicates(player_rows)` (versión con `norm_name`, I-15) por `identity.duplicate_candidates(competition_id)`; mantiene el shape del check (`_check`: `status`, `count`, `counts_as_incomplete: false`, `items`). F-11 no implementó `register_check` | RF-12 |
+| `backend/app.py` | route | Arranque: `identity.backfill_player_ids()` dentro del `app_context` junto a `competitions.backfill()`; `team_players`, `player_stats`, `search_players` agrupan por `player_id`; ruta NUEVA `GET /api/player/<int:player_id>`; `player_shots`, `onoff_route`, `lineup_route` resuelven por ficha y alias; ruta NUEVA `POST /api/identity/merge`; helper `_player_payload(player_id)` y `_resolve_legacy_player(team_code, name)` | RF-7…RF-11, RF-13 |
+| `frontend/js/api.js` | js-api | `players(code, params)`, `playerById(id, params)`, `searchPlayers(params)`, `mergePlayers(targetId, sourceId)`; reutiliza `qs()` (ya existe, F-11) | RF-7…RF-9, RF-11, RF-14 |
 | `frontend/js/app.js` | js-view | Buscador: filtro de posición por grupo, refetch por competencia, clic → perfil por id. Equipo: `player-select` con `value = player_id` y nombre visible. Jugador: carga por id | RF-5, RF-7, RF-8, RF-14 |
 | `frontend/js/components/identity-merge.js` | js-component (NUEVO, PROPUESTA) | `renderDuplicateItems(el, check, {isAdmin, onMerged})`, `openMergeDialog(pair, {onMerged})` — consumido por la pestaña Calidad de F-11 | RF-11, RF-12 |
 | `frontend/css/style.css` | css | Sección `/* ── identity-merge (C-08) ── */` (tabla de pares, modal) | RF-11, RF-12 |
@@ -56,21 +60,27 @@ RF-13 identity (cache) · RF-14 app.js. Sin RF huérfanos.
 | `players.merged_into` | INTEGER | NULL | `create_all` | FK `players.id` (sin cascada) |
 | `players.created_at` | TEXT | NULL | `create_all` | ISO-8601 |
 | `player_game_stats.player_id` | INTEGER | NULL | `upgrade_db()` `("player_game_stats", "player_id", "INTEGER")` + completado | índice PROPUESTA `CREATE INDEX IF NOT EXISTS ix_pgs_player_id ON player_game_stats(player_id)` en `upgrade_db()` |
+| `player_game_stats.first_name` · `.family_name` · `.photo_url` | TEXT | NULL | `upgrade_db()` `new_cols` (sin DEFAULT: NULL = "no importado todavía", regla de columnas nuevas de C-11) | La Arquitectura §5 se las asigna a F-11, que las difirió (`00-decisiones.md`, "F-11 alcance"); las completa la ingesta al importar/reprocesar |
 
 La restricción única `(game_id, team_code, player_name)` de `player_game_stats` no se toca. `players` no tiene columnas de
 F-16 (las agrega F-16 por `upgrade_db()`).
+`persist_game` hoy **borra y reinserta** las filas de `player_game_stats` de un partido al reprocesar (F-11): por eso
+`assign_game` se ejecuta en cada importación/reproceso y no alcanza con el completado inicial.
 
 ### 3.2 Endpoints
 
 **GET `/api/players/<team_code>`** (modificado · `login_required`)
 - Query: `competition` opcional (`<id>` | `all` | string legado; ausente = todas, ver spec §9). Resolución con
-  `repository.resolve_competition` (F-11).
+  `competitions.resolve(value)` (F-11; devuelve id o `None`, lanza `CompetitionError`). No existe `repository.py`: el filtro por
+  competencia se aplica sobre `Game.competition_id` y los partidos de competencias en borrador se excluyen con `_visible`
+  (como el resto de las rutas).
 - Response 200:
 ```json
 [{"player_id": 12, "name": "C. Zinaich", "games": 2, "uso_pct": 0.2145, "pts": 19.0},
  {"player_id": 15, "name": "J. Feldeine", "games": 2, "uso_pct": null, "pts": 11.5}]
 ```
-- Errores: 400 `{"error": "Competencia inexistente", "code": "competencia_inexistente"}`. Equipo sin filas → `[]` (como hoy).
+- Errores: 400 `{"error": "La competencia no existe."}` (copy y formato `{error}` vigentes de `CompetitionError`; el formato con
+  `code` de Arq. §7.8 no fue adoptado por F-11). Equipo sin filas → `[]` (como hoy).
 
 **GET `/api/player/<int:player_id>`** (NUEVO · `login_required` · Ctx en la medida que C-02/T-05 lo agreguen al builder común)
 - Response 200: exactamente el shape de `GET /api/player/<team>/<name>` en `dev` (`player`, `team_code`, `team_name`, `games`,
@@ -102,7 +112,7 @@ después delegando en `shot_zones`). 404 si no resuelve: `{"error": "Jugador no 
 tiros para un nombre inexistente; el cambio a 404 se documenta (ver §10 D-5).
 
 **GET `/api/onoff/<team_code>/<player_name>`** (existente): resuelve ficha (404 `"Sin datos ON/OFF para este jugador"` si no
-resuelve, copy actual); `games = identity.canonicalize_pbp_games(repository.team_pbp_games(team, None), team)`;
+resuelve, copy actual); `games = identity.canonicalize_pbp_games(_team_pbp_games(team), team)` (helper vigente de `app.py`; `repository.py` no existe);
 `lineups.onoff_stats(games, team, display_name)`; USO% sobre `PlayerGameStats.player_id == pid`. Response + `"player_id"`.
 
 **GET `/api/lineup/<team_code>?players=A|B|C`** (existente): cada nombre se resuelve a ficha (`create=False`); nombre que no
@@ -117,7 +127,7 @@ nombre inexistente da métricas vacías); dos nombres que resuelven a la misma f
 ```json
 {"player": {"player_id": 15, "team_code": "CNF", "display_name": "J. Feldeine", "position": "PG",
             "position_group": "G", "games": 3, "aliases": ["J. Feldeine", "Jerome Feldeine"]},
- "merged": {"source_id": 41, "rows_moved": 1}, "data_version": 57}
+ "merged": {"source_id": 41, "rows_moved": 1}}
 ```
 - Errores (§7.8): 400 `parametro_invalido` `"Indicá target_id y source_id enteros"` / `"No se puede unificar una ficha
   consigo misma"`; 403 `requiere_admin` `"Necesitás permisos de administrador para unificar jugadores"`; 404 `no_encontrado`
@@ -135,7 +145,7 @@ nombre inexistente da métricas vacías); dos nombres que resuelven a la misma f
 | `backfill_player_ids` | `backfill_player_ids() -> int` | filas con `player_id IS NULL` | RF-2 |
 | `aliases` | `aliases(player_id: int) -> list[str]` — PROPUESTA | `player_game_stats.player_name` de la ficha | RF-10 |
 | `name_index` | `name_index(team_code: str) -> dict[str, int]` — PROPUESTA | nombres crudos → id canónico | RF-10 |
-| `canonicalize_pbp_games` | `canonicalize_pbp_games(games: list[dict], team_code: str) -> list[dict]` — PROPUESTA | shape de `repository.team_pbp_games` | RF-10 |
+| `canonicalize_pbp_games` | `canonicalize_pbp_games(games: list[dict], team_code: str) -> list[dict]` — PROPUESTA | shape de `app._team_pbp_games` | RF-10 |
 | `position_group` | `position_group(pos: str \| None) -> str \| None` — PROPUESTA | posición FIBA | RF-5 |
 | `player_card` | `player_card(player_id: int) -> dict` | `players` + filas | RF-4, RF-6, RF-9 |
 | `duplicate_candidates` | `duplicate_candidates(competition_id: int \| None) -> list[dict]` | `players`, `player_game_stats`, `games` | RF-12 |
@@ -171,19 +181,18 @@ return nuevo id
 para cada fila de `player_game_stats` del partido: `pid = resolve_player_id(row.team_code, row.player_name,
 first_name=row.first_name, family_name=row.family_name, photo_url=row.photo_url)`; si `row.player_id != pid` → asignar.
 Después `_refresh_display(pids_tocados)`; si hubo fichas nuevas o asignaciones distintas, la versión la sube `ingest`
-(ya hace `bump_data_version` al importar). Devuelve filas asignadas.
+(F-11 no tiene `data_version` ni caché: nada que invalidar). Devuelve filas asignadas.
 
 **`_refresh_display(pids)`** (privada): por ficha canónica, fila más reciente por `(games.date, games.game_id)` →
 `display_name = row.player_name.strip()`.
 
-**`backfill_player_ids()`** (llamada al final de `upgrade_db()`, dentro del contexto de app):
+**`backfill_player_ids()`** (llamada en el arranque de `app.py`, dentro de `with app.app_context():`, justo después de `upgrade_db(app)` y de `competitions.backfill()`; no desde `upgrade_db()`, que vive en `database.py` e `identity` importa de `database`):
 ```
 filas = player_game_stats WHERE player_id IS NULL, JOIN games, ORDER BY games.date, game_id
 si no hay filas: return 0                                   # idempotente: la 2.ª corrida no hace nada
 cache local {(team, key): id} precargado desde players
 por fila: pid = cache o resolve_player_id(...); fila.player_id = pid
 commit por lotes de 500; _refresh_display(todas las fichas tocadas)
-si asignó > 0: cache.bump_data_version("identity_backfill")
 return asignadas
 ```
 Costo: 13 partidos ≈ 300 filas (ms); 200 partidos ≈ 5.000 filas (< 2 s una sola vez).
@@ -218,8 +227,10 @@ por ficha: más de un par (first,family) distinto → {kind: "posible_fusion_inc
 resumen(x) = {player_id, name, games, jerseys, first_date, last_date}
 orden: team_code, kind, reason
 ```
-Registro: `data_quality.register_check("possible_duplicates", lambda comp_id: {"status": "alerta" if items else "ok",
-"count": len(items), "items": items})`. El shape de `items[]` es PROPUESTA (la arquitectura solo fija `{status, count, items[]}`).
+Integración: F-11 no implementó `register_check`; `data_quality.report()` arma hoy el check con `_check(items, incomplete=False)`
+a partir de `_duplicates(player_rows)`. C-08 reemplaza esa función por una llamada a `identity.duplicate_candidates(competition_id)`
+y conserva el shape del check (`{status: "alerta"|"ok", count, counts_as_incomplete: false, items}`). El shape de `items[]` es
+PROPUESTA (la arquitectura solo fija `{status, count, items[]}`).
 
 **`merge_players(target_id, source_id)`**:
 ```
@@ -229,8 +240,8 @@ en una transacción:
     UPDATE players SET merged_into = t WHERE id = s OR merged_into = s      # aplana la cadena
     n = UPDATE player_game_stats SET player_id = t WHERE player_id = s
     completar first/family/photo de t desde s si en t son NULL
-_refresh_display([t]);  v = cache.bump_data_version("identity_merge")
-return {player: player_card(t) (con aliases), merged: {source_id: s, rows_moved: n}, data_version: v}
+_refresh_display([t])
+return {player: player_card(t) (con aliases), merged: {source_id: s, rows_moved: n}}
 ```
 Reversibilidad por datos (sin UI): `merged_into = NULL` en `s` y `player_id = s` para las filas cuyo
 `(team_code, norm_name(player_name)) == (team(s), s.norm_key)`.
@@ -248,7 +259,8 @@ Reversibilidad por datos (sin UI): `merged_into = NULL` en `s` y `player_id = s`
 Nulos (C-11): la unificación no crea valores; `uso_pct`/`pts` siguen `null` sin partidos jugados; `position` `""` y
 `position_group` `null` sin dato (la UI muestra "—").
 
-Caché: `bump_data_version` en fusión y completado (RF-13); el resto de lecturas no se cachea en C-08.
+Caché: hoy no existe (F-11 difirió `cache.py`/`data_version`); C-08 no cachea nada, así que RF-13 se cumple por construcción. Si
+una pieza posterior introduce `bump_data_version`, `merge_players` y `backfill_player_ids` deben llamarlo.
 
 ## 5. Frontend — capa API (`api.js`)
 
@@ -259,8 +271,8 @@ Caché: `bump_data_version` en fusión y completado (RF-13); el resto de lectura
 | `api.searchPlayers(params = {})` | `GET /api/search/players` + `qs(params)` | firma compatible |
 | `api.mergePlayers(targetId, sourceId)` | `POST /api/identity/merge` body JSON | NUEVO; errores 403/409 con `error` legible |
 
-`qs(params)` con el contrato de Arquitectura §8 (omite `null`/`undefined`/`""`). Si F-11 no lo creó, C-08 lo crea con ese
-contrato exacto (T-05 lo reutiliza). `api.player(code, name)`, `api.playerShots`, `api.onoff`, `api.lineup` sin cambio.
+`qs(params)` ya existe en `api.js` (lo creó F-11; es un helper local, no exportado) y omite `null`/`undefined`/`""`, igual que el
+contrato de Arquitectura §8: C-08 lo reutiliza sin cambios. `api.player(code, name)`, `api.playerShots`, `api.onoff`, `api.lineup` sin cambio.
 
 ## 6. Frontend — UI
 
@@ -268,7 +280,7 @@ Ubicación (fase 1, antes de X-01): vistas actuales de `app.js` (Buscar, Equipo,
 Importar que crea F-11 (§3.12). X-01 las reubica en S7 `explorar/jugadores`, S3 y S4 sin cambiar componentes.
 
 - **Buscar** (`renderSearch`/filtros, `dev` l.1587–1680): el select `sf-pos` pasa a 3 opciones fijas G/F/C con etiquetas
-  `t('search.pos.g','Base/Escolta (G)')`, `t('search.pos.f','Alero/Ala-pívot (F)')`, `t('search.pos.c','Pívot (C)')` y filtra
+  "Base/Escolta (G)", "Alero/Ala-pívot (F)", "Pívot (C)" (copy en español directo, sin `t()`: DA-21 resuelta, F-21 lo extrae) y filtra
   por `p.position_group`; la columna Posición sigue mostrando el valor FIBA (`"—"` si vacío, vía `nullDisplay` de C-11).
   `sf-comp`: opciones por `id` (de `api.competitions()` de F-11); al cambiar → `api.searchPlayers({competition: id})` y
   re-render (loading con el spinner existente). Filas con `data-player-id`; clic → abre Jugador por id.
@@ -278,12 +290,12 @@ Importar que crea F-11 (§3.12). X-01 las reubica en S7 `explorar/jugadores`, S3
 - **Jugador**: el select de jugador usa `player_id`; `renderPlayer` llama `api.playerById(id)`; el shot chart sigue con
   `api.playerShots(team, data.player)`.
 - **Calidad → Posibles duplicados** (`components/identity-merge.js`, PROPUESTA): tabla responsive (en < 768 px, tarjetas
-  apiladas) con columnas Equipo · Ficha A · Ficha B · Motivo (`t('dq.dup.reason.apellido_inicial','Mismo apellido e inicial')`,
+  apiladas) con columnas Equipo · Ficha A · Ficha B · Motivo ("Mismo apellido e inicial",
   `…dorsal_apellido 'Mismo dorsal y apellido parecido'`, `…nombre_completo_distinto 'Nombres completos distintos en la misma
   ficha'`, `…foto_distinta 'Fotos distintas en la misma ficha'`) · acción. Botón `"Unificar"` solo si `me.is_admin` y
   `can_merge`; abre modal (`.modal` existente) para elegir qué ficha conserva el nombre ("Conservar {A}" / "Conservar {B}")
   → `api.mergePlayers` → toast de éxito y recarga del check. Estados del spec §6.
-- Helpers reutilizados: `toast`, `.modal`, `.search-table`, `nullDisplay`/`t()` (C-11), `cmpNullsLast` (sin cambio).
+- Helpers reutilizados: `toast`, `.modal`, `.search-table`, `nullDisplay` (C-11), `cmpNullsLast` (sin cambio).
 - Mobile 768 px: el modal usa el ancho completo con márgenes de 16 px; botones de 44 px de alto.
 
 ## 7. Navegación
@@ -319,21 +331,24 @@ Offline: `/api/*` siempre a red; sin conexión el buscador y el panel muestran e
   y pbp coincide con el del box porque el parser usa el mapa dorsal→nombre, `fiba_fetcher.py` l.370–372). Agregar
   `player_id` a esas tablas no está en la arquitectura y no hace falta.
 - **D-4 · Riesgo de sobre-fusión** (R-11): la clave tipográfica puede unir a dos "P. Prieto" del mismo equipo; se detecta
-  con nombres completos y foto (F-11 captura `first_name`/`family_name`/`photo_url`) y se lista en el panel. Separar fichas
+  con nombres completos y foto (columnas `first_name`/`family_name`/`photo_url` que agrega C-08; solo disponibles tras reprocesar) y se lista en el panel. Separar fichas
   queda fuera de alcance.
 - **D-5 · Cambios visibles menores**: `GET /api/shots/<team>/<nombre inexistente>` pasa de 200 vacío a 404; `lineup` con un
   nombre inexistente pasa a 400. Se documentan en `docs/api.md`. El frontend ya maneja ambos (toast/`catch`).
 - **D-6 · Datos de verificación sin duplicados** (R-05): CA-1/2/5/8/10 sobre copia de la base con inyección controlada.
-- **Desviaciones respecto de la arquitectura:** ninguna de contrato. Se agregan PROPUESTAS (no están en
+- **INGEST_VERSION 2 → 3** (decisión de implementación, a confirmar): es lo que marca como "pendientes de reproceso" a los partidos
+  sin nombre completo/foto; si otro requisito de fase 1 sube también la versión, se coordina un solo salto al integrar.
+- **Desviaciones respecto de la arquitectura:** ninguna de contrato (salvo no usar `repository.py`/`cache.py`, inexistentes). Se agregan PROPUESTAS (no están en
   00-arquitectura-transversal.md): `identity.canonical_id`, `assign_game`, `aliases`, `name_index`, `canonicalize_pbp_games`,
   `position_group`; campos `position_group` y `competition_ids` en el buscador; shape de `items[]` de `possible_duplicates`;
-  componente `components/identity-merge.js`; índice `ix_pgs_player_id`. `qs()` lo fija la arquitectura como pieza de T-05
-  (orden 13) pero lo necesitan F-11/C-08 antes: se crea con su contrato exacto (hueco reportado).
-- **Dependencias técnicas:** F-11 → `ingest.persist_game` (hook), `repository.resolve_competition`,
-  `repository.team_pbp_games`, `data_quality.register_check`, `cache.bump_data_version`, `auth.admin_required`,
-  columnas `player_game_stats.first_name/family_name/photo_url`, `GET /api/competitions` con ids
+  componente `components/identity-merge.js`; índice `ix_pgs_player_id`. `qs()` ya existe (F-11).
+- **Dependencias técnicas (verificadas contra el código de F-11, rama `v2`):** `ingest.persist_game` (hook), `competitions.resolve`,
+  `competitions.visible` / `app._visible`, `app._team_pbp_games`, `data_quality.report` (check `possible_duplicates` provisional),
+  `auth.admin_required`, `GET /api/competitions` con ids. **No existen** (la Arquitectura los asigna a F-11, que los difirió):
+  `repository.py`, `cache.py`/`data_version`, `data_quality.register_check`, `player_game_stats.first_name/family_name/photo_url`
+  (los agrega C-08) y el formato de error con `code`
   ([../02-F-11-calidad-datos-competencias/plan.md](../02-F-11-calidad-datos-competencias/plan.md)); C-11 → Grupo 0 (`norm_name`,
-  `resolve_identity`, rutas de `dev`), `core/format.js` (`nullDisplay`), `core/i18n.js` (`t`)
+  `resolve_identity`, rutas de `dev`), `core/format.js` (`nullDisplay`), sin `core/i18n.js` (DA-21: copy en español directo)
   ([../01-C-11-tratamiento-de-nulos/plan.md](../01-C-11-tratamiento-de-nulos/plan.md)).
 - **Estimación: L · 12–18 h** (esquema + completado 2 h; identity 4–5 h; rutas 3–4 h; UI buscador/equipo/jugador 2–3 h;
   panel y modal 2 h; verificación con copia inyectada y docs 2 h).

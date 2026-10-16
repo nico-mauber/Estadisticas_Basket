@@ -3,7 +3,7 @@
 > **ID:** T-02 · **Prioridad:** P0 · **Fase y orden:** 1·14
 > **Depende de:** F-13 ([../12-F-13-configuracion/plan.md](../12-F-13-configuracion/plan.md)), T-05 ([../13-T-05-conjunto-estandar-metricas/plan.md](../13-T-05-conjunto-estandar-metricas/plan.md)), F-11 ([../02-F-11-calidad-datos-competencias/plan.md](../02-F-11-calidad-datos-competencias/plan.md)), C-08 ([../07-C-08-jugadores-duplicados/plan.md](../07-C-08-jugadores-duplicados/plan.md))
 > **Habilita:** T-01, T-06, C-03, F-06, F-19, T-03, F-09, F-10, A-06, A-08, A-11, F-15
-> **Estado:** Borrador (agente) — pendiente de revisión humana (gate Paso 2)
+> **Estado:** ✅ Aprobado
 > **Fuente:** Especificación v2 §3 · T-02 · Arquitectura §2.1, §3.2, §3.7, §3.10, §7.1, §7.2, §9.2
 > **Estimación:** L · 14–20 h
 

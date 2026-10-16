@@ -414,5 +414,3 @@ Offline: `/api/*` siempre a red (SW actual); un `TypeError` de `fetch` se traduc
 - INCREMENTO DIFERIDO (→ A-01): chequeo `possession_gaps` real y partidos con conciliación > 5 % (DA-30). F-11 deja el punto de extensión (`register_check`) y el placeholder `no_disponible`.
 
 **Estimación:** XL · 32–40 h (esquema y backfill 4 h · ingesta v2 y parser 8 h · ingest/reproceso/archivo 5 h · competitions + repository + cache 6 h · data_quality 5 h · auth + tests 1,5 h · rutas 2,5 h · UI 4 pestañas + selectores 7 h · verificación con inyecciones y docs 4 h). No se propone partición: si superara 40 h, la ingesta v2 (grupo B1) puede separarse como sub-entrega previa.
-</content>
-</invoke>

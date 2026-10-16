@@ -4,17 +4,36 @@ from datetime import timedelta
 from flask import Flask, jsonify, request, session
 from flask_cors import CORS
 from sqlalchemy import func
-from database import db, init_db, upgrade_db, Game, TeamGameStats, PlayerGameStats, Shot, PbpEvent, DB_PATH
-from stats_engine import (calc_team_stats, calc_player_stats, league_averages,
-                          _parse_minutes, played, norm_name, resolve_identity,
-                          season_ast_to, season_def_to_ratio, null_reasons,
+from database import db, init_db, upgrade_db, Game, TeamGameStats, PlayerGameStats, Player, Shot, PbpEvent, DB_PATH
+from stats_engine import (calc_team_stats, calc_player_stats,
+                          _parse_minutes, played, resolve_identity,
+                          season_ast_to, null_reasons,
+                          sum_pool, season_player_rates,
                           standings_row, standings_sort_key)
 from clutch import team_clutch, MARGIN_RANGE, WINDOW_RANGE
 import lineups
 import competitions
+import context
 import data_quality
+import identity
 import ingest
+import config
+import population
+import prefs
+import repository
+import metrics_catalog
+import bundles  # noqa: F401 — se importa para que registre los 5 tipos de entidad (T-05)
+import cache
+import tables  # noqa: F401 — se importa para que registre las tablas de T-06 al arrancar
+import export_xlsx
+import shot_zones
+import possessions
+import game_analysis
+import matchups  # noqa: F401 — registra entidad matchup
+from metrics_catalog import MetricsError
+from tables import TableError
 from competitions import CompetitionError
+from context import ContextError
 from auth import (
     login_required, admin_required, is_admin, auth_enabled, verify,
     check_rate_limit, register_fail, clear_fails, client_ip,
@@ -41,6 +60,7 @@ init_db(app)
 upgrade_db(app)
 with app.app_context():
     competitions.backfill()   # partidos sin competencia (idempotente, F-11 RF-4)
+    identity.backfill_player_ids()   # fichas de jugador de partidos ya importados (idempotente, C-08 RF-2)
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────
@@ -94,91 +114,9 @@ def _opp_for(game_id: str, team_code: str) -> TeamGameStats | None:
     ).first()
 
 
-def _classify_zone(action_type: str, sub_type: str, y: float = 0, x: float = 0) -> str:
-    if action_type == "3pt":
-        if x != 0 or y != 0:
-            if y < 15 or y > 85:
-                return "corner_3"
-        return "above_break_3"
-    sub = (sub_type or "").lower()
-    if any(k in sub for k in ["layup", "dunk", "alley", "tip", "hook", "putback", "driving"]):
-        return "paint"
-    return "mid_range"
-
-
-_PAINT_KWORDS = {"layup", "dunk", "alley", "tip", "hook", "putback", "driving", "fingerroll"}
-
-ZONE_KEYS_11 = [
-    "restricted_area",
-    "mid_left_close", "mid_right_close",
-    "mid_left_far",   "mid_right_far",   "mid_top",
-    "left_corner_3",  "right_corner_3",
-    "left_wing_3",    "right_wing_3",    "top_key_3",
-]
-
-ZONE_POINTS = {
-    "restricted_area": 2, "mid_left_close": 2, "mid_right_close": 2,
-    "mid_left_far": 2,    "mid_right_far": 2,   "mid_top": 2,
-    "left_corner_3": 3,   "right_corner_3": 3,
-    "left_wing_3": 3,     "right_wing_3": 3,    "top_key_3": 3,
-}
-
-_2PT_ZONES = {"restricted_area", "mid_left_close", "mid_right_close",
-              "mid_left_far", "mid_right_far", "mid_top"}
-_3PT_ZONES = {"left_corner_3", "right_corner_3", "left_wing_3",
-              "right_wing_3", "top_key_3"}
-
-
-def _classify_zone_11(action_type: str, sub_type: str, x: float = 0, y: float = 0) -> str:
-    """
-    Classify a shot into one of 11 zones.
-
-    Coordinate system (FIBA LiveStats normalized):
-      x: 0–100, center=50, left<50
-      y: 0–100, baseline=0, increases away from basket
-
-    Zone geometry matches SVG rendering:
-      restricted_area  = full paint box (x 34–66)
-      mid_left_close   = outside paint left, near baseline (x<34, y<25)
-      mid_right_close  = outside paint right, near baseline (x>66, y<25)
-      mid_left_far     = left elbow / wing mid (x<42, y≥25)
-      mid_right_far    = right elbow (x≥58, y≥25)
-      mid_top          = high post center (x 42–58, y≥25)
-    """
-    sub       = (sub_type or "").lower()
-    has_coord = x != 0 or y != 0
-
-    if action_type == "3pt":
-        if has_coord and y < 14:
-            return "left_corner_3" if x < 50 else "right_corner_3"
-        if not has_coord:
-            return "top_key_3"
-        if x < 38:
-            return "left_wing_3"
-        if x >= 62:
-            return "right_wing_3"
-        return "top_key_3"
-
-    # 2pt — paint keywords always → restricted area
-    paint_sub = any(k in sub for k in _PAINT_KWORDS)
-    if paint_sub:
-        return "restricted_area"
-
-    if has_coord:
-        # Inside paint box (lane lines x ≈ 34–66)
-        if 34 <= x <= 66:
-            return "restricted_area"
-        # Outside paint, near baseline
-        if y < 25:
-            return "mid_left_close" if x < 50 else "mid_right_close"
-        # Mid-range above baseline
-        if x < 42:
-            return "mid_left_far"
-        if x >= 58:
-            return "mid_right_far"
-        return "mid_top"
-
-    return "mid_top"
+# Zone constants and classification moved to shot_zones.py (C-03)
+from shot_zones import (ZONE_KEYS_11, ZONE_POINTS, _2PT_ZONES, _3PT_ZONES,
+                         _PAINT_KWORDS, classify_zone as _classify_zone_11)
 
 
 def _opp_dict(opp: TeamGameStats) -> dict:
@@ -285,126 +223,202 @@ def list_teams():
     return jsonify(sorted(teams.values(), key=lambda t: t["name"]))
 
 
+def _standard_block(entity_type: str, entity_id) -> dict | None:
+    """Bloque `standard` (T-05 plan §3.4/§4.10) para `/api/team` y `/api/player`: mismo
+    `build_payload` que `GET /api/metrics/<entity_type>`, con los query args de la petición en
+    curso. `None` si el cálculo falla — el legado se sirve igual, nunca se degrada (RF-18)."""
+    try:
+        args = dict(request.args)
+        args["id"] = entity_id
+        return metrics_catalog.build_payload(entity_type, args)
+    except MetricsError as e:
+        app.logger.warning("standard block (%s %s) falló: %s", entity_type, entity_id, e.message)
+        return None
+    except Exception:
+        app.logger.exception("standard block (%s %s) falló de forma inesperada", entity_type, entity_id)
+        return None
+
+
+@app.route("/api/metrics-catalog")
+@login_required
+def metrics_catalog_route():
+    """Catálogo de las 83 métricas estándar (T-05 plan §3.2): grupos, metadatos y razones de nulo."""
+    return jsonify(metrics_catalog.catalog_json())
+
+
+@app.route("/api/metrics/<entity_type>")
+@login_required
+def metrics_route(entity_type: str):
+    """Conjunto estándar de métricas de una entidad (T-05 plan §3.3): `?id=` obligatorio,
+    `competition`/`last`/`base` (y `margin`/`window_secs` para `clutch`)."""
+    try:
+        payload = metrics_catalog.build_payload(entity_type, request.args)
+    except MetricsError as e:
+        return jsonify({"error": e.message, "code": e.code}), e.status
+    except ValueError as e:
+        return jsonify({"error": str(e), "code": "parametro_invalido"}), 400
+    return jsonify(payload)
+
+
+@app.route("/api/table/<table_id>")
+@login_required
+def table_route(table_id: str):
+    """Tabla completa de un apartado (T-06 plan §3.1/§4.6). Errores con `code`/`details`."""
+    try:
+        return jsonify(tables.build_table(table_id, request.args))
+    except TableError as e:
+        return jsonify(e.body), e.status
+
+
+# Límite de cuerpo de exportación (plan §3.2 / D-10): 10 MB y 50.000 filas por hoja.
+_XLSX_MAX_BYTES = 10 * 1024 * 1024
+_XLSX_MAX_ROWS = 50000
+
+
+@app.route("/api/export/xlsx", methods=["POST"])
+@login_required
+def export_xlsx_route():
+    """Genera un XLSX con lo que el cliente envía ya ordenado (T-06 plan §3.2/§4.6).
+
+    413 si el cuerpo supera 10 MB (`content_length`) o una hoja supera 50.000 filas;
+    400 si el cuerpo es inválido (JSON malformado, fila con celdas de más, `fmt` desconocido,
+    más de 20 hojas, nombre de hoja vacío)."""
+    if request.content_length is not None and request.content_length > _XLSX_MAX_BYTES:
+        return jsonify({"error": "La tabla es demasiado grande para exportar en XLSX; exportá en CSV.",
+                        "code": "parametro_invalido"}), 413
+
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict) or "sheets" not in data:
+        return jsonify({"error": "Cuerpo de exportación inválido", "code": "parametro_invalido"}), 400
+
+    sheets = data.get("sheets")
+    if isinstance(sheets, list):
+        for si, sheet in enumerate(sheets):
+            if isinstance(sheet, dict) and len(sheet.get("rows") or []) > _XLSX_MAX_ROWS:
+                return jsonify({"error": "La tabla es demasiado grande para exportar en XLSX; exportá en CSV.",
+                                "code": "parametro_invalido"}), 413
+
+    meta = data.get("meta") or {}
+    try:
+        content = export_xlsx.workbook_bytes(sheets, meta)
+    except ValueError as e:
+        return jsonify({"error": "Cuerpo de exportación inválido", "code": "parametro_invalido",
+                        "details": {"reason": str(e)}}), 400
+
+    file_name = (meta.get("file_name") or "export") + ".xlsx"
+    from urllib.parse import quote
+    disposition = (f'attachment; filename="{_ascii_fallback(file_name)}"; '
+                   f"filename*=UTF-8''{quote(file_name)}")
+    from flask import Response
+    return Response(content, mimetype=export_xlsx.XLSX_MIME,
+                    headers={"Content-Disposition": disposition})
+
+
+@app.route("/api/export/bulk")
+@login_required
+def export_bulk_route():
+    """Exportación masiva de un equipo o una competencia (T-06 plan §3.3/§4.5/§4.6)."""
+    scope = request.args.get("scope")
+    if scope not in ("team", "competition"):
+        return jsonify({"error": "Alcance inválido: usá team o competition",
+                        "code": "parametro_invalido"}), 400
+
+    raw_comp = request.args.get("competition")
+    if str(raw_comp or "").strip().lower() == "all":
+        return jsonify({"error": "La exportación masiva requiere una competencia concreta",
+                        "code": "parametro_invalido"}), 400
+    try:
+        comp_id = repository.resolve_competition(raw_comp)["id"]
+    except CompetitionError as e:
+        return jsonify({"error": str(e), "code": "competencia_inexistente"}), e.status
+    if comp_id is None:
+        return jsonify({"error": "La exportación masiva requiere una competencia concreta",
+                        "code": "parametro_invalido"}), 400
+
+    scope_id = (request.args.get("team") or "").upper() if scope == "team" else ""
+    if scope == "team" and not scope_id:
+        return jsonify({"error": "Parámetro inválido: falta team", "code": "parametro_invalido",
+                        "details": {"param": "team"}}), 400
+
+    try:
+        content = tables.bulk_workbook(scope, scope_id, comp_id)
+    except TableError as e:
+        return jsonify(e.body), e.status
+
+    import datetime as _dt
+    comp_label = repository.competition_labels().get(comp_id)
+    entity = scope_id if scope == "team" else "competencia"
+    today = _dt.date.today().isoformat()
+    file_name = f"exportacion_{entity}_{tables._slug(comp_label or 'todas')}_{today}.xlsx"
+    from urllib.parse import quote
+    disposition = (f'attachment; filename="{_ascii_fallback(file_name)}"; '
+                   f"filename*=UTF-8''{quote(file_name)}")
+    from flask import Response
+    return Response(content, mimetype=export_xlsx.XLSX_MIME,
+                    headers={"Content-Disposition": disposition})
+
+
+def _ascii_fallback(name: str) -> str:
+    """Nombre de archivo ASCII para el `filename=` clásico (el `filename*` lleva el UTF-8)."""
+    import unicodedata
+    s = unicodedata.normalize("NFKD", name)
+    return "".join(c for c in s if ord(c) < 128).replace('"', "") or "export.xlsx"
+
+
+@app.route("/api/rankings/<entity_type>/<metric_key>")
+@login_required
+def rankings_route(entity_type: str, metric_key: str):
+    """Ranking completo de una métrica en la población (T-01 plan §3.2/§4.6): `?id=` (resaltado,
+    opcional), `competition`/`last` (contrato de C-02), `base` (coherencia; el ranking de conteos
+    es siempre por partido)."""
+    from metrics_catalog import METRICS
+
+    valid_types = ("team", "player", "lineup", "onoff", "clutch")
+    if entity_type not in valid_types:
+        return jsonify({"error": "Tipo de entidad desconocido", "code": "parametro_invalido"}), 400
+    mdef = METRICS.get(metric_key)
+    if mdef is None:
+        return jsonify({"error": "Métrica desconocida", "code": "parametro_invalido"}), 400
+    if entity_type not in mdef.entities:
+        return jsonify({"error": "La métrica no aplica a este tipo de entidad",
+                        "code": "parametro_invalido"}), 400
+
+    raw_id = request.args.get("id")
+    kwargs = metrics_catalog._entity_id_kwargs(entity_type, str(raw_id)) if raw_id else {}
+    try:
+        ctx = context.parse_context(request.args, **kwargs)
+    except ContextError as e:
+        msg = str(e)
+        code = "competencia_inexistente" if "competencia" in msg.lower() else "contexto_invalido"
+        return jsonify({"error": msg, "code": code}), e.status
+    except CompetitionError as e:
+        return jsonify({"error": str(e), "code": "competencia_inexistente"}), e.status
+
+    variant = None
+    if entity_type == "lineup" and raw_id and ":" in str(raw_id):
+        pids = [p for p in str(raw_id).split(":", 1)[1].split("-") if p.strip()]
+        variant = len(pids) or None
+
+    result = population.full_ranking(entity_type, metric_key, ctx.competition_id, ctx,
+                                     highlight_id=raw_id, variant=variant)
+    return jsonify(result)
+
+
 @app.route("/api/team/<team_code>")
 @login_required
 def team_stats(team_code: str):
+    """Perfil del equipo para la selección activa: `?competition=<id>|all|<texto>` (ausente = la de su
+    partido más reciente) y `?last=<n>`. El promedio de liga es el de la competencia (C-02)."""
     team_code = team_code.upper()
-    rows = _visible(TeamGameStats.query.filter_by(team_code=team_code), TeamGameStats).all()
-    if not rows:
+    try:
+        ctx = context.parse_context(request.args, team_code=team_code)
+    except ContextError as e:
+        return jsonify({"error": str(e)}), e.status
+    profile = population.team_profile(team_code, ctx)
+    if profile is None:
         return jsonify({"error": "Equipo no encontrado"}), 404
-
-    games_by_id = {g.game_id: g for g in Game.query.all()}
-    # Orden cronológico explícito: el orden de las filas cambia al reprocesar (F-11)
-    rows.sort(key=lambda r: ((games_by_id[r.game_id].date or "") if r.game_id in games_by_id else "", r.game_id))
-    team_name = rows[-1].team_name
-    labels = competitions.labels()
-
-    game_stats = []
-    for row in rows:
-        game_info = games_by_id.get(row.game_id)
-        t   = _to_dict(row)
-        t["minutes"] = game_info.minutes if game_info else 40   # PACE con prórrogas (F-11)
-        opp = _opp_for(row.game_id, team_code)
-        if not opp:
-            continue
-        adv = calc_team_stats(t, _opp_dict(opp))
-        # Desglose FIBA: NULL = la competencia no lo publica; se devuelve null, no 0 (C-11 RF-11)
-        adv.update({k: t.get(k) for k in
-                    ("paint_pts", "second_chance_pts", "pts_from_tov", "bench_pts", "fast_break_pts")})
-        adv["opp_pf"] = t.get("opp_pf", 0)
-        game_stats.append({
-            "game_id":       row.game_id,
-            "date":          game_info.date if game_info else "",
-            "competition":   game_info.competition if game_info else "",
-            **_comp_fields(game_info, labels),
-            "opponent":      opp.team_name,
-            "opponent_code": opp.team_code,
-            "home_away":     "L" if row.is_home else "V",
-            **adv,
-            "null_reasons":  null_reasons(adv),   # C-11 RF-3
-        })
-
-    # Población de liga POR COMPETENCIA (Feature 14 RF-1): comparar contra un promedio
-    # que mezcla torneos distintos no da contexto real. Clave = id de competencia (F-11);
-    # "" es el agregado.
-    game_comp = {gid: str(g.competition_id or "") for gid, g in games_by_id.items()}
-    own_comps = {game_comp.get(r.game_id, "") for r in rows}
-
-    all_adv = []
-    by_comp: dict[str, list] = {}
-    for ar in _visible(TeamGameStats.query, TeamGameStats).all():
-        ao = _opp_for(ar.game_id, ar.team_code)
-        if not ao:
-            continue
-        ad = _to_dict(ar)
-        ad["minutes"] = games_by_id[ar.game_id].minutes if ar.game_id in games_by_id else 40
-        adv = calc_team_stats(ad, _opp_dict(ao))
-        all_adv.append(adv)
-        by_comp.setdefault(game_comp.get(ar.game_id, ""), []).append(adv)
-
-    leagues = {"": league_averages(all_adv)}
-    for comp in own_comps:
-        if comp:   # solo las competencias donde este equipo jugó: son las seleccionables
-            leagues[comp] = league_averages(by_comp.get(comp, []))
-    league = leagues[""]
-
-    def _avg(key):
-        # Excluye None (tasas sin dato): un partido sin intentos no cuenta como 0.
-        vals = [g[key] for g in game_stats if key in g and g[key] is not None]
-        return round(sum(vals) / len(vals), 4) if vals else None
-
-    keys = [
-        "oer", "der", "net_rating", "efg_pct", "ts_pct",
-        "fg2_pct", "fg3_pct", "ft_pct", "ft_rate", "ft_rate_report",
-        "pps", "fg2_uso", "fg3_uso",
-        "or_pct", "dr_pct", "trb_pct", "to_pct", "to_ratio",
-        "as_pct", "ast_ratio", "pace", "pts", "possessions", "plays",
-        "peso_1p", "peso_2p", "peso_3p",
-        "opp_efg_pct", "opp_ts_pct", "opp_to_pct", "opp_ft_rate",
-        "stocks", "def_playmaking", "def_to_ratio",
-        "ppt_2", "ppt_3", "ppt_ft",
-        "fgm", "fga", "fgm2", "fga2", "fgm3", "fga3",
-        "ftm", "fta", "orb", "drb", "trb", "ast", "tov", "stl", "blk", "pf",
-        "opp_pf", "paint_pts", "second_chance_pts", "pts_from_tov", "bench_pts", "fast_break_pts",
-    ]
-    averages = {k: _avg(k) for k in keys}
-    # AS/PER de temporada — mismo criterio acumulado que en jugador (C-04 / Feature 15 RF-7)
-    def _sum(key):
-        return sum(g.get(key, 0) or 0 for g in game_stats)
-
-    averages["ast_to"] = season_ast_to(_sum("ast"), _sum("tov"))
-    # DEF/TO acumulado (pooled, DA-02): sin centinela, un partido sin pérdidas no se pierde (C-11)
-    averages["def_to_ratio"] = season_def_to_ratio(_sum("stl"), _sum("blk"), _sum("drb"), _sum("tov"))
-    # C-07: totales de temporada, además del promedio por partido (Feature 16 RF-5)
-    totals = {k: _sum(k) for k in ("fga2", "fgm2", "fga3", "fgm3", "fta", "ftm")}
-
-    wins      = sum(1 for g in game_stats if g.get("pts", 0) > g.get("opp_pts", 0))
-    losses    = len(game_stats) - wins
-    home_gs   = [g for g in game_stats if g["home_away"] == "L"]
-    away_gs   = [g for g in game_stats if g["home_away"] == "V"]
-    home_wins = sum(1 for g in home_gs if g.get("pts", 0) > g.get("opp_pts", 0))
-    away_wins = sum(1 for g in away_gs if g.get("pts", 0) > g.get("opp_pts", 0))
-
-    record = {
-        "wins":    wins,
-        "losses":  losses,
-        "win_pct": round(wins / len(game_stats), 3) if game_stats else None,  # tasa: sin partidos → None (RF-5)
-        "home":    f"{home_wins}-{len(home_gs) - home_wins}",
-        "away":    f"{away_wins}-{len(away_gs) - away_wins}",
-    }
-
-    return jsonify({
-        "team_code": team_code,
-        "team_name": team_name,
-        "games":     len(game_stats),
-        "record":    record,
-        "averages":  averages,
-        "null_reasons": null_reasons(averages),   # razón de cada null de `averages` (C-11 RF-3)
-        "league":    league,     # = leagues[""] — se conserva por compatibilidad
-        "leagues":   leagues,    # promedio de liga por competencia (Feature 14 RF-1)
-        "totals":    totals,     # totales de temporada (Feature 16 RF-5)
-        "game_log":  game_stats,
-    })
+    profile["standard"] = _standard_block("team", team_code)
+    return jsonify(profile)
 
 
 # ── Players ────────────────────────────────────────────────────────────────
@@ -413,19 +427,23 @@ def team_stats(team_code: str):
 @login_required
 def team_players(team_code: str):
     team_code = team_code.upper()
-    # Una entrada por jugador con nombre NORMALIZADO: dos grafías del mismo nombre
-    # son un solo jugador (Feature 13 RF-1/RF-2). Orden por fecha para que
-    # `resolve_identity` desempate por "más reciente".
+    try:
+        comp_id = competitions.resolve(request.args.get("competition"))   # ausente = todas
+    except CompetitionError as e:
+        return jsonify({"error": str(e)}), e.status
+    # Una entrada por ficha de jugador (C-08): dos grafías del mismo nombre son un solo jugador.
     game_dates = {g.game_id: (g.date or "") for g in Game.query.all()}
-    groups: dict[str, list] = {}
-    for pr in sorted(_visible(PlayerGameStats.query.filter_by(team_code=team_code), PlayerGameStats).all(),
-                     key=lambda r: (game_dates.get(r.game_id, ""), r.game_id)):
-        groups.setdefault(norm_name(pr.player_name), []).append(pr)
+    q = _visible(PlayerGameStats.query.filter_by(team_code=team_code), PlayerGameStats)
+    if comp_id:
+        q = q.filter(PlayerGameStats.game_id.in_(db.session.query(Game.game_id).filter_by(competition_id=comp_id)))
+    display = {p.id: p.display_name for p in Player.query.filter_by(team_code=team_code).all()}
+    groups: dict = {}
+    for pr in sorted(q.all(), key=lambda r: (game_dates.get(r.game_id, ""), r.game_id)):
+        groups.setdefault(identity.group_key(pr), []).append(pr)
 
     result = []
-    for _norm_key in sorted(groups):
-        rows = groups[_norm_key]
-        name, _position = resolve_identity(rows)
+    for rows in groups.values():
+        name = display.get(rows[0].player_id) or resolve_identity(rows)[0]
         uso_vals, pts_vals = [], []
         played_rows = [r for r in rows if played(r.minutes)]   # Feature 12 RF-6
         for row in played_rows:
@@ -447,183 +465,64 @@ def team_players(team_code: str):
         avg_uso = round(sum(uso_vals) / len(uso_vals), 4) if uso_vals else None
         avg_pts = round(sum(pts_vals) / len(pts_vals), 2) if pts_vals else None
         result.append({
+            "player_id": rows[0].player_id,
             "name":    name,
             "games":   len(played_rows),   # partidos JUGADOS — Feature 12 RF-7
             "uso_pct": avg_uso,
             "pts":     avg_pts,
         })
-    result.sort(key=lambda x: (x["uso_pct"] is None, -(x["uso_pct"] or 0)))
+    result.sort(key=lambda x: (x["uso_pct"] is None, -(x["uso_pct"] or 0), x["name"]))
     return jsonify(result)
+
+
+def _resolve_legacy_player(team_code: str, name: str) -> int | None:
+    """Ficha de un jugador por (equipo, nombre en cualquier grafía). None si no existe (C-08 RF-10)."""
+    try:
+        return identity.resolve_player_id(team_code.upper(), name or "", create=False)
+    except ValueError:
+        return None
+
+
+def _player_response(pid: int | None):
+    """Perfil de una ficha para la selección activa (`competition`, `last`); 404 si no existe (C-08, C-02)."""
+    if pid is None:
+        return jsonify({"error": "Jugador no encontrado"}), 404
+    try:
+        ctx = context.parse_context(request.args, player_id=pid)
+    except ContextError as e:
+        return jsonify({"error": str(e)}), e.status
+    payload = population.player_profile(pid, ctx)
+    if payload is None:
+        return jsonify({"error": "Jugador no encontrado"}), 404
+    payload["standard"] = _standard_block("player", pid)
+    return jsonify(payload)
+
+
+@app.route("/api/player/<int:player_id>")
+@login_required
+def player_by_id(player_id: int):
+    return _player_response(identity.canonical_id(player_id))   # una ficha absorbida responde la que la absorbió
 
 
 @app.route("/api/player/<team_code>/<player_name>")
 @login_required
 def player_stats(team_code: str, player_name: str):
-    team_code = team_code.upper()
-    # Resolver por nombre NORMALIZADO: acepta cualquier grafía en la URL y devuelve
-    # TODOS los partidos del jugador, aunque el nombre haya variado (Feature 13 RF-5).
-    key  = norm_name(player_name)
-    rows = [r for r in _visible(PlayerGameStats.query.filter_by(team_code=team_code), PlayerGameStats).all()
-            if norm_name(r.player_name) == key]
-    if not rows:
-        return jsonify({"error": "Jugador no encontrado"}), 404
-    rows.sort(key=lambda r: r.game_id)
-    player_name, _pos = resolve_identity(rows)   # grafía real para la respuesta (RF-4)
-    labels = competitions.labels()
-
-    game_log = []
-    for row in rows:
-        p = _to_dict(row)
-        p.setdefault("trb", p["orb"] + p["drb"])
-
-        game_info = Game.query.filter_by(game_id=row.game_id).first()
-        opp       = _opp_for(row.game_id, team_code)
-        team_row  = TeamGameStats.query.filter_by(
-            game_id=row.game_id, team_code=team_code
-        ).first()
-
-        t_dict   = _to_dict(team_row) if team_row else None
-        game_min = game_info.minutes if game_info else 40
-        # `opp` habilita OR%/DR%/TRB% individuales (Feature 15 RF-6)
-        adv = calc_player_stats(p, team_pos=0, team=t_dict, game_minutes=game_min,
-                                opp=_to_dict(opp) if opp else None)
-
-        if team_row:
-            t_orb = team_row.orb or 0
-            t_drb = team_row.drb or 0
-            t_trb = team_row.trb or (t_orb + t_drb)
-            # Tasas: denominador 0 → None, no 0 (Feature 12 RF-5; mismo patrón que search_players)
-            adv["reb_share"]  = round(adv["trb"] / t_trb, 4) if t_trb else None
-            adv["oreb_share"] = round(adv["orb"] / t_orb, 4) if t_orb else None
-            adv["dreb_share"] = round(adv["drb"] / t_drb, 4) if t_drb else None
-        else:
-            adv["reb_share"] = adv["oreb_share"] = adv["dreb_share"] = None
-
-        is_played = played(row.minutes)
-        game_log.append({
-            "game_id":       row.game_id,
-            "date":          game_info.date if game_info else "",
-            "competition":   game_info.competition if game_info else "",
-            **_comp_fields(game_info, labels),
-            "opponent":      opp.team_name  if opp else "",
-            "opponent_code": opp.team_code  if opp else "",
-            "played":        is_played,   # false = DNP (Feature 12 RF-6)
-            **adv,
-            "null_reasons":  null_reasons(adv, played=is_played),   # C-11 RF-3
-        })
-
-    # Población de liga POR COMPETENCIA (Feature 14 RF-1); clave = id de competencia, "" = agregado.
-    game_comp = {g.game_id: str(g.competition_id or "") for g in Game.query.all()}
-    own_comps = {game_comp.get(r.game_id, "") for r in rows}
-
-    # La población de liga necesita equipo y rival de cada ficha: sin ellos, OR%/DR%/
-    # TRB% individuales y USO% saldrían None y esas métricas quedarían sin Ø (Feature 15 RF-9).
-    all_team_rows = {(tr.game_id, tr.team_code): tr for tr in TeamGameStats.query.all()}
-    game_len      = {g.game_id: (g.minutes or 40) for g in Game.query.all()}
-
-    all_adv = []
-    by_comp: dict[str, list] = {}
-    for ap in _visible(PlayerGameStats.query, PlayerGameStats).all():
-        pp = _to_dict(ap)
-        pp.setdefault("trb", pp["orb"] + pp["drb"])
-        tr_own = all_team_rows.get((ap.game_id, ap.team_code))
-        tr_opp = next((tr for (gid, tc), tr in all_team_rows.items()
-                       if gid == ap.game_id and tc != ap.team_code), None)
-        adv = calc_player_stats(pp, team_pos=0,
-                                team=_to_dict(tr_own) if tr_own else None,
-                                game_minutes=game_len.get(ap.game_id, 40),
-                                opp=_to_dict(tr_opp) if tr_opp else None)
-        all_adv.append(adv)
-        by_comp.setdefault(game_comp.get(ap.game_id, ""), []).append(adv)
-
-    leagues = {"": league_averages(all_adv)}
-    for comp in own_comps:
-        if comp:
-            leagues[comp] = league_averages(by_comp.get(comp, []))
-    league = leagues[""]
-
-    # Población de promedio: solo partidos jugados. Un DNP no cuenta como partido
-    # jugado (Feature 12 RF-6); el game_log sigue devolviéndolos todos (CA-8).
-    played_log = [g for g in game_log if g["played"]]
-
-    def _avg(key):
-        # Excluye None (tasas sin dato): un partido sin intentos no cuenta como 0.
-        vals = [g[key] for g in played_log if key in g and g[key] is not None]
-        return round(sum(vals) / len(vals), 4) if vals else None
-
-    keys = [
-        "oer", "efg_pct", "ts_pct", "fg2_pct", "fg3_pct",
-        "ft_pct", "ft_rate", "ft_rate_report", "pps", "ppp",
-        "fg2_uso", "fg3_uso", "peso_1p", "peso_2p", "peso_3p",
-        "or_pct", "dr_pct", "trb_pct", "to_pct", "to_ratio", "as_pct", "ast_ratio", "ast_to",
-        # C-01 — por posesión y por minuto (Feature 15)
-        "as_pos", "tov_pos", "pts_pos", "orb_min", "drb_min",
-        # C-07 — PPT por tipo de tiro (Feature 16)
-        "ppt_2", "ppt_3", "ppt_ft",
-        "stocks", "def_playmaking", "def_to_ratio", "physical_impact",
-        "reb_share", "oreb_share", "dreb_share",
-        "uso_pct",
-        "pts", "fgm", "fga", "fgm2", "fga2", "fgm3", "fga3",
-        "ftm", "fta", "orb", "drb", "ast", "tov", "stl", "blk",
-    ]
-    averages = {k: _avg(k) for k in keys}
-    # AS/PER de temporada: cociente de los TOTALES, no promedio de los ratios por
-    # partido (Feature 15 RF-7 / C-04). Solo sobre partidos jugados.
-    def _sum(key):
-        return sum(g.get(key, 0) or 0 for g in played_log)
-
-    averages["ast_to"] = season_ast_to(_sum("ast"), _sum("tov"))
-    # DEF/TO acumulado (pooled, DA-02), mismo criterio que AS/PER (C-11)
-    averages["def_to_ratio"] = season_def_to_ratio(_sum("stl"), _sum("blk"), _sum("drb"), _sum("tov"))
-    # C-07: totales de temporada sobre los partidos JUGADOS (Feature 16 RF-5 + Feature 12 RF-6)
-    totals = {k: _sum(k) for k in ("fga2", "fgm2", "fga3", "fgm3", "fta", "ftm")}
-
-    return jsonify({
-        "player":    player_name,
-        "team_code": team_code,
-        "team_name": rows[0].team_name,
-        "games":     len(played_log),   # partidos JUGADOS (excluye DNP) — Feature 12 RF-7
-        "averages":  averages,
-        # Sin partidos jugados, todo `averages` es null por DNP (C-11 RF-3)
-        "null_reasons": null_reasons(averages, played=bool(played_log)),
-        "league":    league,     # = leagues[""] — se conserva por compatibilidad
-        "leagues":   leagues,    # promedio de liga por competencia (Feature 14 RF-1)
-        "totals":    totals,     # totales de temporada (Feature 16 RF-5)
-        "game_log":  game_log,
-    })
+    return _player_response(_resolve_legacy_player(team_code, player_name))
 
 
 # ── Shots (jugador y equipo) ─────────────────────────────────────────────────
 
 def _zones_from_shots(rows):
-    """Clasifica una lista de tiros en las 11 zonas + totales. Compartido jugador/equipo."""
-    has_coordinates = any((row.x or 0) != 0 or (row.y or 0) != 0 for row in rows)
-    zones = {k: {"made": 0, "attempts": 0} for k in ZONE_KEYS_11}
-    for row in rows:
-        z = _classify_zone_11(row.action_type, row.sub_type, row.x or 0, row.y or 0)
-        zones[z]["attempts"] += 1
-        zones[z]["made"]     += row.made
+    """Clasifica una lista de tiros en las 11 zonas + totales. Delegado a shot_zones (C-03).
 
-    total_fga = sum(z["attempts"] for z in zones.values())
-    total_pts = sum(zones[k]["made"] * ZONE_POINTS[k] for k in ZONE_KEYS_11)
-    fgm2 = sum(zones[k]["made"] for k in _2PT_ZONES)
-    fgm3 = sum(zones[k]["made"] for k in _3PT_ZONES)
-
-    for k, z in zones.items():
-        if z["attempts"]:
-            z["pct"] = round(z["made"] / z["attempts"], 4)
-            # PPT = puntos de la zona / intentos de la zona. Antes se llamaba `pf`:
-            # misma fórmula, etiqueta equivocada (C-03 / Feature 16 §9).
-            z["ppt"] = round(z["made"] * ZONE_POINTS[k] / z["attempts"], 3)
-            # eFG% de la zona = (FGM + 0.5×3PM)/FGA aplicado a una zona de un solo
-            # valor de puntos → factor 1.0 en zonas de 2, 1.5 en zonas de 3.
-            factor   = 1.5 if ZONE_POINTS[k] == 3 else 1.0
-            z["efg"] = round(z["made"] * factor / z["attempts"], 4)
-        else:
-            z["pct"] = None
-            z["ppt"] = None
-            z["efg"] = None
-
+    Preserves legacy field names (pct, efg) alongside the new ones (fg_pct, efg_pct).
+    """
+    zones, total_fga, total_pts, fgm2, fgm3, has_coordinates = shot_zones.zone_table(rows)
+    # Legacy routes used 'pct' and 'efg'; zone_table uses 'fg_pct' and 'efg_pct'.
+    # Add legacy aliases for backward compatibility.
+    for z in zones.values():
+        z["pct"] = z["fg_pct"]
+        z["efg"] = z["efg_pct"]
     return zones, total_fga, total_pts, fgm2, fgm3, has_coordinates
 
 
@@ -631,11 +530,15 @@ def _zones_from_shots(rows):
 @login_required
 def player_shots(team_code: str, player_name: str):
     team_code = team_code.upper()
-    rows = _visible(Shot.query.filter_by(team_code=team_code, player_name=player_name), Shot).all()
+    pid = _resolve_legacy_player(team_code, player_name)
+    if pid is None:
+        return jsonify({"error": "Jugador no encontrado"}), 404
+    names = identity.aliases(pid)   # tiros y pbp guardan el nombre crudo: se usan todas las grafías
+    rows = _visible(Shot.query.filter(Shot.team_code == team_code, Shot.player_name.in_(names)), Shot).all()
     zones, total_fga, total_pts, fgm2, fgm3, has_coordinates = _zones_from_shots(rows)
 
-    games = _visible(db.session.query(Shot.game_id).filter_by(
-        team_code=team_code, player_name=player_name
+    games = _visible(db.session.query(Shot.game_id).filter(
+        Shot.team_code == team_code, Shot.player_name.in_(names)
     ), Shot).distinct().count()
 
     pgs = _visible(db.session.query(
@@ -643,7 +546,7 @@ def player_shots(team_code: str, player_name: str):
         func.sum(PlayerGameStats.fga).label("fga"),
         func.sum(PlayerGameStats.fta).label("fta"),
         func.sum(PlayerGameStats.tov).label("tov"),
-    ).filter_by(team_code=team_code, player_name=player_name), PlayerGameStats).first()
+    ).filter(PlayerGameStats.player_id == pid), PlayerGameStats).first()
 
     ppp = None
     if pgs and pgs.fga:
@@ -700,6 +603,68 @@ def team_shots(team_code: str):
     })
 
 
+# ── Shot zones with percentile and sample (C-03) ──────────────────────────
+
+@app.route("/api/shot-zones")
+@login_required
+def shot_zones_route():
+    """Shot zones enriched with PPT percentile and sample badge (C-03)."""
+    entity = request.args.get("entity")
+    if entity not in ("team", "player"):
+        return jsonify({"error": "El parametro entity debe ser 'team' o 'player'",
+                        "code": "parametro_invalido"}), 400
+
+    entity_id = request.args.get("id", "")
+    if not entity_id:
+        return jsonify({"error": "Se requiere el parametro id",
+                        "code": "parametro_invalido"}), 400
+
+    # Resolve competition and last from query args
+    try:
+        comp_raw = request.args.get("competition")
+        comp_id = competitions.resolve(comp_raw) if comp_raw else None
+    except CompetitionError as e:
+        return jsonify({"error": str(e)}), e.status
+
+    last_raw = request.args.get("last", "").strip()
+    last = None
+    if last_raw:
+        try:
+            last = int(last_raw)
+            if last < 1:
+                raise ValueError
+        except ValueError:
+            return jsonify({"error": "El parametro last debe ser un entero mayor a 0.",
+                            "code": "parametro_invalido"}), 400
+
+    if entity == "team":
+        entity_id = entity_id.upper()
+        shots_fn = shot_zones._shots_for_team
+    else:
+        # player: entity_id is player_id
+        try:
+            entity_id = int(entity_id)
+        except ValueError:
+            return jsonify({"error": "El id de jugador debe ser un entero",
+                            "code": "parametro_invalido"}), 400
+        entity_id = identity.canonical_id(entity_id)
+        if entity_id is None:
+            return jsonify({"error": "Jugador no encontrado"}), 404
+        shots_fn = shot_zones._shots_for_player
+
+    result = shot_zones.zones_with_stats(entity, entity_id, comp_id, last, shots_fn)
+
+    # Build context echo
+    labels = competitions.labels()
+    comp_label = labels.get(comp_id, {}).get("label") if comp_id else None
+    result["context"] = {
+        "competition": {"id": comp_id, "label": comp_label},
+        "applied": {"last": last} if last else {},
+    }
+
+    return jsonify(result)
+
+
 # ── Player search ────────────────────────────────────────────────────────────
 
 @app.route("/api/search/players")
@@ -707,9 +672,14 @@ def team_shots(team_code: str):
 def search_players():
     """Todos los jugadores de la base con sus promedios, para el buscador.
 
-    Una entrada por (team_code, player_name). Tasas promediadas excluyendo None
-    (Feature 08); conteos incluyen 0. Filtrado y orden se hacen en el frontend.
+    Una entrada por ficha de jugador (C-08). Tasas promediadas excluyendo None
+    (Feature 08); conteos incluyen 0. Filtrado y orden se hacen en el frontend; el filtro
+    opcional `competition` recorta los partidos que alimentan los promedios.
     """
+    try:
+        comp_id = competitions.resolve(request.args.get("competition"))   # ausente = todas
+    except CompetitionError as e:
+        return jsonify({"error": str(e)}), e.status
     games     = {g.game_id: g for g in Game.query.all()}
     team_rows = {(tr.game_id, tr.team_code): tr for tr in TeamGameStats.query.all()}
     labels    = competitions.labels()
@@ -721,10 +691,11 @@ def search_players():
                      key=lambda r: ((games[r.game_id].date if r.game_id in games else ""), r.game_id))
     groups = {}
     for pr in all_prs:
-        groups.setdefault((pr.team_code, norm_name(pr.player_name)), []).append(pr)
+        groups.setdefault(identity.group_key(pr), []).append(pr)
+    display = {p.id: p.display_name for p in Player.query.all()}
 
     metric_keys = [
-        "efg_pct", "ts_pct", "oer", "uso_pct", "ppp", "pps",
+        "efg_pct", "ts_pct", "oer", "uso_pct", "ppp", "pps", "ppt",
         "fg2_pct", "fg3_pct", "ft_pct",
         "reb_share", "oreb_share", "dreb_share",
         "physical_impact", "stocks", "def_playmaking",
@@ -736,10 +707,14 @@ def search_players():
     count_keys = ["pts", "ast", "tov", "stl", "blk"]
 
     result = []
-    for (team_code, _norm_key), rows in groups.items():
+    for rows in groups.values():
+        team_code = rows[0].team_code
         per_game, comps, pm_vals, min_vals = [], set(), [], []
-        # Grafía real + posición determinista del grupo unificado (Feature 13 RF-3/RF-4)
+        # Grafía real de la ficha + posición determinista entre TODOS sus partidos (C-08 RF-4/RF-6)
         player_name, position = resolve_identity(rows)
+        player_name = display.get(rows[0].player_id) or player_name
+        if comp_id and not any(games.get(r.game_id) and games[r.game_id].competition_id == comp_id for r in rows):
+            continue   # la ficha no tiene partidos en la competencia pedida
         for pr in rows:
             # La competencia sale de TODAS las fichas: estar convocado sin jugar
             # igual ubica al jugador en esa competencia.
@@ -747,6 +722,9 @@ def search_players():
             if g and g.competition_id in labels:
                 comps.add(labels[g.competition_id]["label"])
 
+            # Filtro de competencia: solo los partidos de esa competencia alimentan los promedios
+            if comp_id and not (g and g.competition_id == comp_id):
+                continue
             # Un DNP no entra en ningún promedio (Feature 12 RF-6).
             if not played(pr.minutes):
                 continue
@@ -785,12 +763,16 @@ def search_players():
             return round(sum(vals) / len(vals), 2) if vals else None
 
         rec = {
+            "player_id":    rows[0].player_id,
             "player":       player_name,
             "team_code":    team_code,
             "team_name":    rows[-1].team_name,
             "competitions": sorted(comps),
+            "competition_ids": sorted({games[r.game_id].competition_id for r in rows
+                                       if r.game_id in games and games[r.game_id].competition_id}),
             "games":        len(per_game),   # partidos JUGADOS — Feature 12 RF-7
             "position":     position,
+            "position_group": identity.position_group(position),
             "minutes":      round(sum(min_vals) / len(min_vals), 1) if min_vals else None,
             "plus_minus":   round(sum(pm_vals) / len(pm_vals), 1) if pm_vals else None,
         }
@@ -798,12 +780,15 @@ def search_players():
             rec[k] = _avg_metric(k)
         for k in count_keys:
             rec[k] = _avg_count(k)
+        # C-01: las 9 tasas por posesión / por minuto / de rebote individual, como cociente de totales
+        rate_vals, rate_reasons = season_player_rates(sum_pool(per_game))
+        rec.update(rate_vals)
         # AS/PER de temporada — mismo criterio acumulado (C-04 / Feature 15 RF-7)
         rec["ast_to"] = season_ast_to(sum(gm.get("ast", 0) or 0 for gm in per_game),
                                       sum(gm.get("tov", 0) or 0 for gm in per_game))
         stat_keys = metric_keys + count_keys + ["minutes", "plus_minus", "ast_to"]
         rec["null_reasons"] = null_reasons({k: rec[k] for k in stat_keys},
-                                           played=bool(per_game))   # C-11 RF-3
+                                           played=bool(per_game), overrides=rate_reasons)   # C-11 RF-3
         result.append(rec)
 
     result.sort(key=lambda r: r["player"])
@@ -835,6 +820,210 @@ def game_pbp(game_id: str):
         "first":          _to_dict(rows[0]),
         "last":           _to_dict(rows[-1]),
     })
+
+
+# ── Análisis de partido (F-07) ──────────────────────────────────────────────
+
+@app.route("/api/game/<game_id>")
+@login_required
+def game_detail_route(game_id: str):
+    base = request.args.get("base", "total")
+    if base not in ("total", "partido", "por40", "por100"):
+        return jsonify({"error": "Base de normalización inválida", "code": "parametro_invalido"}), 400
+    result = game_analysis.game_detail(game_id, base)
+    if result is None:
+        return jsonify({"error": "Partido no encontrado", "code": "no_encontrado"}), 404
+    return jsonify(result)
+
+
+@app.route("/api/game/<game_id>/pbp")
+@login_required
+def game_pbp_route(game_id: str):
+    game = Game.query.filter_by(game_id=game_id).first()
+    if not game:
+        return jsonify({"error": "Partido no encontrado", "code": "no_encontrado"}), 404
+    events = game_analysis._load_events(game_id)
+    if not events:
+        return jsonify({"error": "Partido sin play-by-play. Reimportá el partido.",
+                        "code": "sin_pbp"}), 404
+
+    player_id = None
+    raw_player = request.args.get("player")
+    if raw_player:
+        try:
+            player_id = int(raw_player)
+        except (ValueError, TypeError):
+            return jsonify({"error": "Jugador inválido", "code": "parametro_invalido"}), 400
+
+    types = None
+    raw_type = request.args.get("type")
+    if raw_type:
+        types = [t.strip() for t in raw_type.split(",") if t.strip()]
+
+    periods = None
+    raw_period = request.args.get("period")
+    if raw_period:
+        periods = [p.strip() for p in raw_period.split(",") if p.strip()]
+
+    try:
+        result = game_analysis.game_pbp(
+            game_id, events, game.home_code, game.away_code,
+            player_id=player_id, types=types, periods=periods,
+        )
+    except ValueError as e:
+        return jsonify({"error": str(e), "code": "parametro_invalido"}), 400
+    return jsonify(result)
+
+
+@app.route("/api/game/<game_id>/matchups")
+@login_required
+def game_matchups_route(game_id: str):
+    game = Game.query.filter_by(game_id=game_id).first()
+    if not game:
+        return jsonify({"error": "Partido no encontrado", "code": "no_encontrado"}), 404
+    events = PbpEvent.query.filter_by(game_id=game_id).first()
+    if not events:
+        return jsonify({"error": "Partido sin play-by-play: no se pueden calcular los cruces.",
+                        "code": "sin_pbp"}), 404
+
+    level = request.args.get("level", "quinteto")
+    side = request.args.get("side", "home")
+
+    try:
+        result = matchups.game_matchups(game_id, level, side=side)
+    except ValueError as e:
+        return jsonify({"error": str(e), "code": "parametro_invalido"}), 400
+
+    if result is None:
+        return jsonify({"error": "No se pudieron calcular los cruces.", "code": "sin_pbp"}), 404
+    return jsonify(result)
+
+
+@app.route("/api/game/<game_id>/shots")
+@login_required
+def game_shots_route(game_id: str):
+    team = request.args.get("team")
+    if not team:
+        return jsonify({"error": "Parámetro obligatorio: team", "code": "parametro_invalido"}), 400
+
+    player_id = None
+    raw_player = request.args.get("player")
+    if raw_player:
+        try:
+            player_id = int(raw_player)
+        except (ValueError, TypeError):
+            return jsonify({"error": "Jugador inválido", "code": "parametro_invalido"}), 400
+
+    quarters = None
+    raw_q = request.args.get("quarter")
+    if raw_q:
+        quarters = [q.strip() for q in raw_q.split(",") if q.strip()]
+
+    bands = None
+    raw_c = request.args.get("clock")
+    if raw_c:
+        bands = [b.strip() for b in raw_c.split(",") if b.strip()]
+
+    zone = request.args.get("zone")
+
+    try:
+        result = game_analysis.game_shots(
+            game_id, team,
+            player_id=player_id, quarters=quarters, bands=bands, zone=zone,
+        )
+    except ValueError as e:
+        msg = str(e)
+        code = "no_encontrado" if "no encontrado" in msg.lower() else "parametro_invalido"
+        return jsonify({"error": msg, "code": code}), 404 if code == "no_encontrado" else 400
+    return jsonify(result)
+
+
+# ── Posesiones (A-01) ────────────────────────────────────────────────────────
+
+@app.route("/api/game/<game_id>/possessions")
+@login_required
+def game_possessions_route(game_id: str):
+    game = Game.query.filter_by(game_id=game_id).first()
+    if not game:
+        return jsonify({"error": "Partido no encontrado.", "code": "no_encontrado"}), 404
+    events = PbpEvent.query.filter_by(game_id=game_id).first()
+    if not events:
+        return jsonify({"error": "Este partido no tiene play-by-play.", "code": "sin_pbp"}), 404
+
+    team_filter = request.args.get("team")
+    if team_filter and team_filter not in (game.home_code, game.away_code):
+        return jsonify({"error": "Equipo inválido para este partido.", "code": "parametro_invalido"}), 400
+
+    detail = request.args.get("detail") == "1"
+    full = possessions._game_full(game_id)
+    poss_list, outside_points, anomalies = full
+
+    result_poss = poss_list
+    if team_filter:
+        result_poss = [p for p in poss_list if p.team == team_filter]
+
+    rec = possessions.reconcile({"game_id": game_id})
+
+    def _serialize_poss(p):
+        d = {
+            "poss_id": p.poss_id, "team": p.team, "opp": p.opp,
+            "period": p.period, "period_type": p.period_type,
+            "start_clock": p.start_clock, "end_clock": p.end_clock,
+            "duration": p.duration,
+            "start_event": p.start_event, "end_event": p.end_event,
+            "origin": p.origin, "ptype": p.ptype,
+            "chances": [{"n": c.n, "start_event": c.start_event,
+                         "start_clock": c.start_clock, "shot_clock_start": c.shot_clock_start,
+                         "end_event": c.end_event, "end_type": c.end_type,
+                         "pts": c.pts, "outcome": c.outcome} for c in p.chances],
+            "shots": p.shots,
+            "end_type": p.end_type, "pts": p.pts,
+            "own_on_court": p.own_on_court, "opp_on_court": p.opp_on_court,
+            "lineup_changed": p.lineup_changed,
+            "finisher_id": p.finisher_id, "assister_id": p.assister_id,
+            "turnover_by_id": p.turnover_by_id,
+            "incomplete": p.incomplete, "incomplete_reason": p.incomplete_reason,
+        }
+        if detail:
+            d["event_numbers"] = p.event_numbers
+            d["box"] = p.box
+            d["opp_box"] = p.opp_box
+            d["score_start"] = p.score_start
+        return d
+
+    return jsonify({
+        "game_id": game_id,
+        "teams": {"home": game.home_code, "away": game.away_code},
+        "possessions": [_serialize_poss(p) for p in result_poss],
+        "outside_points": outside_points,
+        "reconcile": rec,
+        "anomalies": [{"action_number": a.get("action_number"), "kind": a.get("kind"),
+                       "detail": a.get("detail")} for a in anomalies],
+    })
+
+
+@app.route("/api/possessions/reconcile")
+@login_required
+def possessions_reconcile_route():
+    comp_param = request.args.get("competition")
+    if not comp_param or comp_param == "all":
+        return jsonify({"error": "Elegí una competencia para conciliar.",
+                        "code": "parametro_invalido"}), 400
+    try:
+        comp_id = int(comp_param)
+    except (ValueError, TypeError):
+        return jsonify({"error": "La competencia no existe.",
+                        "code": "competencia_inexistente"}), 400
+
+    from database import Competition
+    comp = Competition.query.filter_by(id=comp_id).first()
+    if not comp:
+        return jsonify({"error": "La competencia no existe.",
+                        "code": "competencia_inexistente"}), 400
+
+    result = possessions.reconcile({"comp_id": comp_id})
+    result["competition"] = {"id": comp.id, "label": competitions.label(comp)}
+    return jsonify(result)
 
 
 # ── Lineups / ON-OFF / Clutch (motor de quintetos + cierres) ─────────────────
@@ -886,12 +1075,23 @@ def lineup_route(team_code: str):
     if not (3 <= len(players) <= 5):
         return jsonify({"error": "Elegí entre 3 y 5 jugadores"}), 400
 
+    pids = []
+    for name in players:
+        pid = _resolve_legacy_player(team_code, name)
+        if pid is None:
+            return jsonify({"error": f"Jugador no encontrado: {name}"}), 400
+        if pid not in pids:
+            pids.append(pid)
+    if len(pids) < 3:   # dos nombres de la misma ficha cuentan una sola vez
+        return jsonify({"error": "Elegí entre 3 y 5 jugadores"}), 400
+
     games = _team_pbp_games(team_code)
     if not games:
         return jsonify({"error": "Equipo no encontrado o sin play-by-play"}), 404
 
-    result = lineups.lineup_stats(games, team_code, players)
-    result.update({"team_code": team_code, "players": players, "size": len(players)})
+    names = [db.session.get(Player, pid).display_name for pid in pids]
+    result = lineups.lineup_stats(identity.canonicalize_pbp_games(games, team_code), team_code, names)
+    result.update({"team_code": team_code, "players": names, "size": len(names)})
     return jsonify(result)
 
 
@@ -904,15 +1104,17 @@ def onoff_route(team_code: str, player_name: str):
     if not games:
         return jsonify({"error": "Equipo no encontrado o sin play-by-play"}), 404
 
-    if not _visible(PlayerGameStats.query.filter_by(team_code=team_code, player_name=player_name),
-                    PlayerGameStats).first():
+    pid = _resolve_legacy_player(team_code, player_name)
+    player_rows = (_visible(PlayerGameStats.query.filter_by(player_id=pid), PlayerGameStats).all()
+                   if pid is not None else [])
+    if not player_rows:
         return jsonify({"error": "Sin datos ON/OFF para este jugador"}), 404
 
-    result = lineups.onoff_stats(games, team_code, player_name)
+    display_name = db.session.get(Player, pid).display_name
+    result = lineups.onoff_stats(identity.canonicalize_pbp_games(games, team_code), team_code, display_name)
 
     uso_vals = []
-    for pr in _visible(PlayerGameStats.query.filter_by(team_code=team_code, player_name=player_name),
-                       PlayerGameStats).all():
+    for pr in player_rows:
         p = _to_dict(pr)
         p.setdefault("trb", p["orb"] + p["drb"])
         team_row = TeamGameStats.query.filter_by(game_id=pr.game_id, team_code=team_code).first()
@@ -922,7 +1124,8 @@ def onoff_route(team_code: str, player_name: str):
             uso_vals.append(adv["uso_pct"])
     result["usg_pct"] = round(sum(uso_vals) / len(uso_vals), 4) if uso_vals else None
     result["team_code"] = team_code
-    result["player"] = player_name
+    result["player"] = display_name
+    result["player_id"] = pid
     return jsonify(result)
 
 
@@ -985,9 +1188,11 @@ def _int_arg(name: str, lo: int, hi: int) -> int | None:
 @login_required
 def list_competitions():
     """Competencias (F-11). Sin parámetros, solo las publicadas (selectores); con
-    `include_hidden=1` también las en borrador (sección Datos)."""
+    `include_hidden=1` también las en borrador (sección Datos). `is_default` marca la competencia por
+    defecto (C-02)."""
     include_hidden = request.args.get("include_hidden") in ("1", "true")
-    return jsonify(competitions.list_competitions(include_hidden))
+    default_id = repository.resolve_competition(None)["id"]   # la que se usa sin parámetro ni entidad
+    return jsonify(competitions.list_competitions(include_hidden, default_id))
 
 
 @app.route("/api/competitions", methods=["POST"])
@@ -1022,6 +1227,26 @@ def merge_competition(comp_id: int):
         return jsonify({"ok": True, **competitions.merge(comp_id, source_id)})
     except CompetitionError as e:
         return jsonify({"error": str(e)}), e.status
+
+
+# ── Identidad de jugador (C-08) ─────────────────────────────────────────────
+
+@app.route("/api/identity/merge", methods=["POST"])
+@admin_required
+def identity_merge():
+    """Une dos fichas del mismo equipo: `target_id` absorbe a `source_id`."""
+    body = request.get_json(silent=True) or {}
+    t, s = body.get("target_id"), body.get("source_id")
+    if not all(isinstance(v, int) and not isinstance(v, bool) for v in (t, s)):
+        return jsonify({"error": "Indicá target_id y source_id enteros"}), 400
+    try:
+        result = identity.merge_players(t, s)
+        db.session.commit()
+    except identity.IdentityError as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), e.status
+    cache.bump_data_version("identity.merge_players")   # invalida poblaciones memorizadas (T-A2)
+    return jsonify(result)
 
 
 # ── Calidad de datos + reproceso (F-11) ─────────────────────────────────────
@@ -1070,25 +1295,36 @@ def reprocess():
     return jsonify({**result, "total": len(all_ids), "next_offset": nxt if nxt < len(all_ids) else None})
 
 
+_LEAGUE_METRIC_KEYS = ("oer", "der", "net_rating", "efg_pct", "ts_pct",
+                       "or_pct", "dr_pct", "to_pct", "pace", "pts", "stl")
+
+
 @app.route("/api/league")
 @login_required
 def league_overview():
+    """Tabla de Liga (T-01 plan §3.3/§4.5): las filas conservan sus claves (C-09) pero los valores
+    `oer…stl` salen de la POBLACIÓN de equipos (cociente de totales, por partido en `pts`/`stl`),
+    y cada fila agrega `in_population`, `rank` y `pct`. `include=summary` agrega `avg`, `leaders`
+    y `population`. Sin `include`, lista (sin cambio de forma)."""
     codes    = db.session.query(TeamGameStats.team_code).distinct().all()
     games_by_id = {g.game_id: g for g in Game.query.all()}
-    minutes  = {gid: g.minutes or 40 for gid, g in games_by_id.items()}
     # orden cronológico: rows[-1] es el partido más reciente de cada equipo
     all_rows = sorted(_visible(TeamGameStats.query, TeamGameStats).all(),
                       key=lambda r: ((games_by_id[r.game_id].date or "") if r.game_id in games_by_id else "", r.game_id))
 
-    # Filtro opcional por competencia (id; acepta el texto de FIBA por compatibilidad):
-    # mantiene solo los partidos de esa competencia (evita mezclar competencias).
+    # Competencia (id; acepta el texto de FIBA por compatibilidad): ausente = la competencia por
+    # defecto (la del partido más reciente, RF-12); `all` = todas. Evita mezclar competencias.
     try:
-        comp_id = competitions.resolve(request.args.get("competition"))
+        comp_id = repository.resolve_competition(request.args.get("competition"))["id"]
     except CompetitionError as e:
         return jsonify({"error": str(e)}), e.status
     if comp_id:
         comp_gids = {g.game_id for g in Game.query.filter_by(competition_id=comp_id).all()}
         all_rows = [r for r in all_rows if r.game_id in comp_gids]
+
+    ctx = context.Context(comp_id, comp_id is None, None)
+    pop = population.population("team", comp_id, ctx)
+    members_by_id = {m.id: m for m in pop.members}
 
     result = []
     for (code,) in codes:
@@ -1096,51 +1332,60 @@ def league_overview():
         if not rows:
             continue  # equipo sin partidos en la competencia filtrada
         name = rows[-1].team_name
+        member = members_by_id.get(code)
 
-        adv_list = []
-        for row in rows:
-            ao = _opp_for(row.game_id, code)
-            if not ao:
-                continue
-            t = _to_dict(row)
-            t["minutes"] = minutes.get(row.game_id, 40)   # PACE con prórrogas (F-11)
-            adv_list.append(calc_team_stats(t, _opp_dict(ao)))
-
-        if not adv_list:
-            continue
-
-        def _avg(key):
-            # Excluye None: un nulo no entra en el promedio ni cuenta como 0
-            # (Feature 14 RF-4). Sin el filtro, sum() con un None levanta TypeError.
-            vals = [a[key] for a in adv_list if a.get(key) is not None]
-            return round(sum(vals) / len(vals), 4) if vals else None
-
-        result.append({
+        row_out = {
             "team_code":  code,
             "team_name":  name,
-            # C-09 — tabla general: games, wins, losses, table_points, pts_for, pts_against
-            **standings_row([(r.pts, r.opp_pts) for r in rows]),
-            "oer":        _avg("oer"),
-            "der":        _avg("der"),
-            "net_rating": _avg("net_rating"),
-            "efg_pct":    _avg("efg_pct"),
-            "ts_pct":     _avg("ts_pct"),
-            "or_pct":     _avg("or_pct"),
-            "dr_pct":     _avg("dr_pct"),
-            "to_pct":     _avg("to_pct"),
-            "pace":       _avg("pace"),
-            "pts":        _avg("pts"),
-            "stl":        _avg("stl"),
-        })
+            **standings_row([(r.pts, r.opp_pts) for r in rows],
+                           win_points=config.get("standings.win_points"),
+                           loss_points=config.get("standings.loss_points")),
+            "in_population": bool(member and member.in_population),
+        }
+        rank_cell, pct_cell = {}, {}
+        for k in _LEAGUE_METRIC_KEYS:
+            v = member.values.get(k) if member else None
+            row_out[k] = v
+            mdef = metrics_catalog.METRICS[k]
+            in_members = [m for m in pop.members if m.in_population and m.values.get(k) is not None]
+            if v is None or len(in_members) < config.get("population.min_size"):
+                rank_cell[k] = None
+                pct_cell[k] = None
+                continue
+            others = [m.values[k] for m in in_members if m.id != code]
+            r_, tied = population.rank(v, others, mdef.direction)
+            rank_cell[k] = {"rank": r_, "total": len(in_members), "tied": tied}
+            pct_cell[k] = population.percentile(v, others, mdef.direction)
+        row_out["rank"] = rank_cell
+        row_out["pct"] = pct_cell
+        result.append(row_out)
 
     # Posición en la tabla general (C-09): el orden y el desempate se deciden acá.
-    for pos, row in enumerate(sorted(result, key=standings_sort_key), start=1):
+    tiebreak = config.get("standings.tiebreak")
+    for pos, row in enumerate(sorted(result, key=lambda r: standings_sort_key(r, tiebreak)), start=1):
         row["standings_pos"] = pos
 
-    # Orden null-safe: desde la Feature 14 `_avg` puede devolver None, y comparar
-    # None con float levanta TypeError. Los nulos van al final (Feature 12 RF-1).
+    # Orden null-safe (Feature 12 RF-1): por oer descendente con nulos al final.
     result.sort(key=lambda x: (x["oer"] is None, -(x["oer"] or 0)))
-    return jsonify(result)
+
+    if request.args.get("include") != "summary":
+        return jsonify(result)
+
+    avg = population.league_reference("team", comp_id, ctx)
+    avg = {k: avg.get(k) for k in _LEAGUE_METRIC_KEYS}
+    leaders = {}
+    in_members = [m for m in pop.members if m.in_population]
+    for k in _LEAGUE_METRIC_KEYS:
+        ldr = population._leader([m for m in in_members if m.values.get(k) is not None],
+                                 k, metrics_catalog.METRICS[k].direction)
+        leaders[k] = ({"id": ldr.id, "name": ldr.name, "value": ldr.values[k]} if ldr else None)
+    return jsonify({
+        "teams": result,
+        "avg": avg,
+        "leaders": leaders,
+        "population": {"size": pop.size, "criterion": pop.criterion,
+                       "context_label": pop.context_label, "reason": pop.reason},
+    })
 
 
 # ── Delete games ──────────────────────────────────────────────────────────
@@ -1157,6 +1402,8 @@ def delete_games():
     for g in games:
         db.session.delete(g)  # cascade: stats, tiros, pbp y JSON archivado
     db.session.commit()
+    if games:
+        cache.bump_data_version("delete_games")   # invalida poblaciones memorizadas (T-A2)
 
     return jsonify({"ok": True, "deleted": len(games)})
 
@@ -1230,6 +1477,125 @@ def seed_games():
         "failed":   len(results) - imported,
         "results":  results,
     })
+
+
+# ── Configuración (F-13) ──────────────────────────────────────────────────
+
+@app.route("/api/settings")
+@login_required
+def get_settings():
+    return jsonify(config.payload())
+
+
+@app.route("/api/settings", methods=["PUT"])
+@admin_required
+def put_settings():
+    body = request.get_json(silent=True) or {}
+    values = body.get("values")
+    if not values or not isinstance(values, dict):
+        return jsonify({"error": "No hay valores para guardar", "code": "parametro_invalido"}), 400
+    try:
+        result = config.set_values(values)
+    except config.ConfigError as e:
+        code = "parametro_invalido"
+        for v in e.errors.values():
+            if "habilita con" in str(v) or "desconocida" in str(v).lower():
+                code = "clave_no_disponible"
+                break
+        return jsonify({"error": "Hay valores inválidos", "code": code, "details": e.errors}), 400
+    return jsonify(result)
+
+
+@app.route("/api/settings/reset", methods=["POST"])
+@admin_required
+def reset_settings():
+    body = request.get_json(silent=True) or {}
+    keys = body.get("keys")
+    section = body.get("section")
+    if not keys and not section:
+        return jsonify({"error": "Indicá claves o una sección", "code": "parametro_invalido"}), 400
+    try:
+        if section:
+            result = config.reset_section(section)
+        else:
+            result = config.reset(keys)
+    except config.ConfigError as e:
+        return jsonify({"error": "Hay valores inválidos", "code": "clave_no_disponible", "details": e.errors}), 400
+    return jsonify(result)
+
+
+@app.route("/api/settings/calibrate", methods=["POST"])
+@login_required
+def calibrate_settings():
+    """Calibración de K por correlación de mitades (T-02 plan §3): `{entity, competition}` →
+    shape de `sample.calibrate_k`. 401 sin sesión (`login_required`); 403 `requiere_admin` si el
+    usuario no es administrador (código estable para el frontend, a diferencia del 403 genérico
+    de `admin_required`)."""
+    if not is_admin():
+        return jsonify({"error": "Necesitás permisos de administrador", "code": "requiere_admin"}), 403
+
+    body = request.get_json(silent=True) or {}
+    entity = body.get("entity")
+    if entity not in ("lineup", "onoff"):
+        return jsonify({"error": "Calibración no disponible para esta entidad",
+                        "code": "parametro_invalido"}), 400
+
+    competition = body.get("competition")
+    if competition in (None, "", "all"):
+        return jsonify({"error": "Elegí una competencia", "code": "competencia_inexistente"}), 400
+    try:
+        comp_id = int(competition)
+    except (TypeError, ValueError):
+        return jsonify({"error": "Elegí una competencia", "code": "competencia_inexistente"}), 400
+    from database import Competition
+    if db.session.get(Competition, comp_id) is None:
+        return jsonify({"error": "Elegí una competencia", "code": "competencia_inexistente"}), 400
+
+    import sample
+    try:
+        result = sample.calibrate_k(entity, comp_id)
+    except ValueError:
+        return jsonify({"error": "Calibración no disponible para esta entidad",
+                        "code": "parametro_invalido"}), 400
+    return jsonify(result)
+
+
+@app.route("/api/prefs")
+@login_required
+def get_prefs():
+    scope = request.args.get("scope", "")
+    try:
+        values = prefs.get_prefs(scope)
+    except ValueError as e:
+        return jsonify({"error": str(e), "code": "parametro_invalido"}), 400
+    return jsonify({"scope": scope, "values": values})
+
+
+@app.route("/api/prefs", methods=["PUT"])
+@login_required
+def put_pref():
+    body = request.get_json(silent=True) or {}
+    scope = body.get("scope", "")
+    key = body.get("key", "")
+    value = body.get("value")
+    try:
+        prefs.set_pref(scope, key, value)
+    except ValueError as e:
+        return jsonify({"error": str(e), "code": "parametro_invalido"}), 400
+    return jsonify({"scope": scope, "key": key, "value": value})
+
+
+@app.route("/api/prefs", methods=["DELETE"])
+@login_required
+def delete_pref():
+    body = request.get_json(silent=True) or {}
+    scope = body.get("scope", "")
+    key = body.get("key", "")
+    try:
+        deleted = prefs.delete_pref(scope, key)
+    except ValueError as e:
+        return jsonify({"error": str(e), "code": "parametro_invalido"}), 400
+    return jsonify({"scope": scope, "key": key, "deleted": deleted})
 
 
 # ── PWA ────────────────────────────────────────────────────────────────────

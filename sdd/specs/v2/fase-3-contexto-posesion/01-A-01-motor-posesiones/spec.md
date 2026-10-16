@@ -3,7 +3,7 @@
 > **ID:** A-01 · **Prioridad:** P0 · **Fase y orden:** 3·01
 > **Depende de:** T-05 ([../../fase-1-confiabilidad/13-T-05-conjunto-estandar-metricas/](../../fase-1-confiabilidad/13-T-05-conjunto-estandar-metricas/spec.md)), F-11 ([../../fase-1-confiabilidad/02-F-11-calidad-datos-competencias/](../../fase-1-confiabilidad/02-F-11-calidad-datos-competencias/spec.md)), C-11 ([../../fase-1-confiabilidad/01-C-11-tratamiento-de-nulos/](../../fase-1-confiabilidad/01-C-11-tratamiento-de-nulos/spec.md)); usa F-13 (config) y T-03 (contexto) ya cerrados
 > **Habilita:** A-02, A-03, A-04, A-05, A-06, A-07, A-11, F-01, F-02, F-07 (quintetos de ambos equipos) · completa incrementos diferidos de F-11 (`possession_gaps`), T-02 (σ empírico y calibración por posesiones alternas), T-03 (nivel "posesión") y A-12 (`player_poss_duration`)
-> **Estado:** Borrador (agente) — pendiente de revisión humana (gate Paso 1)
+> **Estado:** ✅ Aprobado
 > **Fuente:** [Especificación v2 §5.1 · A-01](../../00-especificacion-cliente-v2.md) · Arquitectura §1.6, §2.1, §3.9, §3.10, §3.14, §9.2 (I-01, I-03, I-10, I-19)
 
 ## 0. Contexto y situación actual

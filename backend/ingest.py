@@ -17,14 +17,17 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 import competitions
 import fiba_fetcher
+import identity
 from database import db, Game, GameSource, TeamGameStats, PlayerGameStats, Shot, PbpEvent
 
 # Versión de la ingesta con que se guardó cada partido (`games.ingest_version`).
 #   NULL / 1 — previa a F-11 (sin minutos reales ni coordenadas de tiro)
 #   2        — F-11: minutos reales, coordenadas, archivo crudo
+#   3        — C-08: nombre completo y foto del jugador (identidad de ficha)
+#   4        — T-05: tapones y faltas recibidas (equipo y jugador)
 # Subirla cuando un cambio del parser deba llegar a los partidos ya importados: el panel de
 # calidad los marca "pendientes de reproceso".
-INGEST_VERSION = 2
+INGEST_VERSION = 4
 
 # Partidos por petición de reproceso. Peor caso sin archivo: 5 descargas × 20 s de timeout de
 # urllib = 100 s, por debajo de los 180 s de gunicorn (render.yaml).
@@ -44,7 +47,18 @@ def import_url(url: str) -> dict:
     persist_game(game)
     archive_raw(game_id, raw, page_info, source_url=url)
     db.session.commit()
+    _bump_data_version("import_url")
     return _summary(game)
+
+
+def _bump_data_version(reason: str) -> None:
+    """Sube `data_version` del caché entre peticiones (T-01/T-A2): una escritura de datos invalida
+    las poblaciones memorizadas. Tolerante a que `cache.py` no esté disponible."""
+    try:
+        import cache
+        cache.bump_data_version(reason)
+    except Exception:
+        pass
 
 
 def _summary(game: dict) -> dict:
@@ -107,10 +121,12 @@ def persist_game(game: dict) -> None:
     team_cols = ("team_code", "team_name", "is_home", "pts", "fgm", "fga", "fgm2", "fga2",
                  "fgm3", "fga3", "ftm", "fta", "orb", "drb", "trb", "ast", "tov", "stl", "blk", "pf",
                  "opp_pts", "opp_fga2", "opp_fga3", "opp_fta", "opp_orb", "opp_drb", "opp_tov", "opp_pf",
-                 "paint_pts", "second_chance_pts", "pts_from_tov", "bench_pts", "fast_break_pts")
+                 "paint_pts", "second_chance_pts", "pts_from_tov", "bench_pts", "fast_break_pts",
+                 "blk_received", "fouls_drawn")
     player_cols = ("team_code", "team_name", "player_name", "jersey", "minutes", "position",
-                   "plus_minus", "starter", "pts", "fgm", "fga", "fgm2", "fga2", "fgm3", "fga3",
-                   "ftm", "fta", "orb", "drb", "trb", "ast", "tov", "stl", "blk", "pf")
+                   "plus_minus", "starter", "first_name", "family_name", "photo_url", "pts", "fgm", "fga", "fgm2", "fga2", "fgm3", "fga3",
+                   "ftm", "fta", "orb", "drb", "trb", "ast", "tov", "stl", "blk", "pf",
+                   "blk_received", "fouls_drawn")
     shot_cols = ("team_code", "player_name", "x", "y", "court_x", "court_y", "made",
                  "action_type", "sub_type", "period", "action_number")
     pbp_cols = ("team_code", "player_name", "period", "period_type", "clock_secs", "s1", "s2",
@@ -132,6 +148,9 @@ def persist_game(game: dict) -> None:
         if rows:
             db.session.execute(sqlite_insert(model),
                                [{"game_id": game_id, **{c: r.get(c) for c in cols}} for r in rows])
+
+    # C-08: cada jugador del partido queda asociado a su ficha en la misma transacción
+    identity.assign_game(game_id)
 
 
 def reprocess_games(game_ids: list[str]) -> dict:
@@ -162,4 +181,6 @@ def reprocess_games(game_ids: list[str]) -> dict:
         except Exception as e:   # FIBA caído, JSON inválido, etc.: se informa y se sigue
             db.session.rollback()
             failed.append({"game_id": gid, "error": str(e) or e.__class__.__name__})
+    if processed:
+        _bump_data_version("reprocess_games")
     return {"processed": processed, "failed": failed}

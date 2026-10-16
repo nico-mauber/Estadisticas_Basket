@@ -134,14 +134,17 @@ def _stats() -> dict:
     return out
 
 
-def list_competitions(include_hidden: bool = False) -> list[dict]:
+def list_competitions(include_hidden: bool = False, default_id: int | None = None) -> list[dict]:
     """Competencias ordenadas por último partido (más reciente primero). Sin `include_hidden`,
-    solo las publicadas (selectores de Liga/Equipo/Comparar/Jugador)."""
+    solo las publicadas (selectores de Liga/Equipo/Comparar/Jugador). `default_id` marca con
+    `is_default` la competencia por defecto (la decide `repository.resolve_competition`)."""
     q = Competition.query
     if not include_hidden:
         q = q.filter(Competition.status == "publicada")
     stats = _stats()
     items = [to_dict(c, stats) for c in q.all()]
+    for it in items:
+        it["is_default"] = default_id is not None and it["id"] == default_id   # C-02
     items.sort(key=lambda c: (c["last_date"] or "", c["label"]), reverse=True)
     return items
 
@@ -156,7 +159,19 @@ def create(name: str, season: str | None) -> Competition:
     comp = Competition(name=name, season=season, status=DEFAULT_STATUS)
     db.session.add(comp)
     db.session.commit()
+    _bump_data_version("competition.create")
     return comp
+
+
+def _bump_data_version(reason: str) -> None:
+    """Sube `data_version` del caché entre peticiones (T-01/T-A2): cambiar la asignación o el
+    estado de una competencia cambia el universo de las poblaciones. Tolerante a que `cache.py`
+    no esté disponible."""
+    try:
+        import cache
+        cache.bump_data_version(reason)
+    except Exception:
+        pass
 
 
 def update(comp_id: int, data: dict) -> Competition:
@@ -172,6 +187,7 @@ def update(comp_id: int, data: dict) -> Competition:
         raise CompetitionError("Ya existe una competencia con ese nombre y temporada.", 409)
     comp.name, comp.season, comp.status = name, season, status
     db.session.commit()
+    _bump_data_version("competition.update")
     return comp
 
 
@@ -185,6 +201,7 @@ def merge(target_id: int, source_id: int) -> dict:
         {"competition_id": target.id})
     db.session.delete(source)
     db.session.commit()
+    _bump_data_version("competition.merge")
     return {"target": describe(target), "moved_games": moved_games, "moved_aliases": moved_aliases}
 
 
@@ -197,6 +214,7 @@ def assign_game(game_id: str, comp_id: int) -> Game:
         raise CompetitionError("La competencia no existe.", 400)
     game.competition_id = comp_id
     db.session.commit()
+    _bump_data_version("competition.assign_game")
     return game
 
 

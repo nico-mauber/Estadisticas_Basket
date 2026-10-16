@@ -2,7 +2,7 @@
 
 > **ID:** T-06 · **Prioridad:** P0 · **Fase y orden:** 1·16
 > **Depende de:** T-05 · T-01 · T-02 · C-11 · F-13 (+ C-02, C-06, C-09, F-11 cerrados) — ver [spec.md](spec.md)
-> **Estado:** Borrador (agente) — pendiente de revisión humana (gate Paso 2)
+> **Estado:** ✅ Aprobado
 > **Fuente:** Especificación v2 §3 · T-06 · Arquitectura §3.11, §3.3, §3.2, §6, §7.6, §7.7, §8
 > **Estimación:** XL · 30–40 h
 
@@ -32,6 +32,7 @@ Cero dependencias nuevas (DA-19): CSV en cliente, XLSX en servidor con stdlib, P
 | `frontend/js/components/data-table.js` | js-component NUEVO | `createDataTable` (orden, columnas, colores, totales, promedio, paginación, columna fija, badge, filas grises) | RF-1…RF-9, RF-19 |
 | `frontend/js/components/export-menu.js` | js-component NUEVO | `exportMenu` (botón + menú CSV/XLSX/PNG/PDF, estados) | RF-11, RF-12, RF-13 |
 | `frontend/js/components/exporters.js` | js-component NUEVO | `toCSV`, `toPNG`, `printNode`, `downloadBlob`, helpers de cabecera y nombre | RF-12…RF-16, RF-19 |
+| `frontend/js/core/format.js` | js-core (extensión) | agrega `export function cmpNullsLast(av, bv, dir)` (movida desde `app.js`, misma lógica) | RF-2 |
 | `frontend/js/api.js` | js-api | `apiFetchBlob`, `api.table`, `api.exportXlsx`, `api.exportBulk` | RF-6, RF-12, RF-18 |
 | `frontend/js/app.js` | js-view | migra Liga (ranking + tabla general), game log de equipo y jugador, buscador y cierres a `createDataTable`; agrega `exportMenu` a las 7 tablas restantes; bloque de exportación masiva en Importar | RF-10, RF-11, RF-18 |
 | `frontend/css/style.css` | css | secciones `/* ── data-table (T-06) ── */`, `/* ── export-menu (T-06) ── */`, `@media print` (contenedor de impresión A4) | RF-5, RF-8, RF-9, RF-12, RF-17(vista) |
@@ -129,7 +130,8 @@ Sin modelos nuevos ni `upgrade_db()`. Todas las rutas con `login_required`; erro
     entidades (percentil contra la población de T-01) o partidos de una entidad (percentil contra partidos, spec §9 D-6).
   - `row_count` — PROPUESTA: redundante con `rows.length`, facilita verificar "no truncar" desde curl.
   - `meta.sort` y `meta.columns_visible` vuelven `null`: los completa el cliente al exportar (son estado de pantalla).
-- **Errores**: 404 `{"error": "Tabla inexistente", "code": "no_encontrado"}` (id no registrado); 404
+- **Errores** (`code`/`details` son campos adicionales: F-11 mantuvo `{"error": "..."}` y `api.js` solo lee `error`; ver spec D-12):
+  404 `{"error": "Tabla inexistente", "code": "no_encontrado"}` (id no registrado); 404
   `{"error": "Equipo no encontrado", "code": "no_encontrado"}` / `"Jugador no encontrado"`; 400
   `{"error": "Parámetro inválido: falta team", "code": "parametro_invalido", "details": {"param": "team"}}`; 400
   `{"error": "Base inválida", "code": "parametro_invalido"}` (base fuera de las disponibles en la fase); 400
@@ -172,6 +174,8 @@ Sin modelos nuevos ni `upgrade_db()`. Todas las rutas con `login_required`; erro
 
 ### 3.4 Configuración (F-13 `CONFIG_SPEC`, dueño T-06)
 
+F-13 declara ambas claves como `reservada (→ T-06)` en `CONFIG_SPEC` (campo `status`); T-06 las pasa a `activa` al empezar a leerlas.
+
 | Clave | Tipo | Default | Rango | Sección | Consumidor |
 |---|---|---|---|---|---|
 | `table.page_size` | int | 50 | 10–500 | Preferencias | `data-table.js` (leída de `GET /api/settings` una vez por sesión y al guardar configuración) |
@@ -205,10 +209,14 @@ bundle.name}`.
 1. `tdef = _REGISTRY.get(table_id)` → si falta, `TableError(404, "Tabla inexistente", "no_encontrado")`.
 2. Validar `required_params` en `args` → 400 `parametro_invalido`.
 3. `ctx = context.parse_context(args, team_code=args.get("team"), player_id=…)` (C-02/T-03); `comp_id = ctx.competition_id`.
+   `competition` se valida con `competitions.resolve(valor)` (existe hoy: id o texto legado; `CompetitionError` → 400). La
+   competencia por defecto (DA-14) la agrega C-02; hasta entonces un `competition` vacío significa "todas".
 4. `base = args.get("base") or config.get("ui.default_base")`; validar contra las bases disponibles
    (`stats_engine.apply_base` lanza `ValueError` para bases no implementadas → 400 "Base inválida").
 5. Memo: `cache.memo("tables:" + table_id, (table_id, sorted(args.items())), lambda: _compute(...))` (namespace NUEVO,
-   PROPUESTA; la clave ya incluye `data_version`/`config_version`, §3.14).
+   PROPUESTA; la clave ya incluye `data_version`/`config_version`, §3.14). **`cache.py` no existe hoy** (F-11 lo difirió, ver
+   `../../00-decisiones.md`): lo crea el primer requisito que lo necesite (T-01/C-02). Si al implementar T-06 sigue sin existir,
+   `build_table` calcula en cada petición (sin memo) y se mide el tiempo en `progress.md`; no se inventa un caché propio.
 6. `rows = tdef.builder(TableRequest(...))`.
 7. Por cada fila: `values = stats_engine.compute_standard(row.bundle)` → `values = stats_engine.apply_base(values, row.bundle,
    base)` (en filas `game`, `total` y `partido` coinciden; `por40`/`por100` escalan conteos desde T-04).
@@ -251,11 +259,11 @@ bundle.name}`.
 | table_id | entity_type · row_kind | Builder (entradas) | Columnas por defecto (las de hoy) | Orden por defecto | Totales / promedio | bulk_scopes |
 |---|---|---|---|---|---|---|
 | `league_teams` | team · entity | por equipo de la competencia: `sum_bundles(load_game_bundles(team))` (= bundle de temporada en el contexto) | `_name`, `games`, `oer`, `der`, `net_rating`, `pace`, `efg_pct`, `ts_pct`, `or_pct`, `dr_pct`, `to_pct`, `ft_rate`, `fg3_uso`, `ast_to`, `stl` (las columnas actuales de `_leagueTableHTML`, con claves estándar) | `net_rating` desc | sum (agregado de la competencia) / population | `competition` |
-| `league_standings` | team · entity | mismos bundles + `extra` = `wins`, `losses`, `table_points` (C-09, puntos `standings.win_points`/`loss_points`, desempate `standings.tiebreak`) | `_name`, `games`, `_wins`, `_losses`, `_table_points`, `pts`, `pts_against`, `plus_minus` | `_table_points` desc, desempate `plus_minus` desc (solo si `standings.tiebreak == diferencia`) | none / none | `competition` |
+| `league_standings` | team · entity | mismos bundles + `extra` = `wins`, `losses`, `table_points`, `pts_for`, `pts_against`, `standings_pos` calculados con `stats_engine.standings_row([(pts, opp_pts), …])` y `standings_sort_key` (C-09, ya implementados; F-13 los pasa a `standings.win_points`/`loss_points`/`standings.tiebreak` sin cambios en T-06). Con "Todas" y varias competencias → 400 (spec D-11) | `_pos`, `_name`, `games`, `_wins`, `_losses`, `_table_points`, `_pts_for`, `_pts_against` (las columnas de hoy de `_standingsCardHTML`: PJ, PG, PP, Pts, PF, PC) | `_pos` asc (= `standings_pos`; orden y desempate los fija `standings_sort_key`) | none / none | `competition` |
 | `team_game_log` | team · game | `load_game_bundles(EntityRequest("team", team, comp_id, ctx, base))` → una fila por partido; textos `_date`, `_opponent`, `_venue` (L/V), `_result` ("G 84-79"/"P 70-75") | `_date`, `_opponent`, `_venue`, `_result`, `pts`, `oer`, `der`, `efg_pct`, `ts_pct`, `or_pct`, `dr_pct`, `to_pct` | `_date` desc | sum (= temporada del equipo; `_result` = récord "G-P") / population (team) | `team` |
 | `player_game_log` | player · game | `load_game_bundles(EntityRequest("player", str(player_id), …))`; partidos DNP como filas con todas las métricas `null` razón `dnp` | `_date`, `_opponent`, `pts`, `fgm`, `fga`, `fgm3`, `fga3`, `ftm`, `fta`, `orb`, `drb`, `ast`, `tov`, `oer`, `efg_pct`, `ts_pct` | `_date` desc | sum (DNP excluidos, `played`) / population (player) | — |
 | `search_players` | player · entity | por jugador (`player_id`) con partidos en la competencia: `sum_bundles(load_game_bundles(player))`; `team` opcional filtra el plantel; textos `_name`, `_team`, `_position` (FIBA más frecuente, DA-11) | `_name`, `_team`, `_position`, `games`, `minutes`, `pts`, `trb`, `ast`, `ts_pct`, `efg_pct`, `uso_pct`, `ast_to` (columnas actuales de `SEARCH_COLS` con claves estándar) | `pts` desc | sum / population (player) | `competition`, `team` (filtrado) |
-| `clutch_games` | clutch · game | `clutch.team_clutch(...)["per_game"]` convertido a bundles por partido por el loader `clutch` de T-05 (`load_game_bundles(EntityRequest("clutch", team, …))`); textos `_date`, `_opponent`, `_entry_margin` (marcador al inicio del tramo), `_result` | `_date`, `_opponent`, `_entry_margin`, `_result`, `pts`, `pts_against`, `plus_minus`, `oer`, `der`, `efg_pct`, `ts_pct`, `trb`, `ast`, `tov` | `_date` desc | sum (= agregado de cierres) / population (clutch de los equipos de la competencia) | `team` |
+| `clutch_games` | clutch · game | `clutch.team_clutch(...)["per_game"]` convertido a bundles por partido por el loader `clutch` de T-05 (`load_game_bundles(EntityRequest("clutch", team, …))`); textos `_date`, `_opponent`, `_entry_margin` (marcador al inicio del tramo), `_result` | las de `CLUTCH_COLS` de hoy: `_date`, `_opponent`, `_venue`, `_entry_margin` (Δ al inicio de la ventana), `_overtime` (PR), `plus_minus` (Dif), `pts`, `oer` (Off), `der` (Def), `efg_pct`, `ts_pct`, `tov`, `ast`, `trb` (REB), `fouls_drawn` (FR), `pf` (FC), `_finisher`, `_creator` (texto "Nombre (pts)"); el resto del conjunto queda como columnas ocultas | `_date` desc | sum (= agregado de cierres) / population (clutch de los equipos de la competencia) | `team` |
 
 **`_game_population(entity_type, comp_id, ctx, key) -> list[float]`** (PROPUESTA, interno): para cada equipo (o cada jugador
 `in_population` de T-01) de la competencia, `load_game_bundles` → `compute_standard` por partido → lista de valores no nulos de
@@ -415,8 +423,9 @@ del filtro activo, fecha).
 | Exportación en las 7 restantes | — | `exportMenu` en: `_renderUsageRanking`, `renderTeamOnOff`, `renderTeamLineup`, `renderCompare` (2 tablas), `_fourFactorsCard`, `_gamesTable` (Importar), `_shotDetailGrid` |
 | Importar → "Exportar todo" (NUEVO bloque) | — | selector "Alcance: Equipo · Competencia", select de competencia (de `api.competitions()`), select de equipo (de `api.teams()`), botón "Exportar XLSX" → `api.exportBulk({scope, team, competition})` |
 
-Las funciones reemplazadas se eliminan de `app.js` (sin usos restantes); `_cmpNullsLast` de `dev` ya fue movida a
-`core/format.js` por C-11.
+Las funciones reemplazadas se eliminan de `app.js` (sin usos restantes). `_cmpNullsLast` **sigue en `app.js`** (C-11 no la
+movió): T-06 la mueve a `core/format.js` como `cmpNullsLast` (misma lógica, exportada) y `app.js` la importa para los usos que
+queden (p. ej. otras tablas no migradas); mover y cambiar import es la tarea T-D1.
 
 ### 6.5 Estados y mobile
 
@@ -448,7 +457,7 @@ mueve a `#/datos/exportar`. `docs/frontend.md` documenta el bloque nuevo de Impo
 | 413 | XLSX demasiado grande | "La tabla es demasiado grande para exportar en XLSX; exportá en CSV." |
 | red caída | fetch rechazado | "Sin conexión. No se pudo cargar la tabla." / aviso XLSX / bulk |
 Service worker: agregar `/js/components/data-table.js`, `/js/components/export-menu.js`, `/js/components/exporters.js` a
-`STATIC` y subir `CACHE` al siguiente entero (p. ej. `smart-basket-v1N`, número asignado al integrar, Arq. §3.13). Con los
+`STATIC` y subir `CACHE` al siguiente entero al vigente al integrar (hoy `smart-basket-v13`; Arq. §3.13). Con los
 módulos en caché, CSV/PNG/PDF funcionan offline sobre la tabla ya cargada.
 
 ## 10. Riesgos / decisiones
@@ -488,14 +497,16 @@ módulos en caché, CSV/PNG/PDF funcionan offline sobre la tabla ya cargada.
 - T-02 ([../14-T-02-confiabilidad-muestra/plan.md](../14-T-02-confiabilidad-muestra/plan.md)): `sample.sample_level`,
   `sample.adjusted`; `components/sample-badge.js`.
 - C-11 ([../01-C-11-tratamiento-de-nulos/plan.md](../01-C-11-tratamiento-de-nulos/plan.md)): `core/format.js` (`cmpNullsLast`,
-  `nullDisplay`, `NULL_REASON_LABELS`, `fmtNumber`), `core/i18n.js` (`t`).
+  `nullDisplay`, `NULL_REASON_LABELS`, `fmtNumber`), (sin `core/i18n.js`: DA-21 resuelta, copy en español directo).
 - F-13 ([../12-F-13-configuracion/plan.md](../12-F-13-configuracion/plan.md)): `config.get`, `CONFIG_SPEC`, `prefs.current_owner`,
   `core/prefs.js` (`getPref`, `setPref`), `GET /api/settings`.
 - C-02 ([../11-C-02-promedios-de-liga/plan.md](../11-C-02-promedios-de-liga/plan.md)): `context.parse_context`, `context_echo`.
-- F-11 ([../02-F-11-calidad-datos-competencias/plan.md](../02-F-11-calidad-datos-competencias/plan.md)): `repository.resolve_competition`,
-  `cache.memo`, `competitions.list_competitions`.
-- C-09 ([../06-C-09-tabla-general-liga/plan.md](../06-C-09-tabla-general-liga/plan.md)) y C-06 ([../05-C-06-umbral-cierres/plan.md](../05-C-06-umbral-cierres/plan.md)):
-  cálculo de tabla general y de cierres que los builders reutilizan.
+- F-11 ([../02-F-11-calidad-datos-competencias/plan.md](../02-F-11-calidad-datos-competencias/plan.md), implementada en versión
+  acotada): `competitions.resolve`, `competitions.visible`, `competitions.list_competitions`, `ingest`. **No** existen
+  `repository.py` ni `cache.py` (difieridos): `cache.memo` es opcional (ver §4.1 paso 5).
+- C-09 ([../06-C-09-tabla-general-liga/plan.md](../06-C-09-tabla-general-liga/plan.md), implementada): `stats_engine.standings_row`
+  y `standings_sort_key`, `standings_pos` en `/api/league`. C-06 ([../05-C-06-umbral-cierres/plan.md](../05-C-06-umbral-cierres/plan.md),
+  implementada): `clutch.team_clutch(...)` con `window_secs`, prórrogas `OVERTIME` y `per_game` que el builder `clutch_games` convierte.
 - C-08 ([../07-C-08-jugadores-duplicados/plan.md](../07-C-08-jugadores-duplicados/plan.md)): `player_id` en buscador y game log.
 
 **Estimación: XL · 30–40 h** (backend `tables.py` + builders 10–13 h; `export_xlsx.py` 4–5 h; `data-table.js` 6–8 h;

@@ -4,14 +4,11 @@ Ventana clutch = último período REGULAR con clock_secs <= window_secs + todas 
 Métricas con fórmulas de docs/metrics.md; semántica null de Feature 08 (tasa con
 denominador 0 → None).
 """
-from stats_engine import _safe_div
+from stats_engine import _safe_div, StatBundle
+import config
 
-# Único lugar del umbral de partido cerrado y de la ventana de cierre (C-06). La ruta y el
-# frontend los leen de la respuesta; F-13 los reemplaza por la configuración.
-DEFAULT_MARGIN = 10          # partido cerrado = diferencia ≤ 10 al entrar a la ventana (antes 15)
-DEFAULT_WINDOW_SECS = 300    # últimos 5 minutos del último período regular
-MARGIN_RANGE = (0, 40)       # valores aceptados en `?margin`
-WINDOW_RANGE = (60, 600)     # valores aceptados en `?window_secs`
+MARGIN_RANGE = (0, 40)
+WINDOW_RANGE = (60, 600)
 
 OVERTIME_TYPES = ("OVERTIME", "OT")   # FIBA manda OVERTIME; OT es el valor legado
 
@@ -113,20 +110,17 @@ def _box_metrics(tb, ob):
     }
 
 
-def team_clutch(games, team_code, team_name, margin=None, window_secs=None, games_without_pbp=0):
-    """Cierre agregado ("mini-partido") + desglose por partido de UN equipo.
+def _qualified_games(games, team_code, margin, window_secs):
+    """Partidos calificados de cierre (plan §4.7, extraído de `team_clutch` para que
+    `clutch_bundle` use la MISMA selección). Un partido califica si la diferencia al entrar a la
+    ventana es ≤ `margin` y hay eventos de cierre de AMBOS equipos (§10.1).
 
-    games: partidos con pbp [{game_id, events, opp_code, info:{date, home_away}}, ...].
-    Solo cuentan los partidos con diferencia ≤ `margin` al entrar a la ventana (§10.1).
-    `margin`/`window_secs` en None → DEFAULT_MARGIN/DEFAULT_WINDOW_SECS (C-06).
-    `games_without_pbp`: partidos del equipo en el universo que no tienen pbp (solo se
-    informan, para que el recuento cierre). Ver sdd/specs/05-clutch/spec.md §10.
+    Devuelve `{"qualified": [...], "excluded": n, "without_events": m}` — cada elemento de
+    `qualified` es `{game_id, date, opp, home_away, entry_margin, overtimes, tb, ob, clutch_evs}`
+    (`tb`/`ob` = `_agg` del equipo/rival sobre los eventos de cierre).
     """
-    margin = DEFAULT_MARGIN if margin is None else margin
-    window_secs = DEFAULT_WINDOW_SECS if window_secs is None else window_secs
-    per_game, team_boxes, opp_boxes = [], [], []
-    excluded = without_events = wins = losses = ties = 0
-
+    qualified = []
+    excluded = without_events = 0
     for g in games:
         evs = g["events"]
         opp = g["opp_code"]
@@ -148,23 +142,51 @@ def team_clutch(games, team_code, team_name, margin=None, window_secs=None, game
 
         tb = _agg([e for e in clutch if e.get("team_code") == team_code])
         ob = _agg([e for e in clutch if e.get("team_code") == opp])
+
+        qualified.append({
+            "game_id": g["game_id"], "date": g.get("info", {}).get("date", ""),
+            "opp": opp, "home_away": g.get("info", {}).get("home_away", ""),
+            "entry_margin": em, "overtimes": overtimes,
+            "tb": tb, "ob": ob, "clutch_evs": clutch,
+        })
+    return {"qualified": qualified, "excluded": excluded, "without_events": without_events}
+
+
+def team_clutch(games, team_code, team_name, margin=None, window_secs=None, games_without_pbp=0):
+    """Cierre agregado ("mini-partido") + desglose por partido de UN equipo.
+
+    games: partidos con pbp [{game_id, events, opp_code, info:{date, home_away}}, ...].
+    Solo cuentan los partidos con diferencia ≤ `margin` al entrar a la ventana (§10.1).
+    `margin`/`window_secs` en None → DEFAULT_MARGIN/DEFAULT_WINDOW_SECS (C-06).
+    `games_without_pbp`: partidos del equipo en el universo que no tienen pbp (solo se
+    informan, para que el recuento cierre). Ver sdd/specs/05-clutch/spec.md §10.
+    """
+    margin = config.get("clutch.margin") if margin is None else margin
+    window_secs = config.get("clutch.window_secs") if window_secs is None else window_secs
+
+    sel = _qualified_games(games, team_code, margin, window_secs)
+    excluded, without_events = sel["excluded"], sel["without_events"]
+    per_game, team_boxes, opp_boxes = [], [], []
+    wins = losses = ties = 0
+
+    for q in sel["qualified"]:
+        tb, ob = q["tb"], q["ob"]
         team_boxes.append(tb)
         opp_boxes.append(ob)
-        top_fin, top_cre = _leaders([e for e in clutch if e.get("team_code") == team_code])
+        top_fin, top_cre = _leaders([e for e in q["clutch_evs"] if e.get("team_code") == team_code])
 
         pd = tb["pts"] - ob["pts"]
         if   pd > 0: wins += 1
         elif pd < 0: losses += 1
         else:        ties += 1
 
-        gi = g.get("info", {})
         per_game.append({
-            "game_id":         g["game_id"],
-            "date":            gi.get("date", ""),
-            "opponent_code":   opp,
-            "home_away":       gi.get("home_away", ""),
-            "entry_margin":    em,
-            "overtime_periods": overtimes,
+            "game_id":         q["game_id"],
+            "date":            q["date"],
+            "opponent_code":   q["opp"],
+            "home_away":       q["home_away"],
+            "entry_margin":    q["entry_margin"],
+            "overtime_periods": q["overtimes"],
             "pts":             tb["pts"],
             "opp_pts":         ob["pts"],
             "point_diff":      pd,
@@ -212,3 +234,120 @@ def team_clutch(games, team_code, team_name, margin=None, window_secs=None, game
         "aggregate":       aggregate,
         "per_game":        per_game,
     }
+
+
+def _clutch_box_to_bundle(tb, ob, team_code, team_name, window_secs, overtimes, game_id):
+    """`StatBundle` de UN partido de cierre (mismo armado de conteos que `clutch_bundle`)."""
+    own = {k: tb.get(k, 0) for k in _SUM_KEYS}
+    opp = {k: ob.get(k, 0) for k in _SUM_KEYS}
+    own["pf"] = own.pop("foul", 0)
+    own["fouls_drawn"] = own.pop("foulon", 0)
+    opp["pf"] = opp.pop("foul", 0)
+    opp["fouls_drawn"] = opp.pop("foulon", 0)
+    own["blk_received"] = opp.get("blk", 0)
+    opp["blk_received"] = own.get("blk", 0)
+    own["plus_minus"] = own.get("pts", 0) - opp.get("pts", 0)
+    opp["plus_minus"] = opp.get("pts", 0) - own.get("pts", 0)
+    seconds = window_secs + 300 * overtimes
+    minutes = seconds / 60 if seconds else 0.0
+    return StatBundle(
+        entity_type="clutch", entity_id=team_code, name=team_name,
+        own=own, opp=opp, team=None,
+        games=1, minutes=minutes, team_minutes=None, seconds=seconds,
+        on_court=None, shots=None, possessions_counted=None,
+        null_reasons={},
+        meta={"team_code": team_code, "window_secs": window_secs, "game_ids": [game_id]},
+    )
+
+
+def clutch_game_bundles(req) -> list:
+    """`[(dict_partido, StatBundle), ...]` por cierre calificado de un equipo (T-06, loader de
+    partido del tipo `clutch`). `req` es un `metrics_catalog.EntityRequest`."""
+    import identity
+    import repository
+    team_code = str(req.entity_id).upper()
+    comp_id = req.comp_id
+    margin = (req.params or {}).get("margin")
+    window_secs = (req.params or {}).get("window_secs")
+    margin = config.get("clutch.margin") if margin is None else margin
+    window_secs = config.get("clutch.window_secs") if window_secs is None else window_secs
+
+    games = repository.team_pbp_games(team_code, comp_id)
+    games = _filter_pbp_games(games, req.ctx)
+    games = identity.canonicalize_pbp_games(games, team_code)
+    if not games:
+        return []
+
+    row = None
+    for r in repository.team_game_rows(comp_id).values():
+        if r["team_code"] == team_code:
+            row = r
+    team_name = row["team_name"] if row else team_code
+
+    opp_names = {}
+    for r in repository.team_game_rows(comp_id).values():
+        opp_names[r["team_code"]] = r["team_name"]
+
+    sel = _qualified_games(games, team_code, margin, window_secs)
+    out = []
+    for q in sel["qualified"]:
+        bundle = _clutch_box_to_bundle(q["tb"], q["ob"], team_code, team_name,
+                                       window_secs, q["overtimes"], q["game_id"])
+        info = {
+            "game_id": q["game_id"], "date": q["date"],
+            "opponent_code": q["opp"], "opponent": opp_names.get(q["opp"], q["opp"]),
+            "home_away": q["home_away"],
+            "team_pts": q["tb"]["pts"], "opp_pts": q["ob"]["pts"], "played": True,
+            "entry_margin": q["entry_margin"], "overtimes": q["overtimes"],
+        }
+        out.append((info, bundle))
+    # orden cronológico descendente (como team_clutch.per_game)
+    out.sort(key=lambda t: (t[0].get("date") or "", t[0]["game_id"]), reverse=True)
+    return out
+
+
+def _filter_pbp_games(games, ctx):
+    """Últimos N partidos del contexto sobre `repository.team_pbp_games` (idéntico a
+    `bundles._filter_pbp_games`; se duplica para evitar el import cruzado)."""
+    out = sorted(games, key=lambda g: (g.get("info", {}).get("date") or "", g.get("game_id") or ""))
+    if ctx and getattr(ctx, "last", None):
+        out = out[-ctx.last:]
+    return out
+
+
+def clutch_bundle(games, team_code, team_name, margin=None, window_secs=None) -> "StatBundle | None":
+    """`StatBundle` del cierre agregado de un equipo (plan §4.7): reusa `_qualified_games` (misma
+    selección que `team_clutch`). `None` si ningún partido del equipo tiene pbp."""
+    if not games:
+        return None
+    margin = config.get("clutch.margin") if margin is None else margin
+    window_secs = config.get("clutch.window_secs") if window_secs is None else window_secs
+
+    sel = _qualified_games(games, team_code, margin, window_secs)
+    qualified = sel["qualified"]
+
+    own = {k: sum(q["tb"].get(k, 0) for q in qualified) for k in _SUM_KEYS}
+    opp = {k: sum(q["ob"].get(k, 0) for q in qualified) for k in _SUM_KEYS}
+    own["pf"] = own.pop("foul", 0)
+    own["fouls_drawn"] = own.pop("foulon", 0)
+    opp["pf"] = opp.pop("foul", 0)
+    opp["fouls_drawn"] = opp.pop("foulon", 0)
+    own["blk_received"] = opp.get("blk", 0)
+    opp["blk_received"] = own.get("blk", 0)
+    own["plus_minus"] = own.get("pts", 0) - opp.get("pts", 0)
+    opp["plus_minus"] = opp.get("pts", 0) - own.get("pts", 0)
+
+    seconds = sum(window_secs + 300 * q["overtimes"] for q in qualified)
+    minutes = seconds / 60 if seconds else 0.0
+    games_sin_pbp = 0   # el llamador (app.py) conoce `games_without_pbp`; T-05 no lo recibe acá
+
+    return StatBundle(
+        entity_type="clutch", entity_id=team_code, name=team_name,
+        own=own, opp=opp, team=None,
+        games=len(qualified), minutes=minutes, team_minutes=None, seconds=seconds,
+        on_court=None, shots=None, possessions_counted=None,
+        null_reasons={},
+        meta={"team_code": team_code, "margin": margin, "window_secs": window_secs,
+              "games_excluded": {"paliza": sel["excluded"], "sin_pbp": games_sin_pbp},
+              "games_total": len(games)},
+    )

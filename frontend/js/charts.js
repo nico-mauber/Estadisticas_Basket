@@ -44,7 +44,8 @@ function _norm(value, leagueKey, league, higherIsBetter = true) {
   const lg = league?.[leagueKey];
   // Sin dato → null, no 0: un 0 dibujaría el eje en el peor valor posible y se
   // leería como "rinde pésimo" en vez de "no hay dato" (Feature 12 RF-9).
-  if (!lg || value == null) return null;
+  // Sin promedio de liga (`Ø` nulo: "Todas las competencias" o sin datos, C-02) tampoco hay escala.
+  if (!lg || value == null || lg.avg == null || lg.best == null) return null;
   const best  = lg.best;
   const avg   = lg.avg;
   // Estimate "worst" symmetrically from avg
@@ -266,7 +267,7 @@ export function drawEvolution(canvasId, gameLog, leagueOerAvg) {
 }
 
 // ── Player line — pts + OER per game ───────────────────────────────────────
-export function drawPlayerEvolution(canvasId, gameLog) {
+export function drawPlayerEvolution(canvasId, gameLog, leagueOerAvg) {
   _applyDefaults();
   _destroy(canvasId);
   const canvas = document.getElementById(canvasId);
@@ -303,6 +304,17 @@ export function drawPlayerEvolution(canvasId, gameLog) {
           tension: 0.3,
           yAxisID: "y2",
         },
+        // Promedio de OER de los jugadores de la competencia: el mismo valor que la card OER (C-02 RF-10)
+        ...(leagueOerAvg != null ? [{
+          label: "OER liga Ø",
+          data: sorted.map(() => +leagueOerAvg.toFixed(3)),
+          borderColor: C.muted,
+          backgroundColor: "transparent",
+          borderWidth: 1,
+          borderDash: [5, 5],
+          pointRadius: 0,
+          yAxisID: "y2",
+        }] : []),
       ],
     },
     options: {
@@ -352,8 +364,10 @@ export function drawLeagueScatter(canvasId, teams, axis) {
   const valid = teams.filter(t => t[xKey] != null && t[yKey] != null);
   if (!valid.length) return;
 
-  const avgX = valid.reduce((s, t) => s + t[xKey], 0) / valid.length;
-  const avgY = valid.reduce((s, t) => s + t[yKey], 0) / valid.length;
+  // T-01: el promedio de la población (summary.avg) tiene prioridad sobre la media
+  // de las filas en pantalla, para que coincida con el "Ø" del pie de la tabla.
+  const avgX = axis.avgX != null ? axis.avgX : valid.reduce((s, t) => s + t[xKey], 0) / valid.length;
+  const avgY = axis.avgY != null ? axis.avgY : valid.reduce((s, t) => s + t[yKey], 0) / valid.length;
 
   const points = valid.map(t => ({
     x: t[xKey],
