@@ -33,6 +33,7 @@ log = logging.getLogger(__name__)
 
 TEAM_KEYS = ("oer", "der", "net_rating", "efg_pct", "ts_pct", "ppp", "possessions",
              "to_pct", "or_pct", "ft_rate", "ppt", "pace")
+VOLUME_KEYS = frozenset({"possessions"})
 PLAYER_KEYS = ("oer", "ts_pct", "efg_pct", "uso_pct", "plus_minus")
 ORIGIN_KEYS = ("second_chance_pts", "fast_break_pts", "pts_from_tov")
 CHAIN_KEYS = ("points_created", "points_from_assist", "oreb_points", "steal_points", "turnover_cost")
@@ -351,6 +352,11 @@ def _vs_season(team_code: str, current: dict) -> dict | None:
     for k in TEAM_KEYS:
         avg = (season.get(k) or {}).get("value")
         cur = (current.get(k) or {}).get("value")
+        if k in VOLUME_KEYS:
+            # volumen: el pooled es el total de la temporada y el partido en curso está incompleto
+            per_game = None if avg is None or not bundle.games else round(avg / bundle.games, 1)
+            metrics[k] = {"own_avg": per_game, "delta": None}
+            continue
         metrics[k] = {"own_avg": avg,
                       "delta": None if avg is None or cur is None else round(cur - avg, 4)}
     return {"competition_id": ctx.competition_id,

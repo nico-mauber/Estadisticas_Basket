@@ -256,14 +256,18 @@ function _delta(team, key) {
   return `<td class="lv-delta ${cls}" title="Promedio de temporada: ${avg.replace(/<[^>]+>/g, "")}">${sign}${shown}</td>`;
 }
 
+function _teamTh(team) {
+  return `<span class="lv-full">${esc(team.name)}</span><span class="lv-short" title="${esc(team.name)}">${esc(team.code)}</span>`;
+}
+
 function _compareTable(rows, home, away) {
-  return `<table class="lv-cmp-table">
-    <thead><tr><th></th><th>${esc(home.name)}</th><th class="lv-delta">Δ temp.</th><th>${esc(away.name)}</th><th class="lv-delta">Δ temp.</th></tr></thead>
+  return `<div class="lv-table-wrap"><table class="lv-cmp-table">
+    <thead><tr><th></th><th>${_teamTh(home)}</th><th class="lv-delta">Δ temp.</th><th>${_teamTh(away)}</th><th class="lv-delta">Δ temp.</th></tr></thead>
     <tbody>${rows.map(([k, label]) => `
       <tr><td>${label}</td>
         <td>${_fmtVal(k, home.standard?.[k])}</td>${_delta(home, k)}
         <td>${_fmtVal(k, away.standard?.[k])}</td>${_delta(away, k)}</tr>`).join("")}
-    </tbody></table>`;
+    </tbody></table></div>`;
 }
 
 function _seasonNote(home, away) {

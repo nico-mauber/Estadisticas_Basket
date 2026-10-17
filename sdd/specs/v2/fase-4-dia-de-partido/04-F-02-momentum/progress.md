@@ -41,7 +41,7 @@
 - [x] T-F1 · Backend arranca sin traceback
 - [x] T-F2 · `upgrade_db()` — N/A
 - [x] T-F3 · curl: `/api/live/abc/momentum` 404; `/api/live/2849343/momentum` 200 con las 6 claves del plan §8
-- [ ] T-F4 · Consola del navegador — sin navegador en la sesión; render probado en Node (`momentum_render.mjs`, 17/17)
+- [x] T-F4 · Chromium (Playwright) a 1280 px y 360 px: 0 errores de consola; pestaña Momentum en En vivo y en Analizar. Corregido en esa pasada: en tiros/libres fallados el desenlace mostraba al reboteador rival; ahora el tirador (verificado en 13 partidos × 4 cuartos: 0 jugadores del equipo equivocado)
 - [ ] T-F5 · CA-1 con partido real en curso
 
 ## Estado de CA (gate de aceptación)

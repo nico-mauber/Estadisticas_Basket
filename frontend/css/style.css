@@ -1333,9 +1333,14 @@ tbody tr.fuera-poblacion { opacity: .6; }
 .lv-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; border: 1px solid var(--muted2); }
 .lv-dot.on { background: var(--green); border-color: var(--green); }
 .lv-bench td { color: var(--muted); }
+.lv-short { display: none; }
 @media (max-width: 767px) {
   .lv-dist-row { flex-direction: column; gap: var(--sp-3); }
   .lv-bar-row { grid-template-columns: 7.5em 1fr 2.2em 3.2em; }
+  .lv-full { display: none; }
+  .lv-short { display: inline; }
+  .lv-cmp-table { font-size: 12px; }
+  .lv-cmp-table th, .lv-cmp-table td { padding: 4px 5px; }
 }
 
 /* ── momentum (F-02) ── */
