@@ -11,6 +11,7 @@ from game_analysis import elapsed_secs, period_label, _clock_display
 _FG = ("2pt", "3pt")
 _SHOT_PTS = {"2pt": 2, "3pt": 3, "freethrow": 1}
 _ASSIST_LOOKAHEAD = 8          # action_numbers máx. entre la canasta y su asistencia (= possessions)
+_SHOT_ENDS = ("t2c", "t2f", "t3c", "t3f")
 _OUTCOME_LABELS = {
     "t2c": "Doble convertido", "t2f": "Doble fallado", "t3c": "Triple convertido", "t3f": "Triple fallado",
     "perdida": "Pérdida", "falta": "Falta / tiros libres", "fin_periodo": "Fin de período",
@@ -164,13 +165,22 @@ def _last_outcomes(poss, events, assists, codes, n) -> dict:
     for side, code in zip(("home", "away"), codes):
         items = []
         for p in reversed([p for p in poss if p.team == code][-n:]):
-            end = by_an.get(p.end_event) or {}
+            # tiro o libre fallado: la posesión cierra con el rebote del rival → el evento que importa
+            # es el último tiro (o libre) del propio equipo
+            shot_an = p.shots[-1]["action_number"] if p.shots and p.end_type in _SHOT_ENDS else None
+            if p.end_type == "falta":
+                shot_an = next((a for a in reversed(p.event_numbers or ())
+                                if (by_an.get(a) or {}).get("action_type") == "freethrow"
+                                and (by_an.get(a) or {}).get("team_code") == code), None)
+            end = by_an.get(shot_an if shot_an is not None else p.end_event) or {}
+            if end.get("team_code") not in (None, "", code):
+                end = {k: v for k, v in end.items() if k != "player_name"}
             items.append({
                 "end_type": p.end_type,
                 "label": "Incompleta" if p.incomplete and not p.end_type else _OUTCOME_LABELS.get(p.end_type, p.end_type or "—"),
                 "pts": p.pts,
                 "player": end.get("player_name") or None,
-                "assister": assists.get(p.end_event) if p.end_type in ("t2c", "t3c") else None,
+                "assister": assists.get(shot_an) if p.end_type in ("t2c", "t3c") else None,
                 "is_three": p.end_type == "t3c",
                 "had_second_chance": len(p.chances) > 1,
                 "incomplete": p.incomplete,

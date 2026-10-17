@@ -61,7 +61,7 @@
 - Backend arranca sin traceback: ✅
 - Sin cambios de esquema: ✅ (F-07 no toca esquema)
 - Endpoints probados (test_client): ✅ game 200, pbp 200 (593 total, 36 filtered), matchups quinteto 200 (36 rows), matchups jugador 200 (100 rows), shots 200, error cases 404/400
-- Consola del navegador sin errores JS: pendiente (verificación manual)
+- Consola del navegador sin errores JS: ✅ Chromium (Playwright) a 1280 px y 360 px, las 7 pestañas (incluida Momentum de F-02) sin errores de consola, sin "undefined/NaN" y sin scroll horizontal de página (2026-10-16)
 - `game-view.js` syntax check: ✅ (node -c)
 - `shot-chart.js` syntax check: ✅ (node -c)
 - Dev server localhost:5000: ✅ (game-view.js served 200)

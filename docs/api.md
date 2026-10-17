@@ -803,6 +803,7 @@ Snapshot de un partido en curso, leído de FIBA LiveStats. El cliente hace polli
 ```
 - `by_shot` es excluyente y suma `total`; `by_origin` viene de FIBA y sus categorías se superponen (un contraataque tras pérdida cuenta en ambas). Un desglose que la competencia no publica viene `null` con razón `no_registrado`.
 - Jugadores en vivo no tienen id en la base: la clave es `"<equipo>|<nombre>"`.
+- `vs_season.metrics.possessions`: `own_avg` por partido y `delta: null` (un volumen parcial no se compara con un partido completo; el tempo se compara con `pace`).
 - `chains` es `null` con razón `sin_pbp` si FIBA aún no publicó jugada a jugada; con pbp, 0 es real (la acción no ocurrió).
 - `stale: true`: FIBA no respondió y se sirve el último snapshot (`fetched_at` es el de ese snapshot). `persist_error: true`: el partido terminó pero no se pudo guardar; se reintenta en el próximo polling.
 

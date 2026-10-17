@@ -41,7 +41,7 @@
 - [x] T-F1 · Backend arranca sin traceback
 - [x] T-F2 · `upgrade_db()` — N/A, sin cambios de esquema
 - [x] T-F3 · `/api/live` probado con curl (404 id inválido, 400 url de otro host, finalizado) y con simulación
-- [ ] T-F4 · Consola del navegador sin errores JS durante 2 ciclos de polling — sin navegador en la sesión; render probado en Node (`live_render.mjs`, 13/13)
+- [x] T-F4 · Chromium (Playwright) a 1280 px y 360 px: 0 errores de consola; En vivo con respuestas interceptadas, partido terminado → banner + Analizar, polling cortado al cambiar de sección, sin scroll horizontal de página (2026-10-16). Corregido en esa pasada: tablas comparativas desbordaban a 360 px (ahora código de equipo + contenedor con scroll) y el Δ de Posesiones comparaba contra el total de temporada (ahora sin Δ: volumen parcial no comparable; `own_avg` por partido)
 - [ ] T-F5 · CA-1 con partido real en curso
 
 ## Estado de CA (gate de aceptación)
