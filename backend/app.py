@@ -1032,12 +1032,22 @@ def possessions_reconcile_route():
 @app.route("/api/live/<game_id>")
 @login_required
 def live_route(game_id: str):
+    return _live_response(live.live_snapshot, game_id)
+
+
+@app.route("/api/live/<game_id>/momentum")
+@login_required
+def live_momentum_route(game_id: str):
+    return _live_response(live.live_momentum, game_id)
+
+
+def _live_response(fn, game_id: str):
     url = (request.args.get("url") or "").strip() or None
     if url and not live.valid_source_url(game_id, url):
         return jsonify({"error": "URL de FIBA LiveStats inválida para este partido.",
                         "code": "parametro_invalido"}), 400
     try:
-        return jsonify(live.live_snapshot(game_id, url))
+        return jsonify(fn(game_id, url))
     except live.LiveNotFound:
         return jsonify({"error": "Partido no encontrado.", "code": "no_encontrado"}), 404
     except live.LiveFetchError:

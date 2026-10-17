@@ -6,6 +6,7 @@ import { drawScoreTimeline } from "../charts.js";
 import { shotChart, bindZoneTooltips } from "./shot-chart.js";
 import { sampleBadge } from "./sample-badge.js";
 import { createDataTable, dtLoading, dtError, dtEmpty } from "./data-table.js";
+import { momentumHTML } from "./momentum-panel.js";
 
 function esc(s) { return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
 
@@ -40,6 +41,7 @@ let _pbpFilters = { types: null, period: null, player: null };
 let _shotsHome = null;
 let _shotsAway = null;
 let _matchupsData = null;
+let _momentumData = null;
 
 function _destroy() {
   _detail = null;
@@ -47,6 +49,7 @@ function _destroy() {
   _shotsHome = null;
   _shotsAway = null;
   _matchupsData = null;
+  _momentumData = null;
   _tab = "resumen";
   _pbpFilters = { types: null, period: null, player: null };
 }
@@ -81,6 +84,7 @@ function _renderShell() {
     { id: "jugadas", label: "Jugadas" },
     { id: "quintetos", label: "Quintetos" },
     { id: "cruces", label: "Cruces" },
+    { id: "momentum", label: "Momentum" },
   ];
 
   _el.innerHTML = `
@@ -120,6 +124,7 @@ function _renderTab() {
     case "jugadas":   return _renderJugadas(body);
     case "quintetos": return _renderQuintetos(body);
     case "cruces":    return _renderCruces(body);
+    case "momentum":  return _renderMomentum(body);
   }
 }
 
@@ -511,4 +516,22 @@ async function _renderCruces(el) {
     </div>
     ${matchups.length > 50 ? `<p class="td-muted" style="text-align:center;margin-top:8px">Mostrando 50 de ${matchups.length}</p>` : ""}
   </div>`;
+}
+
+// ── Momentum (F-02): estado al cierre ────────────────────────────────────────
+async function _renderMomentum(el) {
+  const g = _detail.game;
+  if (!g.has_pbp) {
+    el.innerHTML = '<p class="empty">Sin jugada a jugada: Momentum no disponible.</p>';
+    return;
+  }
+  el.innerHTML = '<p class="empty"><span class="spinner"></span>Cargando momentum…</p>';
+  try {
+    if (!_momentumData) _momentumData = await api.momentum(g.game_id);
+  } catch (e) {
+    el.innerHTML = `<p class="empty below-avg">${esc(e.message || "No se pudo cargar el momentum")}</p>`;
+    return;
+  }
+  if (_tab !== "momentum") return;
+  el.innerHTML = momentumHTML(_momentumData, { final: _momentumData.status === "finalizado" });
 }

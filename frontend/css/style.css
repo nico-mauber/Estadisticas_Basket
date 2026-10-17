@@ -1338,6 +1338,39 @@ tbody tr.fuera-poblacion { opacity: .6; }
   .lv-bar-row { grid-template-columns: 7.5em 1fr 2.2em 3.2em; }
 }
 
+/* ── momentum (F-02) ── */
+.mo-run { display: flex; align-items: center; gap: var(--sp-4); }
+.mo-run-score { font-size: 34px; font-weight: 800; color: var(--accent); line-height: 1; }
+.mo-run-text { font-size: 14px; }
+.mo-run-text small { color: var(--muted); }
+.mo-empty { color: var(--muted); text-align: center !important; font-size: 12px; }
+.mo-out-col { flex: 1; min-width: 0; }
+.mo-out-col h4 { margin: 0 0 var(--sp-2); font-size: 14px; }
+.mo-out-list { list-style: none; margin: 0; padding: 0; }
+.mo-out { display: grid; grid-template-columns: 2.4em 1fr auto; gap: var(--sp-2); align-items: baseline;
+  padding: 5px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
+.mo-out-pts-val { font-weight: 800; text-align: right; }
+.mo-out-pts .mo-out-pts-val { color: var(--green); }
+.mo-out-zero .mo-out-pts-val { color: var(--muted2); }
+.mo-out-clock { color: var(--muted2); font-size: 11px; white-space: nowrap; }
+.mo-tag { display: inline-block; padding: 0 6px; border-radius: 8px; background: var(--surface2);
+  border: 1px solid var(--border); color: var(--muted); font-size: 10px; white-space: nowrap; }
+.mo-tag-3 { border-color: var(--accent-dim); color: var(--accent); }
+.mo-players { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: var(--sp-2); }
+.mo-player { display: flex; gap: var(--sp-2); align-items: flex-start; padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius); background: var(--surface2); border: 1px solid var(--border); }
+.mo-hot { border-color: var(--accent-dim); }
+.mo-cold { border-color: #1e3a5f; }
+.mo-player-icon { font-size: 18px; line-height: 1.2; }
+.mo-player-name { font-weight: 700; font-size: 13px; }
+.mo-player-name small { color: var(--muted); font-weight: 400; }
+.mo-player-marks { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.mo-mark { font-size: 11px; color: var(--text); background: var(--surface); border: 1px solid var(--border);
+  border-radius: 8px; padding: 1px 7px; }
+@media (max-width: 767px) {
+  .mo-run-score { font-size: 28px; }
+}
+
 /* ── @media print (T-06) ── */
 #print-root { display: none; }
 @media print {
