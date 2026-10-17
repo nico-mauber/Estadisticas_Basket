@@ -21,6 +21,7 @@ import context
 import fiba_fetcher
 import ingest
 import lineups
+import momentum
 import possessions
 import repository
 from competitions import CompetitionError
@@ -55,6 +56,7 @@ class _Entry:
     fetched_at: float
     snapshot: dict
     final: bool = False
+    momentum: dict | None = None
 
 
 _cache: "OrderedDict[str, _Entry]" = OrderedDict()
@@ -115,18 +117,35 @@ def _persisted_final(game_id: str) -> bool:
 
 def live_snapshot(game_id: str, url: str | None = None) -> dict:
     """Snapshot del partido. Cachea por `live.cache_ttl_secs`; al detectar fin, persiste."""
+    entry, stale = _current(game_id, url)
+    return {**entry.snapshot, "stale": True} if stale else entry.snapshot
+
+
+def live_momentum(game_id: str, url: str | None = None) -> dict:
+    """Momentum (F-02) de la misma fuente y el mismo ciclo que `live_snapshot`: no descarga aparte.
+    Partido cerrado → estado al final, calculado sobre los datos guardados."""
+    entry, stale = _current(game_id, url)
+    head = {"status": entry.snapshot["status"], "stale": stale, "fetched_at": entry.snapshot["fetched_at"],
+            "game_id": game_id}
+    if entry.final:
+        return {**_db_momentum(game_id), **head}
+    return {**entry.momentum, **head}
+
+
+def _current(game_id: str, url: str | None) -> tuple[_Entry, bool]:
+    """Entrada vigente de la caché (o recién descargada) y si es un snapshot viejo (`stale`)."""
     if not re.fullmatch(r"\d{5,}", str(game_id)):
         raise LiveNotFound(game_id)
 
     now = time.time()
     cached = _cache.get(game_id)
     if cached and (cached.final or now - cached.fetched_at < config.get("live.cache_ttl_secs")):
-        return cached.snapshot
+        return cached, False
 
     if cached is None and _persisted_final(game_id):
-        snap = _finished(game_id)
-        _cache_put(game_id, _Entry(now, snap, final=True))
-        return snap
+        entry = _Entry(now, _finished(game_id), final=True)
+        _cache_put(game_id, entry)
+        return entry, False
 
     try:
         raw = fiba_fetcher.fetch_raw_by_id(
@@ -139,24 +158,36 @@ def live_snapshot(game_id: str, url: str | None = None) -> dict:
     except Exception as exc:
         return _stale(game_id, cached, exc)
 
-    if is_final(raw):
-        if _persist_final(game_id, raw, url):
-            snap = _finished(game_id)
-            _cache_put(game_id, _Entry(now, snap, final=True))
-            return snap
-        snap = _build_snapshot(fiba_fetcher.parse_game(raw, game_id, validate=False), game_id)
-        snap["persist_error"] = True
+    final = is_final(raw)
+    if final and _persist_final(game_id, raw, url):
+        entry = _Entry(now, _finished(game_id), final=True)
     else:
-        snap = _build_snapshot(fiba_fetcher.parse_game(raw, game_id, validate=False), game_id)
-    _cache_put(game_id, _Entry(now, snap))
-    return snap
+        snap, mom = _build_snapshot(fiba_fetcher.parse_game(raw, game_id, validate=False), game_id)
+        if final:
+            snap["persist_error"] = True
+        entry = _Entry(now, snap, momentum=mom)
+    _cache_put(game_id, entry)
+    return entry, False
 
 
-def _stale(game_id: str, cached: _Entry | None, exc: Exception) -> dict:
+def _stale(game_id: str, cached: _Entry | None, exc: Exception) -> tuple[_Entry, bool]:
     log.warning("Descarga FIBA falló para %s: %s", game_id, exc)
     if cached is None:
         raise LiveFetchError(game_id) from exc
-    return {**cached.snapshot, "stale": True}
+    return cached, True
+
+
+def _db_momentum(game_id: str) -> dict:
+    """Momentum al cierre de un partido guardado (cacheado; se invalida con datos o configuración)."""
+    def build():
+        game = Game.query.filter_by(game_id=game_id).first()
+        codes = (game.home_code, game.away_code)
+        names = {game.home_code: game.home_team, game.away_code: game.away_team}
+        data = repository.game_pbp_data(game_id)
+        events = data["events"] if data else []
+        poss = possessions.game_possessions(game_id) if events else []
+        return momentum.compute(events, poss, codes, names)
+    return cache.memo("momentum", (game_id,), build)
 
 
 def _persist_final(game_id: str, raw: dict, url: str | None) -> bool:
@@ -212,7 +243,11 @@ def _build_snapshot(parsed: dict, game_id: str) -> dict:
 
     name_to_key = {(p.get("team_code"), p.get("player_name")): _key(p.get("team_code"), p.get("player_name"))
                    for p in players_raw}
-    chain_maps = _chains(game_id, events, rows, codes, parsed.get("shots") or [], name_to_key) if has_pbp else None
+    poss = []
+    if has_pbp:
+        xy = {s.get("action_number"): (s.get("court_x"), s.get("court_y")) for s in parsed.get("shots") or []}
+        poss, _, _ = possessions.build_from_events(game_id, events, rows, codes, xy, name_to_key)
+    chain_maps = _chains(poss, events, name_to_key) if has_pbp else None
 
     players = {"home": [], "away": []}
     for p in players_raw:
@@ -226,7 +261,7 @@ def _build_snapshot(parsed: dict, game_id: str) -> dict:
     for side in players:
         players[side].sort(key=lambda r: (not r["on_court"], -(r["pts"] or 0)))
 
-    return {
+    snapshot = {
         "status": "en_curso",
         "stale": False,
         "fetched_at": _now_iso(),
@@ -238,6 +273,8 @@ def _build_snapshot(parsed: dict, game_id: str) -> dict:
         "players_on_court": on_court,
         "players": players,
     }
+    names = {row["team_code"]: row.get("team_name") for row in (home, away)}
+    return snapshot, momentum.compute(events, poss, codes, names)
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -357,9 +394,7 @@ def _on_court(events: list, codes: tuple, starters: dict) -> dict:
     return out
 
 
-def _chains(game_id, events, rows, codes, shots, name_to_key) -> dict:
-    xy = {s.get("action_number"): (s.get("court_x"), s.get("court_y")) for s in shots}
-    poss, _, _ = possessions.build_from_events(game_id, events, rows, codes, xy, name_to_key)
+def _chains(poss, events, name_to_key) -> dict:
     return {
         "assist": chains.assist_points(poss),
         "oreb": chains.oreb_points(poss, events, name_to_key),

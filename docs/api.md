@@ -812,6 +812,41 @@ Snapshot de un partido en curso, leído de FIBA LiveStats. El cliente hace polli
 
 ---
 
+## GET `/api/live/<game_id>/momentum` — NUEVO (F-02)
+
+Lo que está cambiando el partido ahora (no el acumulado). Misma fuente, caché y errores que `GET /api/live/<game_id>`: no descarga aparte. Partido en curso → calculado sobre los datos en memoria del snapshot; partido guardado → estado al cierre, calculado sobre `pbp_events` + posesiones de A-01 (cacheado, se invalida con datos o configuración). Mismo `?url=` opcional.
+
+**Response 200:**
+```json
+{
+  "status": "en_curso", "stale": false, "fetched_at": "…", "game_id": "2849328", "has_pbp": true,
+  "now": {"period": 2, "period_type": "REGULAR", "elapsed_secs": 1200, "label": "2C 0:00"},
+  "teams": {"home": {"code": "OMU", "name": "…"}, "away": {"code": "SAY", "name": "…"}},
+  "thresholds": {"last_possessions": 10, "window_secs": 300, "last_outcomes": 5, "hot_consecutive_makes": 3,
+                 "hot_points": 8, "hot_points_window_secs": 180, "assist_streak": 4, "oreb_in_quarter": 3,
+                 "cold_consecutive_tov": 3},
+  "run": {"team_code": "SAY", "side": "away", "points": 8, "opp_points": 0,
+          "since": {"period": 2, "clock_secs": 154, "label": "2C 2:34"}, "elapsed_secs": 134},
+  "last_possessions": {"n": 10, "home": {"ppp": {"value": 1.2, "reason": null}, "possessions": 10, "points": 12}, "away": {}},
+  "last_window": {"window_secs": 300, "reason": null,
+                  "home": {"oer": {"value": 1.15, "reason": null}, "der": {}, "net_rating": {}, "possessions": 12, "points": 14}, "away": {}},
+  "last_outcomes": {"n": 5, "home": [{"end_type": "t3c", "label": "Triple convertido", "pts": 3, "player": "…",
+                    "assister": "…", "is_three": true, "had_second_chance": false, "incomplete": false, "clock": "2C 0:41"}], "away": []},
+  "hot": [{"player_key": "OMU|R. Previatti", "name": "R. Previatti", "team_code": "OMU", "side": "home",
+           "marks": [{"rule": "makes_streak", "value": 3, "label": "3 tiros de campo convertidos seguidos"},
+                     {"rule": "oreb_in_quarter", "value": 3, "label": "3 rebotes ofensivos en el cuarto"}]}],
+  "cold": [{"player_key": "…", "name": "…", "marks": [{"rule": "cold_streak", "value": 3, "label": "3 pérdidas seguidas"}]}]
+}
+```
+- `run`: parcial abierto = puntos seguidos del último equipo que anotó (`null` si nadie anotó). `opp_points` siempre 0.
+- `last_possessions`/`last_window`: `null` con razón `pocas_posesiones` / `pocos_minutos` si la muestra no alcanza (nunca un valor sobre muestra parcial). OER/DER de la ventana = puntos por posesión reconstruida (A-01), propia / del rival.
+- `last_outcomes`: de la más reciente a la más vieja.
+- Reglas (`marks[].rule`): `makes_streak` (tiros de campo convertidos seguidos), `points_window` (puntos en la ventana corta), `assist_streak` (últimas canastas de campo del equipo asistidas por el mismo jugador; una sin asistir o de otro corta), `oreb_in_quarter` (se reinicia en cada período), `cold_streak` (pérdidas sin canasta, asistencia ni rebote propio en el medio). Umbrales: claves `momentum.*` (F-13).
+
+**Errores:** los mismos que `GET /api/live/<game_id>`.
+
+---
+
 ## POST `/api/identity/merge` — admin
 
 Une dos fichas de jugador **del mismo equipo** (C-08): `target_id` conserva el id y absorbe a `source_id`. Las filas de `player_game_stats` de la absorbida pasan a la vigente y `source_id` queda con `merged_into`, de modo que `GET /api/player/<source_id>` y cualquier consulta por su nombre resuelven a la ficha vigente. No se modifica ninguna estadística ni nombre crudo.

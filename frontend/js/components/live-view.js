@@ -4,6 +4,7 @@
 import { api } from "../api.js";
 import { PCT, DEC1, DEC2, isNull, nullDisplay } from "../core/format.js";
 import { renderGameView } from "./game-view.js";
+import { momentumHTML } from "./momentum-panel.js";
 
 function esc(s) { return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
 
@@ -42,12 +43,17 @@ let _timer = null;
 let _token = 0;
 let _pollSecs = POLL_DEFAULT;
 let _offline = false;
+let _tab = "vivo";
+let _momentum = null;
+let _momentumError = null;
 
 export function destroyLiveView() {
   _token++;
   if (_timer) clearTimeout(_timer);
   _timer = null;
   _data = null;
+  _momentum = null;
+  _momentumError = null;
 }
 
 export async function renderLiveView(el, gameId, { url } = {}) {
@@ -57,6 +63,7 @@ export async function renderLiveView(el, gameId, { url } = {}) {
   _gameId = gameId;
   _url = url || null;
   _offline = false;
+  _tab = "vivo";
   el.innerHTML = '<p class="empty"><span class="spinner"></span>Cargando partido…</p>';
   _pollSecs = await _loadPollSecs();
   if (token !== _token) return;
@@ -95,8 +102,31 @@ async function _poll(token) {
     _renderFinished();
     return;
   }
+  if (_tab === "momentum") await _loadMomentum(token);   // mismo ciclo: sin temporizador propio
+  if (token !== _token) return;
   _render();
   _schedule(token);
+}
+
+async function _loadMomentum(token) {
+  try {
+    const m = await api.momentum(_gameId, _url ? { url: _url } : {});
+    if (token !== _token) return;
+    _momentum = m;
+    _momentumError = null;
+  } catch (e) {
+    if (token !== _token) return;
+    if (!_momentum) _momentumError = e.message || "No se pudo cargar el momentum.";
+  }
+}
+
+function _setTab(id) {
+  _tab = id;
+  _render();
+  if (id === "momentum" && !_momentum) {
+    const token = _token;
+    _loadMomentum(token).then(() => { if (token === _token && _tab === "momentum") _render(); });
+  }
 }
 
 function _schedule(token) {
@@ -157,7 +187,23 @@ function _render() {
     return;
   }
 
-  html += `
+  html += `<div class="gv-tabs">
+    ${[["vivo", "En vivo"], ["momentum", "Momentum"]].map(([id, label]) =>
+      `<button class="gv-tab lv-tab${_tab === id ? " active" : ""}" data-tab="${id}">${label}</button>`).join("")}
+  </div>`;
+  html += _tab === "momentum" ? _momentumBody() : _vivoBody(d, home, away);
+  _el.innerHTML = html;
+  _el.querySelectorAll(".lv-tab").forEach(b => b.addEventListener("click", () => _setTab(b.dataset.tab)));
+}
+
+function _momentumBody() {
+  if (_momentum) return momentumHTML(_momentum);
+  if (_momentumError) return `<div class="card"><p class="empty below-avg">${esc(_momentumError)}</p></div>`;
+  return '<p class="empty"><span class="spinner"></span>Cargando momentum…</p>';
+}
+
+function _vivoBody(d, home, away) {
+  return `
     <div class="card">
       <div class="card-title">Eficiencia</div>
       ${_compareTable(TEAM_ROWS, home, away)}
@@ -180,7 +226,6 @@ function _render() {
       ${_playersHTML(home, d.players?.home || [])}
       ${_playersHTML(away, d.players?.away || [])}
     </div>`;
-  _el.innerHTML = html;
 }
 
 function _fmtTime(iso) {
