@@ -20,7 +20,7 @@ const SC_courtBg = "#f3f6fa", SC_paintBg = "#c7d8ec", SC_restrictBg = "#b4c8e6",
       SC_cornerBg = "#efe9c4", SC_line = "#46566a", SC_boxText = "#1f2937";
 
 // ── Nombres de zona para tooltip ──────────────────────────────────────────
-const ZONE_LABELS = {
+export const ZONE_LABELS = {
   restricted_area:   "Zona restringida",
   mid_top:           "Media distancia central",
   mid_left_far:      "Media izquierda lejana",

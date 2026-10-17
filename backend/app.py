@@ -30,6 +30,7 @@ import shot_zones
 import possessions
 import game_analysis
 import live
+import prepare
 import matchups  # noqa: F401 — registra entidad matchup
 from metrics_catalog import MetricsError
 from tables import TableError
@@ -1053,6 +1054,56 @@ def _live_response(fn, game_id: str):
     except live.LiveFetchError:
         return jsonify({"error": "No se pudo obtener el partido en vivo.",
                         "code": "fiba_no_disponible"}), 502
+
+
+# ── Preparar partido (F-03) ──────────────────────────────────────────────────
+
+def _bad(msg, status=400, code="parametro_invalido"):
+    return jsonify({"error": msg, "code": code}), status
+
+
+@app.route("/api/prepare")
+@login_required
+def prepare_route():
+    team = (request.args.get("team") or "").strip().upper()
+    rival = (request.args.get("rival") or "").strip().upper()
+    if not team:
+        return _bad("Falta el equipo")
+    if not rival:
+        return _bad("Falta el rival")
+    if team == rival:
+        return _bad("El rival no puede ser el mismo equipo")
+    try:
+        last = context._parse_last(request.args.get("last"))
+        comp = repository.resolve_competition(request.args.get("competition"), team_code=team)
+    except ContextError as e:
+        return _bad(str(e), e.status)
+    except CompetitionError as e:
+        return _bad(str(e), e.status)
+    if comp["id"] is None:
+        return _bad("Elegí una competencia para preparar el partido.")
+    try:
+        return jsonify(prepare.prepare_report(team, rival, comp["id"], last=last))
+    except prepare.PrepareError as e:
+        return _bad(e.message, e.status, e.code)
+
+
+@app.route("/api/h2h")
+@login_required
+def h2h_route():
+    a = (request.args.get("a") or "").strip().upper()
+    b = (request.args.get("b") or "").strip().upper()
+    if not a or not b:
+        return _bad("Faltan los dos equipos")
+    if a == b:
+        return _bad("El rival no puede ser el mismo equipo")
+    comp_id = None
+    if request.args.get("competition"):
+        try:
+            comp_id = competitions.resolve(request.args.get("competition"))
+        except CompetitionError as e:
+            return _bad(str(e), e.status)
+    return jsonify(prepare.head_to_head(a, b, comp_id))
 
 
 # ── Lineups / ON-OFF / Clutch (motor de quintetos + cierres) ─────────────────

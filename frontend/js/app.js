@@ -13,6 +13,7 @@ import { tableToData, downloadBlob } from "./components/exporters.js";
 import { shotChart, bindZoneTooltips } from "./components/shot-chart.js";
 import { renderGameView } from "./components/game-view.js";
 import { renderLiveView, destroyLiveView } from "./components/live-view.js";
+import { renderPrepare } from "./components/prepare-report.js";
 
 // ── Toast ──────────────────────────────────────────────────────────────────
 function toast(msg, type = "ok") {
@@ -276,7 +277,7 @@ async function refreshCompareSelectors() {
 }
 
 // ── Nav ────────────────────────────────────────────────────────────────────
-const sections = ["import", "league", "team", "compare", "player", "search", "partido", "config"];
+const sections = ["import", "league", "team", "compare", "player", "search", "preparar", "partido", "config"];
 let activeSection = "import";
 let _lastSection = "import";
 
@@ -2292,6 +2293,7 @@ const NAV_ITEMS = {
   compare: { icon: "⚡", label: "Comparar" },
   player:  { icon: "👤", label: "Jugador" },
   search:  { icon: "🔎", label: "Buscar" },
+  preparar: { icon: "📋", label: "Preparar" },
   partido: { icon: "🏀", label: "Partido" },
 };
 
@@ -2395,6 +2397,11 @@ function renderApp() {
         <div id="search-main"><p class="empty"><span class="spinner"></span>Cargando buscador...</p></div>
       </div>
 
+      <!-- Preparar partido (F-03) -->
+      <div class="section" id="sec-preparar">
+        <div id="preparar-main"></div>
+      </div>
+
       <!-- Partido (F-07) -->
       <div class="section" id="sec-partido">
         <div id="partido-main"><p class="empty">Selecciona un partido desde el catálogo.</p></div>
@@ -2413,6 +2420,7 @@ function renderApp() {
       if (btn.dataset.section === "team")    refreshTeamSelector();
       if (btn.dataset.section === "compare") renderCompare();
       if (btn.dataset.section === "search")  renderSearch();
+      if (btn.dataset.section === "preparar") renderPrepare(document.getElementById("preparar-main"), { onOpenGame: showGame });
     });
   });
 

@@ -848,6 +848,58 @@ Lo que está cambiando el partido ahora (no el acumulado). Misma fuente, caché 
 
 ---
 
+## GET `/api/prepare` — NUEVO (F-03)
+
+Informe de scouting de un rival (Preparar partido), en una sola respuesta. Cacheado por `(team, rival, competencia, last)` y versión de datos/configuración; < 10 s en frío.
+
+**Query:** `team`, `rival` (códigos, requeridos), `competition` (opcional; default: la del partido más reciente de `team`), `last` (opcional: últimos N partidos **del rival**; aplica a todo el informe salvo el historial).
+
+**Response 200:**
+```json
+{
+  "summary": {"team": {"code": "LAG", "name": "LAGOMAR"}, "rival": {"code": "TAB", "name": "TABARE"},
+              "competition": {"id": 1, "label": "Liga de Ascenso 2026"}, "team_games": 2,
+              "rival_games_considered": 2, "rival_games_total": 2, "last": null, "generated_at": "…"},
+  "advantages": [{"id": "tiro_defensa", "side": "defensa", "title": "Su tiro vs nuestra defensa del tiro",
+                  "own_metric": "opp_efg_pct", "ref_metric": "efg_pct", "own_label": "eFG% rival", "ref_label": "eFG%",
+                  "own_fmt": "pct", "ref_fmt": "pct", "own": 0.42, "ref": 0.466, "own_pct": 92, "ref_pct": 31,
+                  "edge": 61, "strength": "clara", "text": "Defendemos el tiro mejor de lo que ellos tiran.", "direction": "up"}],
+  "threats": ["… mismo formato, edge más negativo primero"],
+  "sample_warning": true,
+  "rival_lineups": {"rows": [{"id": "TAB:96-99-…", "name": "…", "games": 2, "minutes": 33.4, "possessions": 73.8,
+                              "oer": 1.05, "der": 1.12, "net_rating": -0.14, "net_adj": -0.10, "net_band": 0.33,
+                              "sample": {"level": "alta", "…": "badge T-02"}}], "reason": null},
+  "rival_threats": {"top_usage": [{"player_id": 105, "name": "A. Da Costa", "games": 2, "mpg": 35.5, "ppg": 23.0,
+                                   "uso_pct": {"value": 0.29, "reason": null}, "ts_pct": {}, "efg_pct": {}}],
+                    "zones": {"…": "mismo payload que GET /api/shot-zones"},
+                    "best_zone": {"zone": "restricted_area", "ppt": 1.27, "attempts": 74, "…": "…"},
+                    "points": {"…": "mismo formato que distribution de GET /api/live"}},
+  "h2h": {"…": "mismo formato que GET /api/h2h"},
+  "matchups": {"games": ["9999991", "2849343"], "reason": null,
+               "quinteto": {"rows": [], "matrix": {}}, "jugador": {"rows": []},
+               "jugador_quinteto": {"rows": []}, "jugador_quinteto_rival": {"rows": []}},
+  "suggestions_profile": null
+}
+```
+- Ventajas/amenazas: 15 duelos (nuestro ataque vs su defensa, nuestra defensa vs su ataque, y la misma métrica en ambos) con percentiles de T-01 contra toda la competencia (sin umbral de muestra; `sample_warning` si alguno de los dos tiene menos de `sample.team.min` partidos). `edge` = percentil propio − percentil del rival; ventajas = 5 mayores, amenazas = 5 menores.
+- Cruces (`matchups`): filas de `matchups.team_matchups` (mismo formato que `GET /api/game/<id>/matchups`, con `games: [{game_id, possessions}]` y `net_band`) sobre los partidos entre ambos que entran en el filtro del rival. Sin partidos → `reason: "sin_enfrentamientos"`.
+
+**Errores:** `400 parametro_invalido` ("Falta el equipo", "Falta el rival", "El rival no puede ser el mismo equipo", `last` inválido), `404 no_encontrado` ("Equipo no encontrado" / "Rival no encontrado" en la competencia).
+
+---
+
+## GET `/api/h2h` — NUEVO (F-03)
+
+Historial completo entre dos equipos, en todas las competencias visibles (o una con `competition`). Orientado al equipo `a`.
+
+**Query:** `a`, `b` (códigos, requeridos), `competition` (opcional).
+
+**Response 200:** `{"team_a": "LAG", "team_b": "TAB", "games": [{"game_id", "date", "competition_id", "competition_label", "venue": "L|V", "score_a", "score_b", "winner"}], "record": {"wins_a": 2, "wins_b": 0}}` (más reciente primero).
+
+**Errores:** `400 parametro_invalido` (falta alguno o son iguales).
+
+---
+
 ## POST `/api/identity/merge` — admin
 
 Une dos fichas de jugador **del mismo equipo** (C-08): `target_id` conserva el id y absorbe a `source_id`. Las filas de `player_game_stats` de la absorbida pasan a la vigente y `source_id` queda con `merged_into`, de modo que `GET /api/player/<source_id>` y cualquier consulta por su nombre resuelven a la ficha vigente. No se modifica ninguna estadística ni nombre crudo.

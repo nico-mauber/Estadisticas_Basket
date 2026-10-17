@@ -80,6 +80,8 @@ export const api = {
   gameShots:    (gameId, params = {}) => apiFetch(`/api/game/${encodeURIComponent(gameId)}/shots${qs(params)}`),
   live:         (gameId, params = {}) => apiFetch(`/api/live/${encodeURIComponent(gameId)}${qs(params)}`),
   momentum:     (gameId, params = {}) => apiFetch(`/api/live/${encodeURIComponent(gameId)}/momentum${qs(params)}`),
+  prepare:      (params = {}) => apiFetch(`/api/prepare${qs(params)}`),
+  h2h:          (params = {}) => apiFetch(`/api/h2h${qs(params)}`),
   searchPlayers: (params = {}) => apiFetch(`/api/search/players${qs(params)}`),
   mergePlayers:  (targetId, sourceId) => send("/api/identity/merge", "POST", { target_id: targetId, source_id: sourceId }),
   // Cierres: "all" (todas las competencias) se envía como "sin parámetro": este endpoint no entiende "all"

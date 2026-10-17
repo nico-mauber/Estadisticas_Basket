@@ -1447,6 +1447,32 @@ def metrics_catalog_keys() -> frozenset:
     return frozenset(out)
 
 
+POINTS_ORIGIN_KEYS = ("second_chance_pts", "fast_break_pts", "pts_from_tov")
+
+
+def points_distribution(t: dict) -> dict:
+    """Cómo se consiguieron los puntos de un box de equipo (F-01, F-03). Por tipo de tiro las
+    categorías son excluyentes y suman PTS; por origen (desglose de FIBA) se superponen entre sí.
+    Desglose no publicado → nulo con razón, nunca 0 (C-11)."""
+    def v(value):
+        return {"value": value, "reason": None if value is not None else "no_registrado"}
+
+    pts = t.get("pts") or 0
+    paint = t.get("paint_pts")
+    three = (t.get("fgm3") or 0) * 3
+    ft = t.get("ftm") or 0
+    mid = None if paint is None else max(0, (t.get("fgm2") or 0) * 2 - paint)
+    known = sum(x for x in (paint, mid, three, ft) if x is not None)
+    return {
+        "total": pts,
+        "by_shot": {
+            "paint_pts": v(paint), "mid_pts": v(mid), "three_pts": v(three), "ft_pts": v(ft),
+            "otros_no_clasificado": v(max(0, pts - known)),
+        },
+        "by_origin": {k: v(t.get(k)) for k in POINTS_ORIGIN_KEYS},
+    }
+
+
 def sum_bundles(bundles: list) -> "StatBundle":
     """Suma una lista de `StatBundle` de la MISMA entidad (un bundle por partido) en uno solo
     (plan §4.4). Un `None` en cualquier sumando de un conteo deja el total en `None` (C-11: un
