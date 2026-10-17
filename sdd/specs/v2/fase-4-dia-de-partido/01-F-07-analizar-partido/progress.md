@@ -89,6 +89,6 @@
 - T-F1..T-F23: Verificación completa
 - Tablas T-06 formales (register_table)
 - load_matchup_bundles completo
-- team_matchups completo (F-03)
+- ~~team_matchups completo (F-03)~~ — hecho en F-03 (2026-10-17)
 - Parciales desde period_pts (F-11)
 - Bandas de tiro (A-05)

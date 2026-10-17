@@ -216,8 +216,8 @@ function _vivoBody(d, home, away) {
     <div class="card">
       <div class="card-title">Cómo se consiguen los puntos</div>
       <div class="lv-dist-row">
-        ${_distributionHTML(home, d.distribution?.home)}
-        ${_distributionHTML(away, d.distribution?.away)}
+        ${pointsDistributionHTML(home.name, d.distribution?.home)}
+        ${pointsDistributionHTML(away.name, d.distribution?.away)}
       </div>
     </div>
     <div class="card">
@@ -277,7 +277,7 @@ function _seasonNote(home, away) {
   return `<p class="lv-hint">Δ temp. = diferencia contra el promedio de temporada del propio equipo (${parts.join(" · ")}).</p>`;
 }
 
-function _distributionHTML(team, dist) {
+export function pointsDistributionHTML(teamName, dist) {
   if (!dist) return '<div class="lv-dist-col"><p class="empty">Sin datos de distribución todavía.</p></div>';
   const total = dist.total || 0;
   const row = (label, m) => {
@@ -291,7 +291,7 @@ function _distributionHTML(team, dist) {
     </div>`;
   };
   return `<div class="lv-dist-col">
-    <h4>${esc(team.name)} · ${total} pts</h4>
+    <h4>${esc(teamName)} · ${total} pts</h4>
     <div class="lv-dist-group">Por tipo de tiro</div>
     ${Object.entries(SHOT_LABELS).map(([k, l]) => row(l, dist.by_shot?.[k])).join("")}
     <div class="lv-dist-group">Por origen <small>(categorías no excluyentes)</small></div>

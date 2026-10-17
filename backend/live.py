@@ -27,7 +27,7 @@ import repository
 from competitions import CompetitionError
 from database import db, Game
 from game_analysis import elapsed_secs, period_label, _clock_display
-from stats_engine import StatBundle, compute_standard, _parse_minutes, played
+from stats_engine import StatBundle, compute_standard, _parse_minutes, played, points_distribution
 
 log = logging.getLogger(__name__)
 
@@ -35,7 +35,6 @@ TEAM_KEYS = ("oer", "der", "net_rating", "efg_pct", "ts_pct", "ppp", "possession
              "to_pct", "or_pct", "ft_rate", "ppt", "pace")
 VOLUME_KEYS = frozenset({"possessions"})
 PLAYER_KEYS = ("oer", "ts_pct", "efg_pct", "uso_pct", "plus_minus")
-ORIGIN_KEYS = ("second_chance_pts", "fast_break_pts", "pts_from_tov")
 CHAIN_KEYS = ("points_created", "points_from_assist", "oreb_points", "steal_points", "turnover_cost")
 
 
@@ -270,7 +269,7 @@ def _build_snapshot(parsed: dict, game_id: str) -> dict:
         "has_pbp": has_pbp,
         "clock": clock,
         "teams": teams,
-        "distribution": {"home": _points_distribution(home), "away": _points_distribution(away)},
+        "distribution": {"home": points_distribution(home), "away": points_distribution(away)},
         "players_on_court": on_court,
         "players": players,
     }
@@ -366,24 +365,6 @@ def _vs_season(team_code: str, current: dict) -> dict | None:
 
 def _v(value, reason="no_registrado") -> dict:
     return {"value": value, "reason": None if value is not None else reason}
-
-
-def _points_distribution(t: dict) -> dict:
-    """Por tipo de tiro (excluyentes, suman PTS) y por origen (FIBA, no excluyentes entre sí)."""
-    pts = t.get("pts") or 0
-    paint = t.get("paint_pts")
-    three = (t.get("fgm3") or 0) * 3
-    ft = t.get("ftm") or 0
-    mid = None if paint is None else max(0, (t.get("fgm2") or 0) * 2 - paint)
-    known = sum(v for v in (paint, mid, three, ft) if v is not None)
-    return {
-        "total": pts,
-        "by_shot": {
-            "paint_pts": _v(paint), "mid_pts": _v(mid), "three_pts": _v(three), "ft_pts": _v(ft),
-            "otros_no_clasificado": _v(max(0, pts - known)),
-        },
-        "by_origin": {k: _v(t.get(k)) for k in ORIGIN_KEYS},
-    }
 
 
 def _on_court(events: list, codes: tuple, starters: dict) -> dict:

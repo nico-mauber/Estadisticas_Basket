@@ -132,8 +132,11 @@ def _matchup_id(own_code, own_ids, opp_code, opp_ids):
 
 # ── game_matchups ─────────────────────────────────────────────────────────────
 
+LEVELS = ("quinteto", "jugador", "jugador_quinteto")
+
+
 def game_matchups(game_id: str, level: str = "quinteto", *, side: str = "home"):
-    if level not in ("quinteto", "jugador", "jugador_quinteto"):
+    if level not in LEVELS:
         raise ValueError("Nivel inválido")
 
     data = _game_segments(game_id)
@@ -142,46 +145,62 @@ def game_matchups(game_id: str, level: str = "quinteto", *, side: str = "home"):
     if not data["segments"]:
         return {"rows": [], "reason": data.get("reason", "sin_pbp")}
 
-    home_code = data["home_code"]
-    away_code = data["away_code"]
-    name_to_id = data["name_to_id"]
+    home_code, away_code = data["home_code"], data["away_code"]
+    own, opp = home_code, away_code
+    if level == "jugador_quinteto" and side != "home":
+        own, opp = away_code, home_code
+    return _matchup_rows([(game_id, data)], own, opp, level)
 
-    # id-to-name for display
+
+def team_matchups(team_code: str, rival_code: str, game_ids: list, level: str = "quinteto", *,
+                  side: str = "team"):
+    """Cruces acumulados de todos los partidos `game_ids` entre los dos equipos (F-03), mismo
+    algoritmo por segmentos que `game_matchups`. `side` (solo `jugador_quinteto`): "team" =
+    jugadores propios vs quintetos rivales; "rival" = el sentido inverso. Cada fila trae en
+    `games` los partidos y posesiones del cruce."""
+    if level not in LEVELS:
+        raise ValueError("Nivel inválido")
+    own, opp = team_code, rival_code
+    if level == "jugador_quinteto" and side == "rival":
+        own, opp = rival_code, team_code
+    datas = []
+    for gid in game_ids:
+        data = _game_segments(gid)
+        if data and data["segments"] and {data["home_code"], data["away_code"]} == {team_code, rival_code}:
+            datas.append((gid, data))
+    if not datas:
+        return {"rows": [], "matrix": None, "reason": "sin_enfrentamientos"}
+    return _matchup_rows(datas, own, opp, level)
+
+
+def _matchup_rows(datas: list, own: str, opp: str, level: str) -> dict:
+    """Acumula los tramos 5v5 de uno o más partidos por cruce (`own` = lado propio)."""
     id_to_name = {}
-    for (tc, pn), pid in name_to_id.items():
-        id_to_name[(tc, pid)] = pn
+    for _, data in datas:
+        for (tc, pn), pid in data["name_to_id"].items():
+            id_to_name[(tc, pid)] = pn
 
     acc = {}
-
-    for seg in data["segments"]:
-        h_on = seg["on_court"].get(home_code)
-        a_on = seg["on_court"].get(away_code)
-        if h_on is None or a_on is None:
-            continue
-        if len(h_on) != 5 or len(a_on) != 5:
-            continue
-
-        if level == "quinteto":
-            keys = [(home_code, h_on, away_code, a_on)]
-        elif level == "jugador":
-            keys = [(home_code, frozenset({a}), away_code, frozenset({b}))
-                    for a in h_on for b in a_on]
-        elif level == "jugador_quinteto":
-            if side == "home":
-                keys = [(home_code, frozenset({a}), away_code, a_on)
-                        for a in h_on]
+    for gid, data in datas:
+        for seg in data["segments"]:
+            o_on = seg["on_court"].get(own)
+            p_on = seg["on_court"].get(opp)
+            if o_on is None or p_on is None or len(o_on) != 5 or len(p_on) != 5:
+                continue
+            if level == "quinteto":
+                keys = [(o_on, p_on)]
+            elif level == "jugador":
+                keys = [(frozenset({a}), frozenset({b})) for a in o_on for b in p_on]
             else:
-                keys = [(away_code, frozenset({b}), home_code, h_on)
-                        for b in a_on]
-
-        for own_code, own_ids, opp_code, opp_ids in keys:
-            mid = _matchup_id(own_code, own_ids, opp_code, opp_ids)
-            if mid not in acc:
-                acc[mid] = {"events": [], "seconds": 0,
-                            "own_code": own_code, "own_ids": own_ids,
-                            "opp_code": opp_code, "opp_ids": opp_ids}
-            acc[mid]["events"].extend(seg["events"])
-            acc[mid]["seconds"] += seg["seconds"]
+                keys = [(frozenset({a}), p_on) for a in o_on]
+            for own_ids, opp_ids in keys:
+                mid = _matchup_id(own, own_ids, opp, opp_ids)
+                entry = acc.setdefault(mid, {"events": [], "seconds": 0, "by_game": {},
+                                             "own_code": own, "own_ids": own_ids,
+                                             "opp_code": opp, "opp_ids": opp_ids})
+                entry["events"].extend(seg["events"])
+                entry["seconds"] += seg["seconds"]
+                entry["by_game"].setdefault(gid, []).extend(seg["events"])
 
     rows = []
     for mid, entry in acc.items():
@@ -229,7 +248,10 @@ def game_matchups(game_id: str, level: str = "quinteto", *, side: str = "home"):
             "opp_efg_pct": opp_efg, "opp_ts_pct": opp_ts,
             "to_pct": to_pct, "or_pct": or_pct,
             "sample": badge,
-            "games": [{"game_id": game_id, "possessions": round(t_pos, 1)}],
+            "net_band": sample_mod.band(t_pos or 0, "matchup", "net_rating", poss_def=o_pos or 0)
+                        if net is not None else None,
+            "games": [{"game_id": gid, "possessions": round(_pos(_side_counts(evs, entry["own_code"])), 1)}
+                      for gid, evs in entry["by_game"].items()],
         }
 
         # player-level extra
@@ -266,13 +288,6 @@ def game_matchups(game_id: str, level: str = "quinteto", *, side: str = "home"):
         matrix = {"rows": own_ids_set, "cols": opp_ids_set, "cells": cells}
 
     return {"rows": rows, "matrix": matrix, "reason": None}
-
-
-# ── team_matchups (for F-03) ──────────────────────────────────────────────────
-
-def team_matchups(team_code, rival_code, comp_id, ctx, level="quinteto"):
-    # placeholder for F-03 — iterates over all games between both teams
-    pass
 
 
 # ── Entity registration ──────────────────────────────────────────────────────
