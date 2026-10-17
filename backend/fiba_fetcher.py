@@ -60,15 +60,15 @@ def _data_url(url: str) -> str:
     return f"{_ALLOWED_BASE}/data/{game_id}/data.json"
 
 
-def _fetch_direct(data_url: str, referer: str) -> dict:
+def _fetch_direct(data_url: str, referer: str, timeout: float = 20) -> dict:
     """Fetch data.json with urllib and browser-like headers."""
     req = urllib.request.Request(data_url, headers={**_HEADERS, "Referer": referer})
-    with urllib.request.urlopen(req, timeout=20) as resp:
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
         raw = resp.read()
     return json.loads(raw)
 
 
-def _fetch_page_info(page_url: str) -> dict:
+def fetch_page_info(page_url: str) -> dict:
     """Scrape bs.html for fields NOT present in data.json: game date + competition.
 
     FIBA LiveStats does not include the competition name in data.json — it only
@@ -206,12 +206,14 @@ def _validate_game(game: dict) -> None:
         raise FibaSchemaError("Datos incompletos: no se importó ningún jugador.")
 
 
-def _download(data_url: str, referer: str) -> dict:
-    """data.json por urllib; Playwright solo como respaldo (no existe en Render)."""
+def _download(data_url: str, referer: str, timeout: float = 20, fallback: bool = True) -> dict:
+    """data.json por urllib; Playwright solo como respaldo (no existe en Render).
+    `fallback=False` re-lanza el error de urllib (el modo en vivo distingue 404 de red caída)."""
     try:
-        return _fetch_direct(data_url, referer=referer)
+        return _fetch_direct(data_url, referer=referer, timeout=timeout)
     except Exception:
-        pass
+        if not fallback:
+            raise
     if not _PLAYWRIGHT_AVAILABLE:
         raise RuntimeError("No se pudo obtener datos de FIBA LiveStats (urllib falló y Playwright no está disponible).")
     return _fetch_playwright(data_url)
@@ -222,24 +224,30 @@ def fetch_raw(url: str) -> tuple[dict, dict]:
     que no vienen en data.json). Devuelve (raw, page_info). Lo archiva ingest.py (F-11)."""
     raw = _download(_data_url(url), referer=url)
     _validate_raw(raw)                     # structural guard (clear early error)
-    return raw, _fetch_page_info(url)
+    return raw, fetch_page_info(url)
 
 
-def fetch_raw_by_id(game_id: str) -> dict:
+def page_url_for(game_id: str) -> str:
+    return f"{_ALLOWED_BASE}/u/FUBB/{game_id}/bs.html"
+
+
+def fetch_raw_by_id(game_id: str, timeout: float = 20, fallback: bool = True) -> dict:
     """JSON crudo por id de partido, para reprocesar partidos importados sin URL archivada."""
     if not re.fullmatch(r"\d{5,}", str(game_id)):
         raise ValueError(f"Id de partido inválido: {game_id}")
     raw = _download(f"{_ALLOWED_BASE}/data/{game_id}/data.json",
-                    referer=f"{_ALLOWED_BASE}/u/FUBB/{game_id}/bs.html")
+                    referer=page_url_for(game_id), timeout=timeout, fallback=fallback)
     _validate_raw(raw)
     return raw
 
 
-def parse_game(raw: dict, game_id: str, page_info: dict | None = None) -> dict:
+def parse_game(raw: dict, game_id: str, page_info: dict | None = None, validate: bool = True) -> dict:
     """JSON crudo → dict normalizado listo para persistir. Puro: no accede a la red, así se
-    puede re-ejecutar sobre el JSON archivado (reproceso, F-11)."""
+    puede re-ejecutar sobre el JSON archivado (reproceso, F-11). `validate=False` para un
+    partido en curso, que puede tener legítimamente 0 tiros (F-01)."""
     game = _parse_fiba_json(raw, game_id)
-    _validate_game(game)                   # value guard (catches silent key drift)
+    if validate:
+        _validate_game(game)               # value guard (catches silent key drift)
     info = page_info or {}
     if not game.get("date"):
         game["date"] = info.get("date", "")

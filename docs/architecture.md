@@ -63,8 +63,9 @@ Extrae datos de FIBA LiveStats.
 
 Descarga y parseo están separados para poder reprocesar desde el JSON archivado sin red:
 - `fetch_raw(url)` → `(raw, page_info)`: `data/{game_id}/data.json` por `urllib` (Playwright solo como respaldo, no existe en Render) + fecha y competencia scrapeadas de `bs.html` (no vienen en el `data.json`).
-- `fetch_raw_by_id(game_id)` → `raw`: para reprocesar partidos importados antes de que existiera el archivo.
-- `parse_game(raw, game_id, page_info)` → dict normalizado (`teams[]`, `players[]`, `shots[]`, `pbp[]`, `minutes`). Puro: no accede a la red.
+- `fetch_raw_by_id(game_id, timeout, fallback)` → `raw`: para reprocesar partidos importados antes de que existiera el archivo, y para el modo en vivo (F-01) con `fallback=False` (sin Playwright, re-lanza el error de `urllib` para distinguir 404 de red caída).
+- `fetch_page_info(page_url)` → `{date, competition}` scrapeados de `bs.html`.
+- `parse_game(raw, game_id, page_info, validate=True)` → dict normalizado (`teams[]`, `players[]`, `shots[]`, `pbp[]`, `minutes`). Puro: no accede a la red. `validate=False` para un partido en curso (puede tener 0 tiros).
 - `fetch_game_data(url)` = `parse_game(*fetch_raw(url))`.
 
 **Coordenadas de tiro:** FIBA sí las publica, en `tm[n].shot[]` (cancha completa, 0–100). Se unen al pbp por `actionNumber` y se guardan en `shots.court_x/court_y`; `x/y` (legado) quedan en 0 hasta que C-03 clasifique zonas con esta geometría. **Minutos:** 40 + 5 por prórroga (`periodType = "OVERTIME"`).
@@ -79,10 +80,16 @@ Competencias y temporadas (F-11): el texto de FIBA se mapea a una competencia po
 Informe de calidad de una competencia (F-11): partidos sin pbp, con datos básicos faltantes, pendientes de reproceso, pbp que no cuadra con el box, quintetos inconsistentes (usa `lineups`), sin coordenadas, campos nulos, posibles duplicados; `possession_gaps` (A-01) delega en `possessions.possession_gaps_check` para reportar posesiones incompletas y partidos con diferencia de conciliación mayor al 5 %.
 
 ### `possessions.py`
-Reconstrucción de posesiones (A-01): máquina de estados sobre `pbp_events` que recorre cada partido en orden de `action_number` con reloj monótono por período. `game_possessions(game_id)` devuelve la lista cacheada (`cache.memo("poss:game", ...)`; nunca persistida). `team_possessions(team_code, comp_id)` filtra por equipo/competencia. `reconcile(scope)` concilia conteo reconstruido vs fórmula del glosario por partido o competencia. `possession_gaps_check(comp_id)` alimenta el check de calidad. `register_enricher(name, fn)` permite a A-02..A-05 inyectar atributos. `ppp_stats(comp_id)` calcula media y σ de PPP empírico. `build_segments_both` y `event_lineups` en `lineups.py` dan los quintetos de ambos equipos por tramo y por evento.
+Reconstrucción de posesiones (A-01): máquina de estados sobre `pbp_events` que recorre cada partido en orden de `action_number` con reloj monótono por período. `game_possessions(game_id)` devuelve la lista cacheada (`cache.memo("poss:game", ...)`; nunca persistida). `team_possessions(team_code, comp_id)` filtra por equipo/competencia. `reconcile(scope)` concilia conteo reconstruido vs fórmula del glosario por partido o competencia. `possession_gaps_check(comp_id)` alimenta el check de calidad. `register_enricher(name, fn)` permite a A-02..A-05 inyectar atributos. `ppp_stats(comp_id)` calcula media y σ de PPP empírico. `build_from_events(game_id, events, rows, codes, xy, n2id)` corre la misma reconstrucción sobre datos en memoria, sin base ni caché (partido en vivo, F-01). `build_segments_both` y `event_lineups` en `lineups.py` dan los quintetos de ambos equipos por tramo y por evento.
 
 ### `game_analysis.py`
 Análisis completo de un partido (F-07): vista Analizar (S5). Carga datos del partido (game, team_game_stats, player_game_stats, shots, pbp_events) y calcula todo on-the-fly sin persistir. `TYPE_GROUPS` mapea 11 grupos en español sobre `action_type`. `period_partials(game_id, events, tgs_map)` calcula parciales derivados del pbp con ratings por período (fallback; la fuente oficial `period_pts` requiere F-11 v2). `score_timeline(game_id, events, ...)` arma la línea de tiempo con puntos, tiempos muertos, rachas (`game.run_min_points`), cambios de líder, empates y máxima ventaja. `game_pbp(game_id, events, ...)` filtra jugada a jugada por `player_id`, `types` (grupos) y `periods`. `game_shots(game_id, team_code, ...)` clasifica por zona (`shot_zones`), agrega badges de muestra y filtra por jugador/cuartos/banda/zona. `reconcile_game(...)` ejecuta 4 checks (score_final, players_sum, period_sum, timeline_final). `_game_player_bundles` y `_game_lineup_bundles` calculan StatBundle por jugador y por quinteto. `game_detail(game_id, base)` ensambla todo en un payload cacheado (`cache.memo("game", ...)`).
+
+### `live.py`
+Partido en vivo (F-01). `live_snapshot(game_id, url)`: caché LRU en memoria de proceso (32 partidos, reloj de pared `live.cache_ttl_secs`, no el versionado de `cache.py` porque un partido en curso cambia sin que nadie suba `data_version`) → descarga con `fiba_fetcher.fetch_raw_by_id` y timeout `live.fetch_timeout_secs` → si FIBA falla, último snapshot con `stale: true` → si el pbp trae `game`/`end`, persiste con `ingest.persist_game` + `archive_raw` y sube `data_version`. El snapshot reutiliza `stats_engine.compute_standard` (equipo y jugador, con `bundles.player_derived` para USO%), `lineups.build_segments_both` (en cancha), `possessions.build_from_events` + `chains.py` (cadenas de puntos) y `bundles._team_bundle_from_games` (promedio de temporada, mismo cálculo que `/api/metrics/team`). Minutos = tiempo transcurrido según el pbp. Sin hilos de fondo: el polling lo inicia el cliente.
+
+### `chains.py`
+Cadenas de producción (F-01; A-07 las extiende): `assist_points`, `oreb_points(possessions, events, name_to_id)`, `steal_points(possessions, events, name_to_id)`, `turnover_cost` → `{player_key: {points, count}}` sobre posesiones de A-01. Asistencia = valor del tiro asistido; rebote ofensivo = puntos de la oportunidad que abre (`Chance.n ≥ 2`); robo = puntos de la posesión propia siguiente; pérdida = puntos del rival en la posesión inmediata siguiente.
 
 ### `matchups.py`
 Coincidencia en cancha (F-07): cruces entre quintetos/jugadores de un partido. `_game_segments` cachea los tramos de `lineups.build_segments_both`. `game_matchups(game_id, level, side)` soporta 3 niveles (`quinteto`, `jugador`, `jugador_quinteto`) con conteo de eventos, posesiones, badge y plus/minus. `team_matchups` es placeholder para F-03. `_register()` registra la entidad `matchup` en `metrics_catalog`.
@@ -146,7 +153,9 @@ label/grupo/formato/dirección/`base_mode`/entidades/`legacy_keys`), `register_e
 
 ### `bundles.py`
 Cargadores de `StatBundle` (T-05) para equipo y jugador: `team_game_bundles`, `player_game_bundles` arman los
-conteos crudos por partido desde `repository.*` y los registran en `metrics_catalog`. Quinteto/ON-OFF/cierre
+conteos crudos por partido desde `repository.*` y los registran en `metrics_catalog`. `player_derived(team, opp,
+minutes, game_minutes)` arma los sumandos de equipo ponderados por minutos (base de USO%/AS%/OR%/DR%/REB%; la
+usan también `game_analysis` y `live`). Quinteto/ON-OFF/cierre
 se cargan desde `lineups.lineup_bundle`/`onoff_bundles` y `clutch.clutch_bundle` respectivamente (mismos
 módulos que ya existían, extendidos).
 
