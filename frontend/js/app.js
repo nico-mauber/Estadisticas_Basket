@@ -14,6 +14,7 @@ import { shotChart, bindZoneTooltips } from "./components/shot-chart.js";
 import { renderGameView } from "./components/game-view.js";
 import { renderLiveView, destroyLiveView } from "./components/live-view.js";
 import { renderPrepare } from "./components/prepare-report.js";
+import { initBase, getBase, setBase } from "./core/base.js";
 
 // ── Toast ──────────────────────────────────────────────────────────────────
 function toast(msg, type = "ok") {
@@ -1446,7 +1447,7 @@ function _loadTeamGameLog(teamCode) {
   if (!el) return;
   const compParam = (_teamComp && _teamComp !== "all") ? _teamComp : null;
   mountTable(el,
-    () => api.table("team_game_log", { team: teamCode, competition: compParam, last: _teamLastN || null, base: _teamStdBase }),
+    () => api.table("team_game_log", { team: teamCode, competition: compParam, last: _teamLastN || null, base: getBase() }),
     { tableId: "team_game_log" });
 }
 
@@ -1462,7 +1463,7 @@ function _fillFichaGrids(container, groups, entityType, std, entityId) {
 
 // ── Conjunto estándar de métricas — card "Equipo" (T-05, T-E1) ──────────────
 let _teamStdReq = 0;
-let _teamStdBase = "partido";
+
 let _teamCardGroups = null;
 
 async function _loadTeamStandard(teamCode) {
@@ -1470,7 +1471,7 @@ async function _loadTeamStandard(teamCode) {
   const main = document.getElementById("team-main");
   if (!el) return;
   const req = ++_teamStdReq;
-  renderStandardPanel(el, null, { layout: "grid", base: _teamStdBase });
+  renderStandardPanel(el, null, { layout: "grid", base: getBase() });
   const ctxQuery = { competition: _teamComp, last: _teamLastN || null };
   try {
     await loadCatalog();
@@ -1479,21 +1480,21 @@ async function _loadTeamStandard(teamCode) {
     const fichaStd = await api.metrics("team", { id: teamCode, ...ctxQuery, base: "partido" });
     if (req !== _teamStdReq) return;
     _fillFichaGrids(main, _teamCardGroups, "team", fichaStd, teamCode);
-    const payload = _teamStdBase === "partido"
+    const payload = getBase() === "partido"
       ? fichaStd
-      : await api.metrics("team", { id: teamCode, ...ctxQuery, base: _teamStdBase });
+      : await api.metrics("team", { id: teamCode, ...ctxQuery, base: getBase() });
     if (req !== _teamStdReq) return;
     renderStandardPanel(el, payload, {
       layout: "grid",
-      base: _teamStdBase,
-      onBaseChange: newBase => { _teamStdBase = newBase; _loadTeamStandard(teamCode); _loadTeamGameLog(teamCode); },
+      base: getBase(),
+      onBaseChange: newBase => { setBase(newBase); _loadTeamStandard(teamCode); _loadTeamGameLog(teamCode); },
     });
     if (main) bindMetricCards(main, { entityType: "team", contextQuery: { ...ctxQuery, id: teamCode } });
   } catch (e) {
     if (req !== _teamStdReq) return;
     // Sin conjunto estándar las cards ya muestran el valor; aviso discreto en el panel.
     _fillFichaGrids(main, _teamCardGroups, "team", null, teamCode);
-    renderStandardPanel(el, { error: e.message || "No se pudo cargar el conjunto estándar" }, { layout: "grid", base: _teamStdBase });
+    renderStandardPanel(el, { error: e.message || "No se pudo cargar el conjunto estándar" }, { layout: "grid", base: getBase() });
   }
 }
 
@@ -1942,7 +1943,7 @@ function _applyPlayerData(main, data) {
 
 // ── Conjunto estándar de métricas — card "Jugador" (T-05, T-E2) ─────────────
 let _playerStdReq = 0;
-let _playerStdBase = "partido";
+
 let _playerCardGroups = null;
 
 async function _loadPlayerStandard(playerId) {
@@ -1950,27 +1951,27 @@ async function _loadPlayerStandard(playerId) {
   const main = document.getElementById("player-main");
   if (!el) return;
   const req = ++_playerStdReq;
-  renderStandardPanel(el, null, { layout: "grid", base: _playerStdBase });
+  renderStandardPanel(el, null, { layout: "grid", base: getBase() });
   const ctxQuery = { competition: _playerComp };
   try {
     await loadCatalog();
     const fichaStd = await api.metrics("player", { id: playerId, ...ctxQuery, base: "partido" });
     if (req !== _playerStdReq) return;
     _fillFichaGrids(main, _playerCardGroups, "player", fichaStd, playerId);
-    const payload = _playerStdBase === "partido"
+    const payload = getBase() === "partido"
       ? fichaStd
-      : await api.metrics("player", { id: playerId, ...ctxQuery, base: _playerStdBase });
+      : await api.metrics("player", { id: playerId, ...ctxQuery, base: getBase() });
     if (req !== _playerStdReq) return;
     renderStandardPanel(el, payload, {
       layout: "grid",
-      base: _playerStdBase,
-      onBaseChange: newBase => { _playerStdBase = newBase; _loadPlayerStandard(playerId); _loadPlayerGameLog(playerId); },
+      base: getBase(),
+      onBaseChange: newBase => { setBase(newBase); _loadPlayerStandard(playerId); _loadPlayerGameLog(playerId); },
     });
     if (main) bindMetricCards(main, { entityType: "player", contextQuery: { ...ctxQuery, id: playerId } });
   } catch (e) {
     if (req !== _playerStdReq) return;
     _fillFichaGrids(main, _playerCardGroups, "player", null, playerId);
-    renderStandardPanel(el, { error: e.message || "No se pudo cargar el conjunto estándar" }, { layout: "grid", base: _playerStdBase });
+    renderStandardPanel(el, { error: e.message || "No se pudo cargar el conjunto estándar" }, { layout: "grid", base: getBase() });
   }
 }
 
@@ -2105,7 +2106,7 @@ function _loadPlayerGameLog(playerId) {
   if (!el || playerId == null) return;
   const compParam = (_playerComp && _playerComp !== "all") ? _playerComp : null;
   mountTable(el,
-    () => api.table("player_game_log", { player_id: playerId, competition: compParam, base: _playerStdBase }),
+    () => api.table("player_game_log", { player_id: playerId, competition: compParam, base: getBase() }),
     { tableId: "player_game_log" });
 }
 
@@ -2320,6 +2321,7 @@ function _liveTarget(input) {
 
 function renderApp() {
   loadPopulationMinSize();   // para el copy "la población tiene menos de N entidades" (T-01)
+  initBase();                // base de normalización de la sesión (T-04)
   document.getElementById("app").innerHTML = `
     <header>
       <span class="header-logo">🏀 Smart-Basket</span>

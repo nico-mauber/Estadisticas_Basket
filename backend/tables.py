@@ -32,6 +32,7 @@ from stats_engine import StatBundle, apply_base, compute_standard, sum_bundles
 APP_VERSION = "smart-basket-v22"
 
 _BASE_VALUES = ("total", "partido", "por40", "por100")
+BASE_LABELS = {"total": "Total", "partido": "Por partido", "por40": "Por 40 minutos", "por100": "Por 100 posesiones"}
 
 
 # ── Errores ───────────────────────────────────────────────────────────────────
@@ -187,8 +188,6 @@ def build_table(table_id: str, args: Mapping[str, str]) -> dict:
     # 4. Base
     base = (args.get("base") or config.get("ui.default_base") or "partido")
     if base not in _BASE_VALUES:
-        raise TableError(400, "Base inválida", "parametro_invalido")
-    if base in ("por40", "por100"):
         raise TableError(400, "Base inválida", "parametro_invalido")
 
     treq = TableRequest(table_id=table_id, params=dict(args), comp_id=comp_id, ctx=ctx, base=base)
@@ -560,7 +559,7 @@ def _meta(tdef, treq, title, echo, comp_label) -> dict:
         "entity": {"type": tdef.entity_type, "id": entity_id, "name": entity_name},
         "competition": {"id": treq.comp_id, "label": comp_label, "season": season},
         "filters": _filters_meta(echo),
-        "base": {"key": treq.base, "label": "Total" if treq.base == "total" else "Por partido"},
+        "base": {"key": treq.base, "label": BASE_LABELS[treq.base]},
         "sort": None,
         "columns_visible": None,
         "generated_at": generated_at,
@@ -635,8 +634,8 @@ def bulk_workbook(scope: str, scope_id: str, comp_id: int) -> bytes:
         "title": f"Exportación completa — {scope_label}",
         "entity": {"type": scope, "id": scope_id, "name": scope_label},
         "competition": {"id": comp_id, "label": comp_label},
-        "filters": [{"label": "Base", "value": "Total" if base == "total" else "Por partido"}],
-        "base": {"key": base, "label": "Total" if base == "total" else "Por partido"},
+        "filters": [{"label": "Base", "value": BASE_LABELS[base]}],
+        "base": {"key": base, "label": BASE_LABELS[base]},
         "generated_at": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
         "generated_by": prefs.current_owner(),
         "app_version": APP_VERSION,

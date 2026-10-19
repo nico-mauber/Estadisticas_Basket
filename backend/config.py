@@ -246,7 +246,8 @@ _register(
     # ── Preferencias (reservadas) ──
     _k("ui.default_base", type="enum", default="partido",
        choices=("total", "partido", "por40", "por100"),
-       label="Base de normalización por defecto", section="preferencias", consumer="T-05, T-04"),
+       label="Base de normalización por defecto", section="preferencias", consumer="T-05, T-04",
+       help="Base con la que arrancan las vistas si no se eligió otra en la sesión.", status="activa"),
     _k("ui.metric_labels", type="json", default={},
        label="Etiquetas personalizadas de métricas", section="preferencias", consumer="T-05",
        status="activa"),

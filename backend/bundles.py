@@ -202,7 +202,7 @@ def player_game_bundles(player_id: int, comp_id: int | None, ctx: "context.Conte
         if oc is None:
             on_court = {
                 "games_exact": 0, "games_estimated": 1,
-                "poss_estimated": (pos(team) or 0) * w,
+                "poss_estimated": (pos(team) or 0) * (mp / gm if gm else 0.0),
                 "own": {k: 0 for k in RAW_KEYS}, "opp": {k: 0 for k in RAW_KEYS},
                 "seconds": 0,
             }

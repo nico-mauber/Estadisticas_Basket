@@ -7,6 +7,7 @@ import { metricLabel, metricDef, groupsFor } from "../core/catalog.js";
 import { fmtMetric, fmtSigned, isNull, nullDisplay } from "../core/format.js";
 import { sampleBadge } from "./sample-badge.js";
 import { metricCard } from "./metric-card.js";
+import { BASE_OPTIONS } from "../core/base.js";
 
 const COMPACT_GROUPS = ["volumen", "produccion", "tiro_pct", "balon"];
 
@@ -27,7 +28,7 @@ function _adjHTML(key, metricObj) {
 function _estBadge(metricObj) {
   if (!metricObj) return "";
   let out = "";
-  if (metricObj.estimated) out += `<span class="std-est" title="Estimado por minutos jugados (sin play-by-play)">est.</span>`;
+  if (metricObj.estimated) out += `<span class="std-est" title="Posesiones estimadas por minutos: no hay jugada a jugada para algún partido.">estimado</span>`;
   if (metricObj.partial) out += `<span class="std-partial" title="Calculado con datos parciales de la selección">parcial</span>`;
   return out;
 }
@@ -71,9 +72,8 @@ function _headerHTML(payload, { base, onBaseChange }) {
     ? `<p class="td-muted std-coverage">Cobertura en cancha: ${coverage.on_court_games_exact} de ${coverage.games} partido(s) con play-by-play exacto.</p>`
     : "";
   const toggle = onBaseChange ? `
-    <div class="seg-toggle" role="group">
-      <button type="button" data-base="total" aria-pressed="${base === "total"}">Totales</button>
-      <button type="button" data-base="partido" aria-pressed="${base === "partido"}">Por partido</button>
+    <div class="seg-toggle" role="group" aria-label="Base">
+      ${BASE_OPTIONS.map(o => `<button type="button" data-base="${o.key}" title="${o.title}" aria-pressed="${base === o.key}">${o.label}</button>`).join("")}
     </div>` : "";
   const badge = payload.sample ? sampleBadge(payload.sample) : "";
   const lowSampleWarning = payload.sample && !payload.sample.ranked

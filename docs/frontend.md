@@ -329,7 +329,7 @@ filtrados por `entities`), `stdKeyFor(legacyKey)` (mapa inverso de `legacy_keys`
 `grid` (Equipo, Jugador, Combinación, Cierres): un `<details class="std-group">` por grupo (el grupo "Otras
 métricas" cerrado), celdas con etiqueta + valor + marcas "est."/"parcial". Layout `compare` (ON/OFF): tabla
 `Métrica | ON | OFF | Δ` (Δ solo en tasas). Estados: cargando ("Calculando métricas…"), vacío ("Sin partidos
-en la selección…"), error (mensaje del backend). Selector de base "Totales | Por partido".
+en la selección…"), error (mensaje del backend). Selector de base (T-04) "Totales · Por partido · Por 40' · Por 100 pos." (`core/base.js`): una sola base para toda la sesión (sessionStorage `sb.base`), reflejada en la URL (`?base=`); sin elección arranca en `ui.default_base` (Configuración). El backend escala; el panel solo la pide. Métrica con posesiones estimadas → marca "estimado".
 
 Montado en las cinco pantallas: Equipo y Jugador agregan una card nueva "Conjunto estándar" (no reemplaza las
 cards existentes); Combinación, ON/OFF y Cierres **reemplazan** sus grillas de métricas anteriores por el
