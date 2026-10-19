@@ -1237,6 +1237,9 @@ tbody tr.fuera-poblacion { opacity: .6; }
 .gv-winner { color: var(--accent); }
 .gv-pts { font-size: 28px; font-weight: 800; }
 .gv-sep { font-size: 22px; color: var(--muted); }
+
+.gv-export { margin-top: 12px; display: flex; justify-content: center; }
+.gv-block-error p { margin: 0 0 8px; }
 .gv-warn { margin-top: 8px; color: var(--below); font-size: 12px; }
 .gv-tabs { display: flex; gap: 2px; overflow-x: auto; margin-bottom: 12px; padding: 0 4px; }
 .gv-tab { background: var(--card); border: 1px solid var(--border); border-radius: 6px 6px 0 0;

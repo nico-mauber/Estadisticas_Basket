@@ -7,6 +7,7 @@ import { shotChart, bindZoneTooltips } from "./shot-chart.js";
 import { sampleBadge } from "./sample-badge.js";
 import { createDataTable, dtLoading, dtError, dtEmpty } from "./data-table.js";
 import { momentumHTML } from "./momentum-panel.js";
+import { mountGameExport } from "./game-report.js";
 
 function esc(s) { return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
 
@@ -32,6 +33,15 @@ const EVENT_TYPE_LABELS = {
   perdida:"Pérdida", robo:"Robo", tapon:"Tapón", falta:"Falta",
   cambio:"Cambio", tiempo_muerto:"Timeout", otro:"Otro",
 };
+
+// Bloque con error: mensaje + "Reintentar" (sin romper el resto de la vista). Sin conexión se avisa distinto.
+function _blockError(el, msg, retry) {
+  const offline = typeof navigator !== "undefined" && navigator.onLine === false;
+  el.innerHTML = `<div class="empty below-avg gv-block-error">
+    <p>${esc(offline ? "Sin conexión: no se pudo cargar este bloque." : msg)}</p>
+    <button type="button" class="btn btn-ghost btn-sm gv-retry">Reintentar</button></div>`;
+  el.querySelector(".gv-retry")?.addEventListener("click", retry);
+}
 
 let _detail = null;
 let _el = null;
@@ -62,7 +72,7 @@ export async function renderGameView(el, gameId) {
   try {
     _detail = await api.game(gameId);
   } catch (e) {
-    el.innerHTML = `<p class="empty below-avg">${esc(e.message || "No se pudo cargar el partido")}</p>`;
+    _blockError(el, e.message || "No se pudo cargar el partido", () => renderGameView(el, gameId));
     return;
   }
   if (!_detail || !_detail.game) {
@@ -97,6 +107,7 @@ function _renderShell() {
         <span class="gv-pts">${g.away_score}</span>
         <span class="gv-team ${winner === 'away' ? 'gv-winner' : ''}">${esc(g.away_team)}</span>
       </div>
+      <div class="gv-export" id="gv-export"></div>
       ${g.needs_reprocess ? '<div class="gv-warn">Partido importado con versión anterior. Reprocesá para obtener datos completos.</div>' : ''}
     </div>
     <div class="gv-tabs">
@@ -111,7 +122,18 @@ function _renderShell() {
       _renderTab();
     });
   });
+  mountGameExport(document.getElementById("gv-export"),
+    () => ({ detail: _detail, shots: { home: _shotsHome, away: _shotsAway }, matchups: _matchupsData }));
+  _prefetch();
   _renderTab();
+}
+
+// Carga en segundo plano lo que el informe de scouting necesita (tiros y cruces); sin error visible.
+function _prefetch() {
+  const g = _detail.game, id = g.game_id;
+  api.gameShots(id, { team: g.home_code }).then(d => { if (_detail?.game.game_id === id) _shotsHome = d; }).catch(() => {});
+  api.gameShots(id, { team: g.away_code }).then(d => { if (_detail?.game.game_id === id) _shotsAway = d; }).catch(() => {});
+  if (g.has_pbp) api.gameMatchups(id).then(d => { if (_detail?.game.game_id === id) _matchupsData = d; }).catch(() => {});
 }
 
 function _renderTab() {
@@ -300,9 +322,11 @@ async function _renderTiros(el) {
     _shotsHome = home;
     _shotsAway = away;
   } catch (e) {
-    el.innerHTML = `<p class="empty below-avg">${esc(e.message || "No se pudo cargar los tiros")}</p>`;
+    if (_tab !== "tiros") return;
+    _blockError(el, e.message || "No se pudo cargar los tiros", () => _renderTiros(el));
     return;
   }
+  if (_tab !== "tiros") return;
 
   el.innerHTML = `
     <div class="gv-shots-row">
@@ -337,9 +361,11 @@ async function _renderJugadas(el) {
   try {
     if (!_pbpData) _pbpData = await api.gamePbp(g.game_id);
   } catch (e) {
-    el.innerHTML = `<p class="empty below-avg">${esc(e.message || "No se pudo cargar las jugadas")}</p>`;
+    if (_tab !== "jugadas") return;
+    _blockError(el, e.message || "No se pudo cargar las jugadas", () => _renderJugadas(el));
     return;
   }
+  if (_tab !== "jugadas") return;
 
   const pbp = _pbpData;
   const typeGroups = pbp.type_groups || [];
@@ -485,9 +511,11 @@ async function _renderCruces(el) {
   try {
     if (!_matchupsData) _matchupsData = await api.gameMatchups(g.game_id);
   } catch (e) {
-    el.innerHTML = `<p class="empty below-avg">${esc(e.message || "No se pudo cargar los cruces")}</p>`;
+    if (_tab !== "cruces") return;
+    _blockError(el, e.message || "No se pudo cargar los cruces", () => _renderCruces(el));
     return;
   }
+  if (_tab !== "cruces") return;
 
   const data = _matchupsData;
   const matchups = data.rows || [];
@@ -529,7 +557,8 @@ async function _renderMomentum(el) {
   try {
     if (!_momentumData) _momentumData = await api.momentum(g.game_id);
   } catch (e) {
-    el.innerHTML = `<p class="empty below-avg">${esc(e.message || "No se pudo cargar el momentum")}</p>`;
+    if (_tab !== "momentum") return;
+    _blockError(el, e.message || "No se pudo cargar el momentum", () => _renderMomentum(el));
     return;
   }
   if (_tab !== "momentum") return;
