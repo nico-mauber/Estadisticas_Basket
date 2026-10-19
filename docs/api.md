@@ -1075,7 +1075,7 @@ Response 200:
 | `id` (obligatorio) | `team`: `team_code` · `player`: `player_id` · `lineup`: `<team_code>:<pid>-<pid>-…` (3–5 ids) · `onoff`: `<team_code>:<pid>` · `clutch`: `team_code` |
 | `competition` | id \| `all` \| texto legado (C-02) |
 | `last` | entero > 0 |
-| `base` | `total` \| `partido` (default `partido`); `por40`/`por100` → 400 (T-04) |
+| `base` | `total` \| `partido` \| `por40` \| `por100` (default `partido`). Conteos: total, ÷ partidos, × 2400/segundos de la entidad, × 100/posesiones (propias o del rival según `per100_den`; jugador: las del equipo con él en cancha, `estimated: true` si se estimaron por minutos). Tasas (`fixed`) iguales en las 4; `volume` en total para por40/por100; denominador 0 → nulo `sin_datos` (T-04) |
 | `margin`, `window_secs` | solo `clutch` |
 
 Response 200 (`GET /api/metrics/team?id=VER&competition=1&base=total`, recorte):
@@ -1101,7 +1101,7 @@ y `diff` (ON − OFF, solo métricas `kind: "rate"`).
 **Errores:**
 | HTTP | `code` | Cuándo |
 |---|---|---|
-| 400 | `parametro_invalido` | Tipo de entidad desconocido / falta `id` / base no disponible (`por40`/`por100`) |
+| 400 | `parametro_invalido` | Tipo de entidad desconocido / falta `id` / base inválida |
 | 400 | `competencia_inexistente` | La competencia no existe |
 | 400 | `contexto_invalido` | Parámetro de contexto inválido |
 | 404 | `no_encontrado` | Id inexistente |

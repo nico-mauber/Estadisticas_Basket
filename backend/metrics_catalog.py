@@ -76,10 +76,18 @@ _PLAYER_ONLY = ("player",)
 _TEAM_ONLY = ("team",)
 
 
+# Conteos que miden lo concedido o lo que genera el rival: "por 100" se divide por las
+# posesiones del rival (T-04 RF-4); el resto de los conteos, por las propias.
+_PER100_OPP = frozenset({"pts_against", "blk_received", "fouls_drawn", "stops"})
+
+
 def _md(key, label, group, fmt, direction, kind, base_mode, *, entities=_ALL_ENTITIES,
         rel_dist=True, legacy_keys=()) -> MetricDef:
+    per100_den = None
+    if base_mode == "count":
+        per100_den = "opp" if key in _PER100_OPP else "own"
     return MetricDef(key=key, label=label, group=group, fmt=fmt, direction=direction,
-                     kind=kind, base_mode=base_mode, entities=entities,
+                     kind=kind, base_mode=base_mode, per100_den=per100_den, entities=entities,
                      rel_dist=rel_dist, legacy_keys=legacy_keys)
 
 
@@ -412,7 +420,7 @@ def build_payload(entity_type: str, args) -> dict:
 
     base = args.get("base") or "partido"
     if base not in _BASE_VALUES:
-        raise MetricsError("La base debe ser total o partido", 400, "parametro_invalido")
+        raise MetricsError("La base debe ser total, partido, por40 o por100", 400, "parametro_invalido")
 
     import context as context_mod
     from competitions import CompetitionError

@@ -901,6 +901,10 @@ thead th[data-key]:hover  { color: var(--text); }
   font-weight: 600;
   cursor: pointer;
   transition: all .15s;
+  white-space: nowrap;
+}
+@media (max-width: 479px) {
+  .seg-toggle button { padding: 7px 4px; font-size: 11px; }
 }
 .seg-toggle button[aria-pressed="true"] {
   background: var(--accent);
@@ -1164,6 +1168,7 @@ tbody tr.fuera-poblacion { opacity: .6; }
   border-radius: var(--radius); box-shadow: 0 8px 24px rgba(0,0,0,0.4);
   min-width: 120px; display: flex; flex-direction: column; padding: 4px;
 }
+.xm-menu[hidden] { display: none; }
 .xm-item {
   background: none; border: none; color: var(--text); text-align: left;
   padding: 8px 12px; font-size: 13px; cursor: pointer; border-radius: 4px;
