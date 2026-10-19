@@ -241,6 +241,27 @@ def _standard_block(entity_type: str, entity_id) -> dict | None:
         return None
 
 
+@app.route("/api/context/options")
+@login_required
+def context_options():
+    """Opciones del selector de contexto (T-03 RF-15): competencias, equipos de la competencia elegida y
+    las dimensiones con su nivel, valores válidos y disponibilidad. `?competition=<id>|all|<texto>`."""
+    try:
+        res = repository.resolve_competition(request.args.get("competition"))
+    except CompetitionError as e:
+        return jsonify({"error": str(e), "code": "competencia_inexistente"}), e.status
+    comp_id = None if res["all"] else res["id"]
+    teams = {}
+    for r in repository.team_game_rows(comp_id).values():
+        teams[r["team_code"]] = r["team_name"]
+    return jsonify({
+        "competition": {"id": res["id"], "all": res["all"]},
+        "competitions": [{"id": cid, "label": label} for cid, label in repository.competition_labels().items()],
+        "teams": [{"code": c, "name": n} for c, n in sorted(teams.items(), key=lambda t: t[1])],
+        "dimensions": context.dimensions(comp_id),
+    })
+
+
 @app.route("/api/metrics-catalog")
 @login_required
 def metrics_catalog_route():
@@ -415,7 +436,7 @@ def team_stats(team_code: str):
     try:
         ctx = context.parse_context(request.args, team_code=team_code)
     except ContextError as e:
-        return jsonify({"error": str(e)}), e.status
+        return jsonify(e.payload()), e.status
     profile = population.team_profile(team_code, ctx)
     if profile is None:
         return jsonify({"error": "Equipo no encontrado"}), 404
@@ -492,7 +513,7 @@ def _player_response(pid: int | None):
     try:
         ctx = context.parse_context(request.args, player_id=pid)
     except ContextError as e:
-        return jsonify({"error": str(e)}), e.status
+        return jsonify(e.payload()), e.status
     payload = population.player_profile(pid, ctx)
     if payload is None:
         return jsonify({"error": "Jugador no encontrado"}), 404
@@ -662,6 +683,9 @@ def shot_zones_route():
     result["context"] = {
         "competition": {"id": comp_id, "label": comp_label},
         "applied": {"last": last} if last else {},
+        # Sede, rival y descanso (T-03) todavía no recortan los tiros: se informa, no se calla.
+        "ignored": [{"param": p, "reason": "no_aplica"} for p in ("venue", "opponent", "rest")
+                    if request.args.get(p)],
     }
 
     return jsonify(result)

@@ -15,6 +15,8 @@ import { renderGameView } from "./components/game-view.js";
 import { renderLiveView, destroyLiveView } from "./components/live-view.js";
 import { renderPrepare } from "./components/prepare-report.js";
 import { initBase, getBase, setBase } from "./core/base.js";
+import { initContext, contextParams, clearContext, dropInvalid, activeCount } from "./core/context.js";
+import { mountContextBar, contextNote } from "./components/context-bar.js";
 
 // ── Toast ──────────────────────────────────────────────────────────────────
 function toast(msg, type = "ok") {
@@ -92,8 +94,19 @@ function _refLegend(data, kind) {
     : `Ø = promedio de ${m.size} ${m.size === 1 ? kind[0] : kind[1]} de ${esc(c.competition.label)}.`;
 }
 function _selectionNote(data, kind) {
-  const empty = data.games === 0 ? '<p class="empty">Sin partidos en esta competencia</p>' : "";
-  return `<p class="td-muted" style="margin:0 0 8px">${_refLegend(data, kind)}</p>${empty}`;
+  const filtered = activeCount() > 0;
+  const empty = data.games === 0
+    ? (filtered
+      ? '<p class="empty">No hay partidos que cumplan estos filtros. <button type="button" class="btn btn-ghost btn-sm ctx-empty-clear">Limpiar filtros</button></p>'
+      : '<p class="empty">Sin partidos en esta competencia</p>')
+    : "";
+  return `<div class="ctx-bar-host"></div>${contextNote(data.context)}<p class="td-muted" style="margin:0 0 8px">${_refLegend(data, kind)}</p>${empty}`;
+}
+
+// Monta la barra de contexto (T-03) y el botón de la selección vacía dentro de `main`; `reload` recarga la vista.
+function _mountCtxBar(main, competition, reload) {
+  mountContextBar(main.querySelector(".ctx-bar-host"), { competition, onChange: reload });
+  main.querySelector(".ctx-empty-clear")?.addEventListener("click", () => { clearContext(); reload(); });
 }
 
 // Radar sin promedio de liga (`Ø` nulo): no hay contra qué escalar.
@@ -1268,7 +1281,7 @@ let _teamReq   = 0;      // descarta respuestas viejas al cambiar de equipo, de 
 
 // Parámetros de la selección activa; `api.js` omite los nulos (sin `competition` el servidor usa la
 // competencia del partido más reciente del equipo).
-const _teamParams = () => ({ competition: _teamComp, last: _teamLastN || null });
+const _teamParams = () => ({ competition: _teamComp, last: _teamLastN || null, ...contextParams() });
 
 // Jugador elegido en el select de Equipo: la ficha (value) y su nombre visible (C-08)
 function _selectedPlayer() {
@@ -1447,7 +1460,7 @@ function _loadTeamGameLog(teamCode) {
   if (!el) return;
   const compParam = (_teamComp && _teamComp !== "all") ? _teamComp : null;
   mountTable(el,
-    () => api.table("team_game_log", { team: teamCode, competition: compParam, last: _teamLastN || null, base: getBase() }),
+    () => api.table("team_game_log", { team: teamCode, competition: compParam, last: _teamLastN || null, ...contextParams(), base: getBase() }),
     { tableId: "team_game_log" });
 }
 
@@ -1472,7 +1485,7 @@ async function _loadTeamStandard(teamCode) {
   if (!el) return;
   const req = ++_teamStdReq;
   renderStandardPanel(el, null, { layout: "grid", base: getBase() });
-  const ctxQuery = { competition: _teamComp, last: _teamLastN || null };
+  const ctxQuery = { competition: _teamComp, last: _teamLastN || null, ...contextParams() };
   try {
     await loadCatalog();
     // El conjunto estándar que alimenta las cards de ficha va siempre por partido
@@ -1516,6 +1529,7 @@ function _applyTeamData(main, data) {
     compSel.innerHTML = _compOptions(data.competitions, _teamComp, "Todas las competencias", "all");
   }
   _renderTeamContent(main, data);
+  _mountCtxBar(main, _teamComp, () => _reloadTeam());
 }
 
 // Cambió la competencia o el filtro de últimos N: se pide el perfil de nuevo al servidor (no se recalcula
@@ -1535,7 +1549,8 @@ async function _reloadTeam({ clutch = false } = {}) {
     try {
       // La competencia elegida dejó de existir o de estar publicada: volver a la por defecto (RF-14);
       // cualquier otro error (p. ej. sin conexión): se conserva la selección anterior.
-      data = /competencia/i.test(e.message) ? await api.team(code) : _teamData;
+      data = /competencia/i.test(e.message) ? await api.team(code)
+           : dropInvalid(e) ? await api.team(code, _teamParams()) : _teamData;
     } catch (e2) {
       if (req === _teamReq) main.innerHTML = `<p class="empty below-avg">${e2.message}</p>`;
       return;
@@ -1556,7 +1571,14 @@ async function renderTeam(teamCode) {
   const req = ++_teamReq;
 
   try {
-    const data = await api.team(teamCode);
+    let data;
+    try {
+      data = await api.team(teamCode, contextParams());
+    } catch (e) {
+      if (!dropInvalid(e)) throw e;
+      toast(e.message, "err");   // filtro inválido en la dirección: se limpia y se reintenta (T-03 RF-17)
+      data = await api.team(teamCode, contextParams());
+    }
     if (req !== _teamReq) return;
     _applyTeamData(main, data);
 
@@ -1653,7 +1675,7 @@ async function renderTeamOnOff(teamCode, playerName, playerId = null) {
       renderStandardPanel(panelEl, null, { layout: "compare" });
       try {
         await loadCatalog();
-        const payload = await api.metrics("onoff", { id: `${teamCode}:${playerId}`, competition: _teamComp, last: _teamLastN || null });
+        const payload = await api.metrics("onoff", { id: `${teamCode}:${playerId}`, competition: _teamComp, last: _teamLastN || null, ...contextParams() });
         renderStandardPanel(panelEl, payload, { layout: "compare" });
       } catch (e) {
         renderStandardPanel(panelEl, { error: e.message || "No se pudo cargar el conjunto estándar" }, { layout: "compare" });
@@ -1702,9 +1724,9 @@ async function renderTeamLineup(teamCode, players, playerIds = []) {
       try {
         await loadCatalog();
         const id = `${teamCode}:${[...playerIds].sort((a, b) => a - b).join("-")}`;
-        const payload = await api.metrics("lineup", { id, competition: _teamComp, last: _teamLastN || null });
+        const payload = await api.metrics("lineup", { id, competition: _teamComp, last: _teamLastN || null, ...contextParams() });
         renderStandardPanel(panelEl, payload, { layout: "grid" });
-        bindMetricCards(panelEl, { entityType: "lineup", contextQuery: { competition: _teamComp, last: _teamLastN || null, id } });
+        bindMetricCards(panelEl, { entityType: "lineup", contextQuery: { competition: _teamComp, last: _teamLastN || null, ...contextParams(), id } });
       } catch (e) {
         renderStandardPanel(panelEl, { error: e.message || "No se pudo cargar el conjunto estándar" }, { layout: "grid" });
       }
@@ -1925,7 +1947,15 @@ async function renderPlayer(teamCode, playerName, playerId = null) {
   const req = ++_playerReq;
 
   try {
-    const data = playerId != null ? await api.playerById(playerId) : await api.player(teamCode, playerName);
+    const load = () => playerId != null ? api.playerById(playerId, contextParams()) : api.player(teamCode, playerName, contextParams());
+    let data;
+    try {
+      data = await load();
+    } catch (e) {
+      if (!dropInvalid(e)) throw e;
+      toast(e.message, "err");
+      data = await load();
+    }
     if (req !== _playerReq) return;
     _applyPlayerData(main, data);
   } catch (e) {
@@ -1938,6 +1968,7 @@ function _applyPlayerData(main, data) {
   _playerComp = String(data.context.competition.id ?? "all");
   _playerCtx  = { teamCode: data.team_code, playerName: data.player };   // grafía de la ficha
   _renderPlayerContent(main, data);
+  _mountCtxBar(main, _playerComp, _reloadPlayer);
   _loadPlayerStandard(data.player_id);
 }
 
@@ -1952,7 +1983,7 @@ async function _loadPlayerStandard(playerId) {
   if (!el) return;
   const req = ++_playerStdReq;
   renderStandardPanel(el, null, { layout: "grid", base: getBase() });
-  const ctxQuery = { competition: _playerComp };
+  const ctxQuery = { competition: _playerComp, ...contextParams() };
   try {
     await loadCatalog();
     const fichaStd = await api.metrics("player", { id: playerId, ...ctxQuery, base: "partido" });
@@ -1984,13 +2015,14 @@ async function _reloadPlayer() {
   main.innerHTML = '<p class="empty"><span class="spinner"></span>Cargando...</p>';
   let data;
   try {
-    data = await api.playerById(id, { competition: _playerComp });
+    data = await api.playerById(id, { competition: _playerComp, ...contextParams() });
   } catch (e) {
     if (req !== _playerReq) return;
     toast(e.message, "err");
     try {
       // competencia inexistente o sin publicar: volver a la por defecto; otro error: conservar la anterior
-      data = /competencia/i.test(e.message) ? await api.playerById(id) : _playerData;
+      data = /competencia/i.test(e.message) ? await api.playerById(id)
+           : dropInvalid(e) ? await api.playerById(id, { competition: _playerComp, ...contextParams() }) : _playerData;
     } catch (e2) {
       if (req === _playerReq) main.innerHTML = `<p class="empty below-avg">${e2.message}</p>`;
       return;
@@ -2106,7 +2138,7 @@ function _loadPlayerGameLog(playerId) {
   if (!el || playerId == null) return;
   const compParam = (_playerComp && _playerComp !== "all") ? _playerComp : null;
   mountTable(el,
-    () => api.table("player_game_log", { player_id: playerId, competition: compParam, base: getBase() }),
+    () => api.table("player_game_log", { player_id: playerId, competition: compParam, ...contextParams(), base: getBase() }),
     { tableId: "player_game_log" });
 }
 
@@ -2322,6 +2354,7 @@ function _liveTarget(input) {
 function renderApp() {
   loadPopulationMinSize();   // para el copy "la población tiene menos de N entidades" (T-01)
   initBase();                // base de normalización de la sesión (T-04)
+  initContext();             // filtros de sede / rival / descanso (T-03)
   document.getElementById("app").innerHTML = `
     <header>
       <span class="header-logo">🏀 Smart-Basket</span>

@@ -18,7 +18,7 @@ from types import SimpleNamespace
 import identity
 import repository
 import stats_engine
-from context import Context, filter_games, context_echo, context_key, without_last
+from context import Context, filter_games, context_echo, context_key, without_last, rest_excluded
 from database import db, Player
 from stats_engine import (aggregate_games, calc_team_stats, calc_player_stats, league_averages,
                           null_reasons, played, resolve_identity, strip_private,
@@ -569,7 +569,8 @@ def team_profile(team_code: str, ctx: Context) -> dict | None:
         "team_name": own_all[-1]["team_name"],           # el del partido más reciente (F-11)
         "games": len(per_game),
         "context": context_echo(ctx, games_used=len(per_game), games_total=games_total,
-                                games_excluded={}, ignored=[], competition_label=comp_label),
+                                games_excluded=rest_excluded(own, ctx, team_code), ignored=[],
+                                competition_label=comp_label),
         "competitions": _comp_options(own, labels),
         "record": record,
         "averages": agg["averages"],
@@ -638,7 +639,8 @@ def player_profile(player_id: int, ctx: Context) -> dict | None:
         "games": len(jugados),                         # partidos JUGADOS (excluye DNP) — Feature 12 RF-7
         "context": context_echo(ctx, games_used=len(jugados),
                                 games_total=sum(1 for r in scoped if played(r["minutes"])),
-                                games_excluded={"dnp": n_dnp} if n_dnp else {}, ignored=[],
+                                games_excluded={**rest_excluded(own, ctx, team_code),
+                                                **({"dnp": n_dnp} if n_dnp else {})}, ignored=[],
                                 competition_label=comp_label),
         "competitions": _comp_options(own, labels, lambda r: played(r["minutes"])),
         "averages": agg["averages"],
