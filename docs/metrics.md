@@ -307,8 +307,21 @@ ej. `paint_fga_share`/`mid_fga_share` hasta C-03).
 recibidas), por equipo-partido y jugador-partido (ver `docs/database.md`). En quinteto/ON-OFF/cierre se
 derivan del play-by-play (`block` del rival, `foulon` del equipo) sin columna nueva.
 
-**Bases:** `total` (todo lo jugado en la selección) o `partido` (conteos y volumen ÷ partidos jugados; las
-tasas nunca se escalan). Por 40 minutos y por 100 posesiones los agrega T-04.
+**Bases de normalización (T-04).** Cada clave del catálogo tiene un `base_mode`:
+
+| `base_mode` | Total | Por partido | Por 40 minutos | Por 100 posesiones |
+|---|---|---|---|---|
+| `fixed` (tasas, %, ratios, `games`, `pace`) | igual | igual | igual | igual |
+| `count` (`pts`, `ast`, `tov`, `orb`…) | suma de la selección | total ÷ partidos | total × 2400 ÷ segundos de la entidad | total × 100 ÷ posesiones del denominador |
+| `volume` (`minutes`, `possessions`, `plays`) | suma | total ÷ partidos | total (sin escalar) | total (sin escalar) |
+
+- **Segundos de la entidad:** equipo = minutos de partido con prórrogas (40 + 5 por prórroga); jugador = minutos
+  jugados; quinteto, ON/OFF y cierre = segundos en cancha.
+- **Posesiones del denominador** (`per100_den`): propias para casi todos los conteos; del rival para lo concedido
+  o generado por el rival (`pts_against`, `blk_received`, `fouls_drawn`, `stops`). Jugador: las del equipo con él en
+  cancha (exactas por pbp; si algún partido no tiene pbp, estimadas por fracción de minutos y la métrica sale con
+  `estimated: true`).
+- Siempre sobre totales ya sumados (`por_partido × partidos = total`). Denominador 0 → nulo `sin_datos`.
 
 Ver `sdd/specs/v2/fase-1-confiabilidad/13-T-05-conjunto-estandar-metricas/` y `docs/api.md` §Conjunto estándar.
 

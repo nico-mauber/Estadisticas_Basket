@@ -11,6 +11,10 @@ import { createDataTable, mountTable } from "./components/data-table.js";
 import { exportMenu } from "./components/export-menu.js";
 import { tableToData, downloadBlob } from "./components/exporters.js";
 import { shotChart, bindZoneTooltips } from "./components/shot-chart.js";
+import { renderGameView } from "./components/game-view.js";
+import { renderLiveView, destroyLiveView } from "./components/live-view.js";
+import { renderPrepare } from "./components/prepare-report.js";
+import { initBase, getBase, setBase } from "./core/base.js";
 
 // ── Toast ──────────────────────────────────────────────────────────────────
 function toast(msg, type = "ok") {
@@ -274,12 +278,13 @@ async function refreshCompareSelectors() {
 }
 
 // ── Nav ────────────────────────────────────────────────────────────────────
-const sections = ["import", "league", "team", "compare", "player", "search", "config"];
+const sections = ["import", "league", "team", "compare", "player", "search", "preparar", "partido", "config"];
 let activeSection = "import";
 let _lastSection = "import";
 
 function setSection(id) {
   if (activeSection !== "config") _lastSection = activeSection;
+  if (id !== "partido") destroyLiveView();
   activeSection = id;
   document.querySelectorAll("nav button").forEach(b => b.classList.toggle("active", b.dataset.section === id));
   document.querySelectorAll(".section").forEach(s => s.style.display = s.id === `sec-${id}` ? "" : "none");
@@ -531,8 +536,9 @@ async function _renderImportTab(el) {
       <div class="import-panel">
         <input id="url-input" type="text" placeholder="https://fibalivestats.dcd.shared.geniussports.com/u/FUBB/2741550/bs.html" />
         <button class="btn" id="btn-import">Importar</button>
+        <button class="btn btn-ghost" id="btn-live">Seguir en vivo</button>
       </div>
-      <p class="import-hint">El sistema captura los datos automáticamente desde la URL de FIBA LiveStats.</p>
+      <p class="import-hint">El sistema captura los datos automáticamente desde la URL de FIBA LiveStats. "Seguir en vivo" muestra un partido en curso y lo guarda solo al terminar.</p>
       ${_seedEnabled ? `
       <div class="seed-panel">
         <button class="btn btn-seed" id="btn-seed">⚡ Agregar partidos (dev)</button>
@@ -616,6 +622,12 @@ async function _renderImportTab(el) {
     }
   });
 
+  document.getElementById("btn-live").addEventListener("click", () => {
+    const target = _liveTarget(document.getElementById("url-input").value);
+    if (!target) return toast("Ingresá la URL de FIBA LiveStats o el id del partido", "err");
+    showLiveGame(target.id, target.url);
+  });
+
   document.getElementById("btn-seed")?.addEventListener("click", async e => {
     const seedBtn = e.currentTarget;
     seedBtn.disabled = true;
@@ -656,6 +668,15 @@ async function _renderImportTab(el) {
   const page = delta => { importPage += delta; refresh(); };
   document.getElementById("pg-prev")?.addEventListener("click", () => page(-1));
   document.getElementById("pg-next")?.addEventListener("click", () => page(1));
+
+  // F-07: click en fila del catálogo abre vista partido
+  el.querySelectorAll("tr[data-game-id]").forEach(tr => {
+    tr.style.cursor = "pointer";
+    tr.addEventListener("click", e => {
+      if (e.target.closest("input")) return;
+      showGame(tr.dataset.gameId);
+    });
+  });
 
   document.getElementById("btn-delete-sel")?.addEventListener("click", () => {
     if (selectedGames.size) _showDeleteModal(selectedGames.size, [...selectedGames]);
@@ -1426,7 +1447,7 @@ function _loadTeamGameLog(teamCode) {
   if (!el) return;
   const compParam = (_teamComp && _teamComp !== "all") ? _teamComp : null;
   mountTable(el,
-    () => api.table("team_game_log", { team: teamCode, competition: compParam, last: _teamLastN || null, base: _teamStdBase }),
+    () => api.table("team_game_log", { team: teamCode, competition: compParam, last: _teamLastN || null, base: getBase() }),
     { tableId: "team_game_log" });
 }
 
@@ -1442,7 +1463,7 @@ function _fillFichaGrids(container, groups, entityType, std, entityId) {
 
 // ── Conjunto estándar de métricas — card "Equipo" (T-05, T-E1) ──────────────
 let _teamStdReq = 0;
-let _teamStdBase = "partido";
+
 let _teamCardGroups = null;
 
 async function _loadTeamStandard(teamCode) {
@@ -1450,7 +1471,7 @@ async function _loadTeamStandard(teamCode) {
   const main = document.getElementById("team-main");
   if (!el) return;
   const req = ++_teamStdReq;
-  renderStandardPanel(el, null, { layout: "grid", base: _teamStdBase });
+  renderStandardPanel(el, null, { layout: "grid", base: getBase() });
   const ctxQuery = { competition: _teamComp, last: _teamLastN || null };
   try {
     await loadCatalog();
@@ -1459,21 +1480,21 @@ async function _loadTeamStandard(teamCode) {
     const fichaStd = await api.metrics("team", { id: teamCode, ...ctxQuery, base: "partido" });
     if (req !== _teamStdReq) return;
     _fillFichaGrids(main, _teamCardGroups, "team", fichaStd, teamCode);
-    const payload = _teamStdBase === "partido"
+    const payload = getBase() === "partido"
       ? fichaStd
-      : await api.metrics("team", { id: teamCode, ...ctxQuery, base: _teamStdBase });
+      : await api.metrics("team", { id: teamCode, ...ctxQuery, base: getBase() });
     if (req !== _teamStdReq) return;
     renderStandardPanel(el, payload, {
       layout: "grid",
-      base: _teamStdBase,
-      onBaseChange: newBase => { _teamStdBase = newBase; _loadTeamStandard(teamCode); _loadTeamGameLog(teamCode); },
+      base: getBase(),
+      onBaseChange: newBase => { setBase(newBase); _loadTeamStandard(teamCode); _loadTeamGameLog(teamCode); },
     });
     if (main) bindMetricCards(main, { entityType: "team", contextQuery: { ...ctxQuery, id: teamCode } });
   } catch (e) {
     if (req !== _teamStdReq) return;
     // Sin conjunto estándar las cards ya muestran el valor; aviso discreto en el panel.
     _fillFichaGrids(main, _teamCardGroups, "team", null, teamCode);
-    renderStandardPanel(el, { error: e.message || "No se pudo cargar el conjunto estándar" }, { layout: "grid", base: _teamStdBase });
+    renderStandardPanel(el, { error: e.message || "No se pudo cargar el conjunto estándar" }, { layout: "grid", base: getBase() });
   }
 }
 
@@ -1922,7 +1943,7 @@ function _applyPlayerData(main, data) {
 
 // ── Conjunto estándar de métricas — card "Jugador" (T-05, T-E2) ─────────────
 let _playerStdReq = 0;
-let _playerStdBase = "partido";
+
 let _playerCardGroups = null;
 
 async function _loadPlayerStandard(playerId) {
@@ -1930,27 +1951,27 @@ async function _loadPlayerStandard(playerId) {
   const main = document.getElementById("player-main");
   if (!el) return;
   const req = ++_playerStdReq;
-  renderStandardPanel(el, null, { layout: "grid", base: _playerStdBase });
+  renderStandardPanel(el, null, { layout: "grid", base: getBase() });
   const ctxQuery = { competition: _playerComp };
   try {
     await loadCatalog();
     const fichaStd = await api.metrics("player", { id: playerId, ...ctxQuery, base: "partido" });
     if (req !== _playerStdReq) return;
     _fillFichaGrids(main, _playerCardGroups, "player", fichaStd, playerId);
-    const payload = _playerStdBase === "partido"
+    const payload = getBase() === "partido"
       ? fichaStd
-      : await api.metrics("player", { id: playerId, ...ctxQuery, base: _playerStdBase });
+      : await api.metrics("player", { id: playerId, ...ctxQuery, base: getBase() });
     if (req !== _playerStdReq) return;
     renderStandardPanel(el, payload, {
       layout: "grid",
-      base: _playerStdBase,
-      onBaseChange: newBase => { _playerStdBase = newBase; _loadPlayerStandard(playerId); _loadPlayerGameLog(playerId); },
+      base: getBase(),
+      onBaseChange: newBase => { setBase(newBase); _loadPlayerStandard(playerId); _loadPlayerGameLog(playerId); },
     });
     if (main) bindMetricCards(main, { entityType: "player", contextQuery: { ...ctxQuery, id: playerId } });
   } catch (e) {
     if (req !== _playerStdReq) return;
     _fillFichaGrids(main, _playerCardGroups, "player", null, playerId);
-    renderStandardPanel(el, { error: e.message || "No se pudo cargar el conjunto estándar" }, { layout: "grid", base: _playerStdBase });
+    renderStandardPanel(el, { error: e.message || "No se pudo cargar el conjunto estándar" }, { layout: "grid", base: getBase() });
   }
 }
 
@@ -2085,7 +2106,7 @@ function _loadPlayerGameLog(playerId) {
   if (!el || playerId == null) return;
   const compParam = (_playerComp && _playerComp !== "all") ? _playerComp : null;
   mountTable(el,
-    () => api.table("player_game_log", { player_id: playerId, competition: compParam, base: _playerStdBase }),
+    () => api.table("player_game_log", { player_id: playerId, competition: compParam, base: getBase() }),
     { tableId: "player_game_log" });
 }
 
@@ -2273,10 +2294,34 @@ const NAV_ITEMS = {
   compare: { icon: "⚡", label: "Comparar" },
   player:  { icon: "👤", label: "Jugador" },
   search:  { icon: "🔎", label: "Buscar" },
+  preparar: { icon: "📋", label: "Preparar" },
+  partido: { icon: "🏀", label: "Partido" },
 };
+
+// ── F-07: Analizar partido ──────────────────────────────────────────────────
+function showGame(gameId) {
+  destroyLiveView();
+  setSection("partido");
+  renderGameView(document.getElementById("partido-main"), gameId);
+}
+
+// ── F-01: Partido en vivo ──────────────────────────────────────────────────
+function showLiveGame(gameId, url = null) {
+  setSection("partido");
+  renderLiveView(document.getElementById("partido-main"), gameId, { url });
+}
+
+// URL de FIBA LiveStats (…/u/LIGA/<id>/bs.html) o id numérico suelto.
+function _liveTarget(input) {
+  const s = input.trim();
+  if (/^\d{5,}$/.test(s)) return { id: s, url: null };
+  const m = /\/(\d{5,})\//.exec(s);
+  return m ? { id: m[1], url: s } : null;
+}
 
 function renderApp() {
   loadPopulationMinSize();   // para el copy "la población tiene menos de N entidades" (T-01)
+  initBase();                // base de normalización de la sesión (T-04)
   document.getElementById("app").innerHTML = `
     <header>
       <span class="header-logo">🏀 Smart-Basket</span>
@@ -2285,7 +2330,7 @@ function renderApp() {
       ${_authRequired ? `<span class="header-user">${_authUser || ""} · <button class="header-logout" id="btn-logout">Salir</button></span>` : ""}
     </header>
     <nav>
-      ${sections.filter(s => s !== "config").map(s => `
+      ${sections.filter(s => s !== "config" && s !== "partido").map(s => `
         <button data-section="${s}">
           <span class="nav-icon">${NAV_ITEMS[s].icon}</span>
           ${NAV_ITEMS[s].label}
@@ -2354,6 +2399,16 @@ function renderApp() {
         <div id="search-main"><p class="empty"><span class="spinner"></span>Cargando buscador...</p></div>
       </div>
 
+      <!-- Preparar partido (F-03) -->
+      <div class="section" id="sec-preparar">
+        <div id="preparar-main"></div>
+      </div>
+
+      <!-- Partido (F-07) -->
+      <div class="section" id="sec-partido">
+        <div id="partido-main"><p class="empty">Selecciona un partido desde el catálogo.</p></div>
+      </div>
+
       <!-- Config (F-13) -->
       <div class="section" id="sec-config"></div>
     </main>`;
@@ -2367,6 +2422,7 @@ function renderApp() {
       if (btn.dataset.section === "team")    refreshTeamSelector();
       if (btn.dataset.section === "compare") renderCompare();
       if (btn.dataset.section === "search")  renderSearch();
+      if (btn.dataset.section === "preparar") renderPrepare(document.getElementById("preparar-main"), { onOpenGame: showGame });
     });
   });
 

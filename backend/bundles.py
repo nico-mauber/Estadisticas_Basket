@@ -31,6 +31,24 @@ def _raw(row: dict) -> dict:
     return out
 
 
+def player_derived(team: dict, opp: dict, minutes: float, game_minutes: float) -> dict:
+    """Sumandos de equipo ponderados por la fracción de minutos del jugador (plan §4.5):
+    base de USO%/AS%/OR%/DR%/REB% en un partido."""
+    w = minutes / game_minutes if game_minutes else 0.0
+    plays_team, fga2_team, fga3_team, fgm_team = plays(team), team.get("fga2"), team.get("fga3"), fgm(team)
+    orb_t, drb_t, orb_o, drb_o = team.get("orb"), team.get("drb"), opp.get("orb"), opp.get("drb")
+    return {
+        "plays_team_w": None if plays_team is None else w * plays_team,
+        "t2a_team_w": None if fga2_team is None else w * fga2_team,
+        "t3a_team_w": None if fga3_team is None else w * fga3_team,
+        "fgm_team_w": None if fgm_team is None else w * fgm_team,
+        "orb_pool_w": None if orb_t is None or drb_o is None else w * (orb_t + drb_o),
+        "drb_pool_w": None if drb_t is None or orb_o is None else w * (drb_t + orb_o),
+        "trb_pool_w": (None if None in (orb_t, drb_t, orb_o, drb_o)
+                      else w * (orb_t + drb_t + orb_o + drb_o)),
+    }
+
+
 # ── Equipo ───────────────────────────────────────────────────────────────────
 
 def team_game_bundles(team_code: str, comp_id: int | None, ctx: "context.Context"):
@@ -176,20 +194,7 @@ def player_game_bundles(player_id: int, comp_id: int | None, ctx: "context.Conte
 
         mp = _parse_minutes(row.get("minutes"))
         gm = row.get("game_minutes") or 40
-        w = mp / gm if gm else 0.0
-
-        plays_team, fga2_team, fga3_team, fgm_team = plays(team), team.get("fga2"), team.get("fga3"), fgm(team)
-        orb_t, drb_t, orb_o, drb_o = team.get("orb"), team.get("drb"), opp.get("orb"), opp.get("drb")
-        derived = {
-            "plays_team_w": None if plays_team is None else w * plays_team,
-            "t2a_team_w": None if fga2_team is None else w * fga2_team,
-            "t3a_team_w": None if fga3_team is None else w * fga3_team,
-            "fgm_team_w": None if fgm_team is None else w * fgm_team,
-            "orb_pool_w": None if orb_t is None or drb_o is None else w * (orb_t + drb_o),
-            "drb_pool_w": None if drb_t is None or orb_o is None else w * (drb_t + orb_o),
-            "trb_pool_w": (None if None in (orb_t, drb_t, orb_o, drb_o)
-                          else w * (orb_t + drb_t + orb_o + drb_o)),
-        }
+        derived = player_derived(team, opp, mp, gm)
 
         pbp_game = _pbp_games().get(row["game_id"])
         display_name = card["display_name"]
@@ -197,7 +202,7 @@ def player_game_bundles(player_id: int, comp_id: int | None, ctx: "context.Conte
         if oc is None:
             on_court = {
                 "games_exact": 0, "games_estimated": 1,
-                "poss_estimated": (pos(team) or 0) * w,
+                "poss_estimated": (pos(team) or 0) * (mp / gm if gm else 0.0),
                 "own": {k: 0 for k in RAW_KEYS}, "opp": {k: 0 for k in RAW_KEYS},
                 "seconds": 0,
             }

@@ -1447,6 +1447,32 @@ def metrics_catalog_keys() -> frozenset:
     return frozenset(out)
 
 
+POINTS_ORIGIN_KEYS = ("second_chance_pts", "fast_break_pts", "pts_from_tov")
+
+
+def points_distribution(t: dict) -> dict:
+    """Cómo se consiguieron los puntos de un box de equipo (F-01, F-03). Por tipo de tiro las
+    categorías son excluyentes y suman PTS; por origen (desglose de FIBA) se superponen entre sí.
+    Desglose no publicado → nulo con razón, nunca 0 (C-11)."""
+    def v(value):
+        return {"value": value, "reason": None if value is not None else "no_registrado"}
+
+    pts = t.get("pts") or 0
+    paint = t.get("paint_pts")
+    three = (t.get("fgm3") or 0) * 3
+    ft = t.get("ftm") or 0
+    mid = None if paint is None else max(0, (t.get("fgm2") or 0) * 2 - paint)
+    known = sum(x for x in (paint, mid, three, ft) if x is not None)
+    return {
+        "total": pts,
+        "by_shot": {
+            "paint_pts": v(paint), "mid_pts": v(mid), "three_pts": v(three), "ft_pts": v(ft),
+            "otros_no_clasificado": v(max(0, pts - known)),
+        },
+        "by_origin": {k: v(t.get(k)) for k in POINTS_ORIGIN_KEYS},
+    }
+
+
 def sum_bundles(bundles: list) -> "StatBundle":
     """Suma una lista de `StatBundle` de la MISMA entidad (un bundle por partido) en uno solo
     (plan §4.4). Un `None` en cualquier sumando de un conteo deja el total en `None` (C-11: un
@@ -1518,52 +1544,69 @@ def sum_bundles(bundles: list) -> "StatBundle":
     )
 
 
+BASES = ("total", "partido", "por40", "por100")
+
+
 def apply_base(values: dict, bundle: "StatBundle", base: str) -> dict:
     """Escala el dict `{clave: {value, reason, ...}}` de `compute_standard` a la base pedida
-    (plan §4.4). `base == "total"`: igual. `"partido"`: cada clave con `base_mode` `count` o
-    `volume` (de `metrics_catalog.METRICS`, Grupo C) y valor no nulo se divide por `bundle.games`
-    (`games == 0` → nulo `sin_datos`); `fixed` y `games` no cambian. Cualquier otra base
-    (`por40`, `por100`) no está disponible todavía (T-04 la habilita) → `ValueError`.
-
-    NOTA para el Grupo C (`metrics_catalog.py`): esta función importa `METRICS` adentro (import
-    local) para evitar el ciclo de imports; hasta que `metrics_catalog.py` exista, cualquier
-    `base == "partido"` deja los valores sin escalar y antepone un TODO (ver el bloque
-    `except ImportError`). Cuando el catálogo exista, cada `MetricDef` DEBE tener un atributo
-    `base_mode` con uno de `"count" | "volume" | "fixed"` (más `"games"` para la propia clave
-    `games`, que nunca se escala) para que esta función sepa qué dividir.
-    """
+    (T-05 plan §4.4, T-04). Solo cambian las claves `count` y `volume` del catálogo; `fixed`
+    (tasas, `games`, `pace`) vale lo mismo en las cuatro bases.
+    - `total`: sin cambios. `partido`: ÷ `games`.
+    - `por40`: × 2400 / segundos de la entidad (equipo: minutos de partido con prórrogas; jugador:
+      minutos jugados; quinteto/ON-OFF/cierre: segundos en cancha).
+    - `por100`: × 100 / posesiones del denominador de la clave (`per100_den`: propias o del rival;
+      jugador: las del equipo con él en cancha, `estimated` si se estimaron por minutos).
+    En `por40`/`por100` las claves `volume` (minutos, posesiones) quedan en total: son la muestra.
+    Denominador 0 o desconocido → nulo `sin_datos`, nunca 0 ni infinito (C-11)."""
     if base == "total":
         return values
-    if base not in ("total", "partido", "por40", "por100"):
-        raise ValueError("Base no disponible: llega con la normalización por 40 minutos y por 100 posesiones")
-    if base in ("por40", "por100"):
-        raise ValueError("Base no disponible: llega con la normalización por 40 minutos y por 100 posesiones")
+    if base not in BASES:
+        raise ValueError("Base inválida: total, partido, por40 o por100")
+    from metrics_catalog import METRICS  # import local: evita el ciclo con metrics_catalog.py
 
-    # base == "partido"
-    try:
-        from metrics_catalog import METRICS  # import local: evita el ciclo con metrics_catalog.py
-    except ImportError:
-        # TODO(Grupo C): sin metrics_catalog.METRICS todavía no se puede saber el base_mode de
-        # cada clave; se devuelve sin escalar en vez de romper el endpoint. Cuando exista el
-        # módulo, este bloque deja de ejecutarse y aplica la división real de abajo.
-        return values
+    if base == "por40":
+        seconds = bundle.seconds if bundle.seconds else (bundle.minutes or 0) * 60
+    elif base == "por100":
+        dens = _per100_dens(bundle)
 
-    games = bundle.games
     out = {}
     for key, obj in values.items():
         mdef = METRICS.get(key)
-        base_mode = getattr(mdef, "base_mode", None) if mdef else None
+        mode = mdef.base_mode if mdef else None
         value = obj.get("value")
-        if base_mode not in ("count", "volume") or value is None:
+        if mode not in ("count", "volume") or value is None or (mode == "volume" and base != "partido"):
             out[key] = obj
             continue
-        if games == 0:
-            new_obj = dict(obj)
-            new_obj["value"] = None
-            new_obj["reason"] = "sin_datos"
-            out[key] = new_obj
+        estimated = False
+        if base == "partido":
+            den, mult = bundle.games, 1
+        elif base == "por40":
+            den, mult = seconds, 2400
         else:
-            new_obj = dict(obj)
-            new_obj["value"] = round(value / games, 2)
-            out[key] = new_obj
+            den, estimated = dens[mdef.per100_den or "own"]
+            mult = 100
+        if not den:
+            out[key] = {**obj, "value": None, "reason": "sin_datos"}
+            continue
+        new_obj = {**obj, "value": round(value * mult / den, 2)}
+        if estimated:
+            new_obj["estimated"] = True
+        out[key] = new_obj
     return out
+
+
+def _per100_dens(bundle: "StatBundle") -> dict:
+    """`{"own": (posesiones, estimadas), "opp": (...)}` para la base por 100 posesiones."""
+    if bundle.entity_type != "player":
+        return {"own": (pos(bundle.own), False),
+                "opp": (pos(bundle.opp) if bundle.opp else None, False)}
+    oc = bundle.on_court or {}
+    est = oc.get("poss_estimated") or 0
+    estimated = (oc.get("games_estimated") or 0) > 0
+
+    def side(key):
+        exact = pos(oc[key]) if oc.get(key) else None
+        if exact is None and not est:
+            return None
+        return (exact or 0) + est
+    return {"own": (side("own"), estimated), "opp": (side("opp"), estimated)}

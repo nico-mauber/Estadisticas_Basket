@@ -771,6 +771,135 @@ Mapa de tiro de un equipo en un partido, con zonas y filtros.
 
 ---
 
+## GET `/api/live/<game_id>` — NUEVO (F-01)
+
+Snapshot de un partido en curso, leído de FIBA LiveStats. El cliente hace polling cada `live.poll_secs` (10–60 s); el servidor cachea la descarga por partido durante `live.cache_ttl_secs`, así varios usuarios generan una sola descarga por intervalo. Al detectar el evento de fin (`game`/`end`) el partido se persiste solo (misma ingesta que `POST /api/import`) y la respuesta pasa a `finalizado`.
+
+**Query:** `?url=<bs.html de FIBA>` (opcional). Si se envía, debe ser del host de FIBA LiveStats y del mismo `game_id`; se usa para leer fecha y competencia al persistir. Sin `url` se usa `…/u/FUBB/<game_id>/bs.html`.
+
+**Response 200 (en curso):**
+```json
+{
+  "status": "en_curso", "stale": false, "fetched_at": "2026-10-16T21:14:32+00:00",
+  "game_id": "2849343", "has_pbp": true,
+  "clock": {"period": 3, "period_type": "REGULAR", "clock_secs": 245, "elapsed_secs": 1555, "label": "3C 4:05"},
+  "teams": {
+    "home": {"code": "LAG", "name": "…", "score": 61,
+             "standard": {"oer": {"value": 1.08, "reason": null}, "...": "der, net_rating, efg_pct, ts_pct, ppp, possessions, to_pct, or_pct, ft_rate, ppt, pace"},
+             "vs_season": {"competition_id": 3, "competition_label": "…", "games": 2,
+                           "metrics": {"oer": {"own_avg": 0.9594, "delta": 0.12}}}},
+    "away": {"...": "mismo shape"}
+  },
+  "distribution": {"home": {"total": 61,
+    "by_shot": {"paint_pts": {"value": 28, "reason": null}, "mid_pts": {}, "three_pts": {}, "ft_pts": {}, "otros_no_clasificado": {}},
+    "by_origin": {"second_chance_pts": {}, "fast_break_pts": {}, "pts_from_tov": {}}}, "away": {}},
+  "players_on_court": {"home": ["LAG|B. Gomez", "…5 claves"], "away": ["…"]},
+  "players": {"home": [{"player_id": "LAG|B. Gomez", "name": "B. Gomez", "jersey": "7", "minutes": 21.5, "pts": 12,
+     "on_court": true,
+     "standard": {"oer": {}, "ts_pct": {}, "efg_pct": {}, "uso_pct": {}, "plus_minus": {}},
+     "chains": {"points_created": {}, "points_from_assist": {}, "oreb_points": {}, "steal_points": {}, "turnover_cost": {}}}],
+   "away": []}
+}
+```
+- `by_shot` es excluyente y suma `total`; `by_origin` viene de FIBA y sus categorías se superponen (un contraataque tras pérdida cuenta en ambas). Un desglose que la competencia no publica viene `null` con razón `no_registrado`.
+- Jugadores en vivo no tienen id en la base: la clave es `"<equipo>|<nombre>"`.
+- `vs_season.metrics.possessions`: `own_avg` por partido y `delta: null` (un volumen parcial no se compara con un partido completo; el tempo se compara con `pace`).
+- `chains` es `null` con razón `sin_pbp` si FIBA aún no publicó jugada a jugada; con pbp, 0 es real (la acción no ocurrió).
+- `stale: true`: FIBA no respondió y se sirve el último snapshot (`fetched_at` es el de ese snapshot). `persist_error: true`: el partido terminó pero no se pudo guardar; se reintenta en el próximo polling.
+
+**Response 200 (finalizado):** `{"status": "finalizado", "stale": false, "fetched_at": "…", "game_id": "…", "redirect": "#/partido/<id>/analizar"}`. El frontend muestra entonces `GET /api/game/<game_id>`.
+
+**Errores:** `404 no_encontrado` (id no numérico, o FIBA responde 403/404 y no está en la base), `400 parametro_invalido` (`url` de otro host o de otro partido), `502 fiba_no_disponible` (FIBA no responde y no hay snapshot previo).
+
+---
+
+## GET `/api/live/<game_id>/momentum` — NUEVO (F-02)
+
+Lo que está cambiando el partido ahora (no el acumulado). Misma fuente, caché y errores que `GET /api/live/<game_id>`: no descarga aparte. Partido en curso → calculado sobre los datos en memoria del snapshot; partido guardado → estado al cierre, calculado sobre `pbp_events` + posesiones de A-01 (cacheado, se invalida con datos o configuración). Mismo `?url=` opcional.
+
+**Response 200:**
+```json
+{
+  "status": "en_curso", "stale": false, "fetched_at": "…", "game_id": "2849328", "has_pbp": true,
+  "now": {"period": 2, "period_type": "REGULAR", "elapsed_secs": 1200, "label": "2C 0:00"},
+  "teams": {"home": {"code": "OMU", "name": "…"}, "away": {"code": "SAY", "name": "…"}},
+  "thresholds": {"last_possessions": 10, "window_secs": 300, "last_outcomes": 5, "hot_consecutive_makes": 3,
+                 "hot_points": 8, "hot_points_window_secs": 180, "assist_streak": 4, "oreb_in_quarter": 3,
+                 "cold_consecutive_tov": 3},
+  "run": {"team_code": "SAY", "side": "away", "points": 8, "opp_points": 0,
+          "since": {"period": 2, "clock_secs": 154, "label": "2C 2:34"}, "elapsed_secs": 134},
+  "last_possessions": {"n": 10, "home": {"ppp": {"value": 1.2, "reason": null}, "possessions": 10, "points": 12}, "away": {}},
+  "last_window": {"window_secs": 300, "reason": null,
+                  "home": {"oer": {"value": 1.15, "reason": null}, "der": {}, "net_rating": {}, "possessions": 12, "points": 14}, "away": {}},
+  "last_outcomes": {"n": 5, "home": [{"end_type": "t3c", "label": "Triple convertido", "pts": 3, "player": "…",
+                    "assister": "…", "is_three": true, "had_second_chance": false, "incomplete": false, "clock": "2C 0:41"}], "away": []},
+  "hot": [{"player_key": "OMU|R. Previatti", "name": "R. Previatti", "team_code": "OMU", "side": "home",
+           "marks": [{"rule": "makes_streak", "value": 3, "label": "3 tiros de campo convertidos seguidos"},
+                     {"rule": "oreb_in_quarter", "value": 3, "label": "3 rebotes ofensivos en el cuarto"}]}],
+  "cold": [{"player_key": "…", "name": "…", "marks": [{"rule": "cold_streak", "value": 3, "label": "3 pérdidas seguidas"}]}]
+}
+```
+- `run`: parcial abierto = puntos seguidos del último equipo que anotó (`null` si nadie anotó). `opp_points` siempre 0.
+- `last_possessions`/`last_window`: `null` con razón `pocas_posesiones` / `pocos_minutos` si la muestra no alcanza (nunca un valor sobre muestra parcial). OER/DER de la ventana = puntos por posesión reconstruida (A-01), propia / del rival.
+- `last_outcomes`: de la más reciente a la más vieja.
+- Reglas (`marks[].rule`): `makes_streak` (tiros de campo convertidos seguidos), `points_window` (puntos en la ventana corta), `assist_streak` (últimas canastas de campo del equipo asistidas por el mismo jugador; una sin asistir o de otro corta), `oreb_in_quarter` (se reinicia en cada período), `cold_streak` (pérdidas sin canasta, asistencia ni rebote propio en el medio). Umbrales: claves `momentum.*` (F-13).
+
+**Errores:** los mismos que `GET /api/live/<game_id>`.
+
+---
+
+## GET `/api/prepare` — NUEVO (F-03)
+
+Informe de scouting de un rival (Preparar partido), en una sola respuesta. Cacheado por `(team, rival, competencia, last)` y versión de datos/configuración; < 10 s en frío.
+
+**Query:** `team`, `rival` (códigos, requeridos), `competition` (opcional; default: la del partido más reciente de `team`), `last` (opcional: últimos N partidos **del rival**; aplica a todo el informe salvo el historial).
+
+**Response 200:**
+```json
+{
+  "summary": {"team": {"code": "LAG", "name": "LAGOMAR"}, "rival": {"code": "TAB", "name": "TABARE"},
+              "competition": {"id": 1, "label": "Liga de Ascenso 2026"}, "team_games": 2,
+              "rival_games_considered": 2, "rival_games_total": 2, "last": null, "generated_at": "…"},
+  "advantages": [{"id": "tiro_defensa", "side": "defensa", "title": "Su tiro vs nuestra defensa del tiro",
+                  "own_metric": "opp_efg_pct", "ref_metric": "efg_pct", "own_label": "eFG% rival", "ref_label": "eFG%",
+                  "own_fmt": "pct", "ref_fmt": "pct", "own": 0.42, "ref": 0.466, "own_pct": 92, "ref_pct": 31,
+                  "edge": 61, "strength": "clara", "text": "Defendemos el tiro mejor de lo que ellos tiran.", "direction": "up"}],
+  "threats": ["… mismo formato, edge más negativo primero"],
+  "sample_warning": true,
+  "rival_lineups": {"rows": [{"id": "TAB:96-99-…", "name": "…", "games": 2, "minutes": 33.4, "possessions": 73.8,
+                              "oer": 1.05, "der": 1.12, "net_rating": -0.14, "net_adj": -0.10, "net_band": 0.33,
+                              "sample": {"level": "alta", "…": "badge T-02"}}], "reason": null},
+  "rival_threats": {"top_usage": [{"player_id": 105, "name": "A. Da Costa", "games": 2, "mpg": 35.5, "ppg": 23.0,
+                                   "uso_pct": {"value": 0.29, "reason": null}, "ts_pct": {}, "efg_pct": {}}],
+                    "zones": {"…": "mismo payload que GET /api/shot-zones"},
+                    "best_zone": {"zone": "restricted_area", "ppt": 1.27, "attempts": 74, "…": "…"},
+                    "points": {"…": "mismo formato que distribution de GET /api/live"}},
+  "h2h": {"…": "mismo formato que GET /api/h2h"},
+  "matchups": {"games": ["9999991", "2849343"], "reason": null,
+               "quinteto": {"rows": [], "matrix": {}}, "jugador": {"rows": []},
+               "jugador_quinteto": {"rows": []}, "jugador_quinteto_rival": {"rows": []}},
+  "suggestions_profile": null
+}
+```
+- Ventajas/amenazas: 15 duelos (nuestro ataque vs su defensa, nuestra defensa vs su ataque, y la misma métrica en ambos) con percentiles de T-01 contra toda la competencia (sin umbral de muestra; `sample_warning` si alguno de los dos tiene menos de `sample.team.min` partidos). `edge` = percentil propio − percentil del rival; ventajas = 5 mayores, amenazas = 5 menores.
+- Cruces (`matchups`): filas de `matchups.team_matchups` (mismo formato que `GET /api/game/<id>/matchups`, con `games: [{game_id, possessions}]` y `net_band`) sobre los partidos entre ambos que entran en el filtro del rival. Sin partidos → `reason: "sin_enfrentamientos"`.
+
+**Errores:** `400 parametro_invalido` ("Falta el equipo", "Falta el rival", "El rival no puede ser el mismo equipo", `last` inválido), `404 no_encontrado` ("Equipo no encontrado" / "Rival no encontrado" en la competencia).
+
+---
+
+## GET `/api/h2h` — NUEVO (F-03)
+
+Historial completo entre dos equipos, en todas las competencias visibles (o una con `competition`). Orientado al equipo `a`.
+
+**Query:** `a`, `b` (códigos, requeridos), `competition` (opcional).
+
+**Response 200:** `{"team_a": "LAG", "team_b": "TAB", "games": [{"game_id", "date", "competition_id", "competition_label", "venue": "L|V", "score_a", "score_b", "winner"}], "record": {"wins_a": 2, "wins_b": 0}}` (más reciente primero).
+
+**Errores:** `400 parametro_invalido` (falta alguno o son iguales).
+
+---
+
 ## POST `/api/identity/merge` — admin
 
 Une dos fichas de jugador **del mismo equipo** (C-08): `target_id` conserva el id y absorbe a `source_id`. Las filas de `player_game_stats` de la absorbida pasan a la vigente y `source_id` queda con `merged_into`, de modo que `GET /api/player/<source_id>` y cualquier consulta por su nombre resuelven a la ficha vigente. No se modifica ninguna estadística ni nombre crudo.
@@ -946,7 +1075,7 @@ Response 200:
 | `id` (obligatorio) | `team`: `team_code` · `player`: `player_id` · `lineup`: `<team_code>:<pid>-<pid>-…` (3–5 ids) · `onoff`: `<team_code>:<pid>` · `clutch`: `team_code` |
 | `competition` | id \| `all` \| texto legado (C-02) |
 | `last` | entero > 0 |
-| `base` | `total` \| `partido` (default `partido`); `por40`/`por100` → 400 (T-04) |
+| `base` | `total` \| `partido` \| `por40` \| `por100` (default `partido`). Conteos: total, ÷ partidos, × 2400/segundos de la entidad, × 100/posesiones (propias o del rival según `per100_den`; jugador: las del equipo con él en cancha, `estimated: true` si se estimaron por minutos). Tasas (`fixed`) iguales en las 4; `volume` en total para por40/por100; denominador 0 → nulo `sin_datos` (T-04) |
 | `margin`, `window_secs` | solo `clutch` |
 
 Response 200 (`GET /api/metrics/team?id=VER&competition=1&base=total`, recorte):
@@ -972,7 +1101,7 @@ y `diff` (ON − OFF, solo métricas `kind: "rate"`).
 **Errores:**
 | HTTP | `code` | Cuándo |
 |---|---|---|
-| 400 | `parametro_invalido` | Tipo de entidad desconocido / falta `id` / base no disponible (`por40`/`por100`) |
+| 400 | `parametro_invalido` | Tipo de entidad desconocido / falta `id` / base inválida |
 | 400 | `competencia_inexistente` | La competencia no existe |
 | 400 | `contexto_invalido` | Parámetro de contexto inválido |
 | 404 | `no_encontrado` | Id inexistente |

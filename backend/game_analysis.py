@@ -18,6 +18,7 @@ import sample as sample_mod
 import shot_zones
 import stats_engine
 from database import db, Game, TeamGameStats, PlayerGameStats, Shot, PbpEvent
+from bundles import player_derived
 from lineups import PERIOD_LEN, _agg, _pos
 from stats_engine import StatBundle, compute_standard, _parse_minutes, played, _safe_div
 
@@ -804,6 +805,7 @@ def _game_player_bundles(game_id, players, tgs_map, events):
             shots=None,
             possessions_counted=None,
             null_reasons={},
+            derived=None if is_dnp else player_derived(team, opp, mins, game_minutes),
             meta={
                 "team_code": tc,
                 "side": side,

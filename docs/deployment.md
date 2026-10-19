@@ -23,6 +23,8 @@ services:
         value: /data/basketball.db
 ```
 
+**Partido en vivo (F-01, DA-28 pendiente):** gunicorn corre con 1 worker síncrono. Cada polling de `/api/live/<id>` que encuentra la caché vencida descarga de FIBA dentro de la petición y bloquea al worker hasta `live.fetch_timeout_secs` (default 8 s) si FIBA tarda; con la caché de `live.cache_ttl_secs` (15 s) esto pasa como mucho una vez por intervalo y por partido. Si se usa en partidos reales con varios usuarios, evaluar `--workers 1 --threads 4` (gthread): requiere revisar antes la seguridad entre hilos de los cachés en memoria (`cache.py`, `live._cache`) y la escritura concurrente en SQLite. `render.yaml` no cambia en F-01.
+
 ### Variables de entorno
 
 | Variable | Valor en producción | Descripción |

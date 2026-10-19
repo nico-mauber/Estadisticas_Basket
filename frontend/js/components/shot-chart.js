@@ -20,7 +20,7 @@ const SC_courtBg = "#f3f6fa", SC_paintBg = "#c7d8ec", SC_restrictBg = "#b4c8e6",
       SC_cornerBg = "#efe9c4", SC_line = "#46566a", SC_boxText = "#1f2937";
 
 // ── Nombres de zona para tooltip ──────────────────────────────────────────
-const ZONE_LABELS = {
+export const ZONE_LABELS = {
   restricted_area:   "Zona restringida",
   mid_top:           "Media distancia central",
   mid_left_far:      "Media izquierda lejana",
@@ -52,10 +52,9 @@ function _scSpoke(deg) {
  * fg_pct, efg_pct, ppt, share, percentile, sample.
  * Color por percentil (percentileColor); gris neutro si percentile es null.
  */
-function _scLbl(zones, totalShots, key, lx, ly) {
+function _scLbl(zones, totalShots, key, lx, ly, colorBy = "percentile") {
   const z = zones?.[key];
   if (!z) return '';
-  // Zona con 0 intentos: caja gris chica con "—"
   if (!z.attempts) {
     const sw = 30, sh = 20, sr = 4;
     const sx0 = lx - sw / 2, sy0 = ly - sh / 2;
@@ -67,7 +66,7 @@ function _scLbl(zones, totalShots, key, lx, ly) {
   const ppt   = z.ppt != null ? DEC2(z.ppt) : '—';
   const fg    = z.fg_pct != null ? DEC1(z.fg_pct * 100) + '%' : '—';
   const efg   = z.efg_pct != null ? DEC1(z.efg_pct * 100) + '%' : '—';
-  const bg    = z.percentile != null ? percentileColor(z.percentile) : '#d1d5db';
+  const bg    = colorBy === "none" ? '#d1d5db' : (z.percentile != null ? percentileColor(z.percentile) : '#d1d5db');
   const w = 54, h = 44, r = 4;
   const x0 = lx - w / 2, y0 = ly - h / 2;
   return `
@@ -125,32 +124,34 @@ function _scSvgWrap(inner) {
 }
 
 // 11 zonas — requiere coordenadas reales de tiro (array `shot` de FIBA con x/y)
-function _shotChart11SVG(zones, totalShots, summary) {
+function _shotChart11SVG(zones, totalShots, summary, colorBy) {
+  const c = colorBy;
   return _scSvgWrap(`
     ${_courtLinesSVG()}
     <!-- Cajas de estadistica por zona (heatmap) -->
-    ${_scLbl(zones, totalShots, 'top_key_3',       SC_cx,          70)}
-    ${_scLbl(zones, totalShots, 'left_wing_3',     SC_cL + 34,    150)}
-    ${_scLbl(zones, totalShots, 'right_wing_3',    SC_cR - 34,    150)}
-    ${_scLbl(zones, totalShots, 'mid_top',         SC_cx,         162)}
-    ${_scLbl(zones, totalShots, 'mid_left_far',    SC_cx - 64,    206)}
-    ${_scLbl(zones, totalShots, 'mid_right_far',   SC_cx + 64,    206)}
-    ${_scLbl(zones, totalShots, 'restricted_area', SC_cx,         236)}
-    ${_scLbl(zones, totalShots, 'mid_left_close',  SC_cx - 64,    263)}
-    ${_scLbl(zones, totalShots, 'mid_right_close', SC_cx + 64,    263)}
-    ${_scLbl(zones, totalShots, 'left_corner_3',   SC_cL + 30,    263)}
-    ${_scLbl(zones, totalShots, 'right_corner_3',  SC_cR - 30,    263)}
+    ${_scLbl(zones, totalShots, 'top_key_3',       SC_cx,          70, c)}
+    ${_scLbl(zones, totalShots, 'left_wing_3',     SC_cL + 34,    150, c)}
+    ${_scLbl(zones, totalShots, 'right_wing_3',    SC_cR - 34,    150, c)}
+    ${_scLbl(zones, totalShots, 'mid_top',         SC_cx,         162, c)}
+    ${_scLbl(zones, totalShots, 'mid_left_far',    SC_cx - 64,    206, c)}
+    ${_scLbl(zones, totalShots, 'mid_right_far',   SC_cx + 64,    206, c)}
+    ${_scLbl(zones, totalShots, 'restricted_area', SC_cx,         236, c)}
+    ${_scLbl(zones, totalShots, 'mid_left_close',  SC_cx - 64,    263, c)}
+    ${_scLbl(zones, totalShots, 'mid_right_close', SC_cx + 64,    263, c)}
+    ${_scLbl(zones, totalShots, 'left_corner_3',   SC_cL + 30,    263, c)}
+    ${_scLbl(zones, totalShots, 'right_corner_3',  SC_cR - 30,    263, c)}
     ${_scBadge(summary)}`);
 }
 
 // 3 zonas — fallback cuando el partido no trae coordenadas de tiro
-function _shotChart3SVG(zones, totalShots, summary) {
+function _shotChart3SVG(zones, totalShots, summary, colorBy) {
+  const c = colorBy;
   return _scSvgWrap(`
     ${_courtLinesSVG()}
     <!-- Cajas de estadistica: Triple / Media / Pintura -->
-    ${_scLbl(zones, totalShots, 'top_key_3',       SC_cx, 70)}
-    ${_scLbl(zones, totalShots, 'mid_top',         SC_cx, 162)}
-    ${_scLbl(zones, totalShots, 'restricted_area', SC_cx, 236)}
+    ${_scLbl(zones, totalShots, 'top_key_3',       SC_cx, 70, c)}
+    ${_scLbl(zones, totalShots, 'mid_top',         SC_cx, 162, c)}
+    ${_scLbl(zones, totalShots, 'restricted_area', SC_cx, 236, c)}
     ${_scBadge(summary)}`);
 }
 
@@ -165,10 +166,11 @@ function _shotChart3SVG(zones, totalShots, summary) {
 export function shotChart(payload, opts = {}) {
   const { zones, summary, has_coordinates } = payload;
   const totalShots = summary?.total_shots || 0;
+  const colorBy = opts.colorBy || "percentile";
   const mode = has_coordinates === false ? 3 : 11;
   return mode === 3
-    ? _shotChart3SVG(zones, totalShots, summary)
-    : _shotChart11SVG(zones, totalShots, summary);
+    ? _shotChart3SVG(zones, totalShots, summary, colorBy)
+    : _shotChart11SVG(zones, totalShots, summary, colorBy);
 }
 
 // ── Tooltip / bottom-sheet ────────────────────────────────────────────────
