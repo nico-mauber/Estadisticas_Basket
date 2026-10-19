@@ -466,9 +466,7 @@ def all_lineups(team_code: str, comp_id: int | None, ctx, *, size: int = 5) -> l
 
     def build():
         games = repo.team_pbp_games(team_code, comp_id)
-        out = sorted(games, key=lambda g: (g.get("info", {}).get("date") or "", g.get("game_id") or ""))
-        if ctx.last:
-            out = out[-ctx.last:]
+        out = context_mod.filter_games(games, ctx, team_code)
         out = identity.canonicalize_pbp_games(out, team_code)
         return _lineup_bundles(out, team_code, size)
 

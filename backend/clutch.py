@@ -273,7 +273,7 @@ def clutch_game_bundles(req) -> list:
     window_secs = config.get("clutch.window_secs") if window_secs is None else window_secs
 
     games = repository.team_pbp_games(team_code, comp_id)
-    games = _filter_pbp_games(games, req.ctx)
+    games = _filter_pbp_games(games, req.ctx, team_code)
     games = identity.canonicalize_pbp_games(games, team_code)
     if not games:
         return []
@@ -306,13 +306,11 @@ def clutch_game_bundles(req) -> list:
     return out
 
 
-def _filter_pbp_games(games, ctx):
-    """Últimos N partidos del contexto sobre `repository.team_pbp_games` (idéntico a
-    `bundles._filter_pbp_games`; se duplica para evitar el import cruzado)."""
-    out = sorted(games, key=lambda g: (g.get("info", {}).get("date") or "", g.get("game_id") or ""))
-    if ctx and getattr(ctx, "last", None):
-        out = out[-ctx.last:]
-    return out
+def _filter_pbp_games(games, ctx, team_code):
+    """Partidos del contexto sobre `repository.team_pbp_games` (sede, rival, descanso y últimos N)."""
+    import context as context_mod
+    return context_mod.filter_games(games, ctx, team_code) if ctx else sorted(
+        games, key=lambda g: (g.get("info", {}).get("date") or "", g.get("game_id") or ""))
 
 
 def clutch_bundle(games, team_code, team_name, margin=None, window_secs=None) -> "StatBundle | None":

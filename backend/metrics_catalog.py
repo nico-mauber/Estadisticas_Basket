@@ -451,6 +451,9 @@ def build_payload(entity_type: str, args) -> dict:
 
     bundles = reg.loader(req)
     if not bundles:
+        if ctx.last or ctx.venue or ctx.opponent or ctx.rest:
+            # La entidad existe pero ningún partido cumple los filtros (T-03 RF-18): estado vacío, no "no existe".
+            raise MetricsError("No hay partidos que cumplan estos filtros.", 404, "sin_partidos")
         raise MetricsError("Entidad no encontrada", 404, "no_encontrado")
 
     import sample as sample_mod

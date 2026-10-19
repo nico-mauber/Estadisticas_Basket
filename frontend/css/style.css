@@ -1477,3 +1477,19 @@ tbody tr.fuera-poblacion { opacity: .6; }
   }
 }
 
+/* ── Barra de contexto (T-03) ── */
+.ctx-bar { padding: 8px 12px; }
+.ctx-bar > summary { display: flex; align-items: center; justify-content: space-between; gap: 8px; cursor: pointer;
+  font-weight: 600; font-size: 13px; list-style: none; }
+.ctx-bar > summary::-webkit-details-marker { display: none; }
+.ctx-bar > summary > span::before { content: "▸ "; color: var(--muted); }
+.ctx-bar[open] > summary > span::before { content: "▾ "; }
+.ctx-fields { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 10px; }
+.ctx-fields label { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: var(--muted);
+  text-transform: uppercase; letter-spacing: .04em; min-width: 0; }
+.ctx-fields select { min-width: 130px; max-width: 100%; }
+.ctx-note { margin: 0 0 8px; font-size: 12px; }
+@media (max-width: 479px) {
+  .ctx-fields { flex-direction: column; gap: 8px; }
+  .ctx-fields select { width: 100%; }
+}
