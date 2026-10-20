@@ -1,6 +1,6 @@
 # Progress — F-08: Plantel en Equipo
 
-> **Estado:** ✅ Implementado (tabla completa del plantel en la vista Equipo, con enlace a la ficha del jugador); pendiente la acción "agregar a comparación" (depende de F-05)
+> **Estado:** ✅ Implementado (tabla completa del plantel, enlace a la ficha y selección para comparar dos jugadores)
 > **Fecha:** 2026-10-20
 
 ## Estado de tareas
@@ -8,7 +8,7 @@
 - [x] RF-2 · Ficha de T-01 por métrica (percentil contra los jugadores de la competencia)
 - [x] RF-3 · Orden, selector de columnas, totales, promedio de competencia, coloreado y exportación (T-06)
 - [x] RF-4 · Los jugadores bajo el mínimo se muestran con badge de muestra baja, sin ocultarse
-- [🔶] RF-5 · Cada fila abre la ficha del jugador; falta la acción "agregar a comparación" (F-05 no existe todavía)
+- [x] RF-5 · Cada fila abre la ficha del jugador; «Elegir para comparar» permite marcar dos filas y abrir Comparar › Jugadores con ambos cargados
 - [x] RF-6 · Contexto de T-03 y base de T-04
 - [x] RF-7 · DNP excluidos del cálculo; nulos con razón, nunca 0
 - [x] RF-8 · La tarjeta "Jugadores más influyentes — USO%" se retira; USO% es una columna ordenable de la tabla
@@ -23,6 +23,7 @@
 | USO% absorbido | ✅ | La tarjeta suelta ya no existe; `uso_pct` es columna de la tabla |
 | Contexto y base | ✅ | `venue=local` aplicado; `base=por100` aplicada |
 | Exportación | ✅ | CSV con el equipo en el nombre del archivo |
+| Comparar desde el plantel | ✅ | Dos filas marcadas abren Comparar › Jugadores con ambos jugadores |
 
 ## Gates técnicos
 - Backend arranca sin traceback: ✅
@@ -40,5 +41,4 @@
 - ✅ `docs/api.md` · ✅ `docs/frontend.md`
 
 ## Deuda / TODO
-- Acción "agregar a comparación" en cada fila (RF-5), cuando exista F-05.
 - `t()` para el copy (F-21).
