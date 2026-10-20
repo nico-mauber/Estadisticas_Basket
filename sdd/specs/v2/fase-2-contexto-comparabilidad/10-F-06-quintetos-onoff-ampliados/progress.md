@@ -1,6 +1,6 @@
 # Progress — F-06: Quintetos y ON/OFF ampliados
 
-> **Estado:** 🔶 Primer corte: tabla completa de quintetos y combinaciones de 3/4, ON/OFF de todo el plantel y tarjetas de mejores quintetos; faltan los cierres por quinteto, la vista de detalle con los tres bloques temáticos y la exportación del bloque de tarjetas
+> **Estado:** 🔶 Tabla completa de quintetos y combinaciones de 3/4, ON/OFF de todo el plantel, cierres por quinteto y tarjetas en 7 categorías; faltan la vista de detalle con los tres bloques temáticos y la exportación del bloque de tarjetas
 > **Fecha:** 2026-10-20
 
 ## Estado de tareas
@@ -16,8 +16,10 @@
 - [x] RF-10 · ON/OFF de todo el plantel con partición exhaustiva (ON + OFF = total del equipo, verificado)
 - [x] RF-11 · Badge de ON/OFF (el menor de los dos estados) y ajuste por estado
 - [x] RF-12 · Tabla `team_onoff` con selector ON / OFF / Diferencia, ordenable y exportable
-- [ ] RF-13 … RF-15 · Cierres por quinteto (récord V-D, % de victorias, diferencial del tramo)
-- [🔶] RF-16 · Tarjetas de los 3 mejores en 5 categorías (Impacto, Tiro, Rebote, Cuidado del balón, Ritmo); faltan Cierres y Versatilidad
+- [x] RF-13 · Récord V-D y % de victorias por quinteto en partidos cerrados (`lineups.clutch_lineup_bundles`, mínimo de posesiones del tramo configurable)
+- [x] RF-14 · Diferencial propio del tramo (PF, PC, Dif) y conjunto estándar del cierre en la tabla `team_clutch_lineups`
+- [x] RF-15 · Badge en partidos contados (`high_games` = 3): con menos, muestra baja, fuera de las tarjetas; Net ajustado con K = 25
+- [x] RF-16 · Tarjetas en 7 categorías: Impacto, Tiro, Rebote, Cuidado del balón, Ritmo, Cierres y Volumen (el spec nombra Versatilidad; se implementó Volumen, que es lo que pide la especificación del cliente: minutos y posesiones)
 - [x] RF-17 · Solo entran los quintetos sobre el umbral, ordenados por el valor ajustado donde lo hay
 - [🔶] RF-18 · Cada tarjeta trae nombres, valor, ajustado con banda, percentil y badge; falta el enlace a la fila
 - [ ] RF-19 · Exportación del bloque de tarjetas
@@ -37,6 +39,8 @@
 | Diferencia | ✅ | `view=diff` = ON − OFF clave por clave; nulos con razón `sin_datos` |
 | Tarjetas | ✅ | 3 por categoría como máximo, solo sobre el umbral (con el seed, 2); cambiar de categoría no hace requests |
 | Contexto y base | ✅ | `venue=local` aplicado; `quarter` informado en `ignored`; `base=por100` aplicada |
+| Cierres por quinteto | ✅ | LBO: 3 quintetos con cierre; Σ puntos = 17 = los del equipo en cierres (`/api/clutch`); ninguno cuenta más cierres que el equipo; récord y % coherentes |
+| Ids consistentes | ✅ | Los ids de la tabla de cierres son un subconjunto de los de la tabla completa y los nombres coinciden |
 
 ## Gates técnicos
 - Backend arranca sin traceback: ✅
@@ -50,13 +54,16 @@
 - **Vista Diferencia:** se calcula en el builder sobre los valores ya escalados (`TableRow.extra["precomputed"]`), no con un bundle; la diferencia ajustada por estado queda pendiente.
 - **Orden de RF-6:** la regla vive en `data-table.js` (presentación), no en el backend; las columnas de tamaño de muestra (partidos, minutos, posesiones) ordenan sin separar, porque ahí la muestra es el dato.
 - **Arreglo de paso:** `meta.entity` de las tablas de quinteto y ON/OFF decía "Liga"; ahora nombra al equipo (afecta el nombre del archivo exportado).
+- **Arreglo de paso (cierres):** `_ids_for` ordenaba los nombres del quinteto alfabéticamente y la tabla completa por id, así que el mismo quinteto se mostraba con distinto orden en cada tabla; ahora ambas usan el orden por id.
+- **Segundos del cierre:** un tramo de quinteto puede empezar antes del cierre; los segundos se reparten en proporción a los eventos del tramo que caen dentro de la ventana (aproximación, el pbp no da el reloj por evento dentro del tramo).
+- **Tipo de entidad:** la tabla de cierres se registra como `lineup` (mismas métricas del catálogo) y mide la muestra como `clutch_lineup`.
 
 ## Docs actualizados
 - ✅ `docs/api.md` · ✅ `docs/architecture.md` · ✅ `docs/frontend.md`
 
 ## Deuda / TODO
-- Cierres por quinteto (RF-13 … RF-15) con `sample.clutch_lineup.*` y `regression.clutch_lineup.k`.
 - Vista de detalle de un quinteto (RF-2) y enlace desde las tarjetas y las filas (RF-8, RF-18).
 - Exportación del bloque de tarjetas (RF-19).
-- Rendimiento: la primera carga de los quintetos tarda ~7 s con 13 partidos.
+- Rendimiento: la primera carga de los quintetos tarda 7–12 s con 13 partidos.
+- La categoría Cierres de las tarjetas queda vacía con el seed: ningún quinteto llega a 3 cierres contados (es el comportamiento de RF-15, pero no se pudo verificar con datos reales).
 - `t()` para el copy (F-21).

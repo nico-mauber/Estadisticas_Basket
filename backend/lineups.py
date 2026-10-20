@@ -713,3 +713,138 @@ def player_on_court(pbp_game, team_code, player_name) -> dict | None:
     opp = _agg(evs, pbp_game["opp_code"])
     seconds = sum(s["seconds"] for s in on_segs)
     return {"own": own, "opp": opp, "seconds": seconds}
+
+
+# ── Cierres por quinteto (F-06 RF-13…RF-15) ──────────────────────────────────
+
+def clutch_lineup_bundles(games, team_code, *, margin=None, window_secs=None, min_poss=None) -> list:
+    """Un `StatBundle` por quinteto con minutos en el tramo de cierre de los partidos cerrados.
+
+    Cierre = últimos `clutch.window_secs` del último período regular más las prórrogas, en partidos
+    con diferencia ≤ `clutch.margin` al entrar al tramo (mismo criterio que `clutch.py`, C-06). Un
+    partido cuenta para el récord del quinteto solo si jugó al menos `sample.clutch_lineup.min_poss`
+    posesiones del tramo; el resultado es el del PARTIDO (gana o pierde el equipo), no el del tramo.
+
+    `meta`: `team_code`, `player_ids`, `wins`, `losses`, `games_counted`, `win_pct`, `pts_for`,
+    `pts_against`, `point_diff` (diferencial propio del quinteto DENTRO del tramo).
+    """
+    import clutch
+    import config
+    import identity
+
+    margin = config.get("clutch.margin") if margin is None else margin
+    window_secs = config.get("clutch.window_secs") if window_secs is None else window_secs
+    min_poss = config.get("sample.clutch_lineup.min_poss") if min_poss is None else min_poss
+
+    sel = clutch._qualified_games(games, team_code, margin, window_secs)
+    by_game = {q["game_id"]: q for q in sel["qualified"]}
+
+    acc: dict[tuple, dict] = {}
+    for g in games:
+        q = by_game.get(g["game_id"])
+        if q is None:
+            continue                     # el partido no fue un cierre apretado
+        starters = game_starters(g["player_rows"], team_code)
+        if starters is None:
+            continue
+        # Resultado del partido: el marcador final está en el último evento del pbp.
+        won = _game_won(g["game_id"], team_code)
+        clutch_nums = {e.get("action_number") for e in q["clutch_evs"]}
+
+        for seg in build_segments(g["events"], team_code, starters):
+            if len(seg["on_court"]) != 5:
+                continue                 # tramo inconsistente (RF-21)
+            evs = [e for e in seg["events"] if e.get("action_number") in clutch_nums]
+            if not evs:
+                continue
+            pairs = _ids_for(team_code, sorted(seg["on_court"]))
+            if pairs is None:
+                continue
+            ids = tuple(pid for pid, _ in pairs)
+            tb = _agg(evs, team_code)
+            ob = _agg(evs, g["opp_code"])
+            entry = acc.setdefault(ids, {
+                "tb": [], "ob": [], "seconds": 0.0, "games": {}, "names": {},
+            })
+            entry["tb"].append(tb)
+            entry["ob"].append(ob)
+            # Segundos del tramo: solo la parte del segmento dentro del cierre no es medible por
+            # evento, así que se reparte proporcionalmente a los eventos del segmento que son de cierre.
+            total_evs = len(seg["events"]) or 1
+            entry["seconds"] += seg["seconds"] * len(evs) / total_evs
+            gstat = entry["games"].setdefault(g["game_id"], {"poss": 0.0, "won": won})
+            gstat["poss"] += _pos(tb)
+            for pid, name in pairs:
+                entry["names"][pid] = name
+
+    out = []
+    for ids, entry in acc.items():
+        counted = [v for v in entry["games"].values() if v["poss"] >= min_poss]
+        wins = sum(1 for v in counted if v["won"] is True)
+        losses = sum(1 for v in counted if v["won"] is False)
+        own = dict(_sum_boxes(entry["tb"]))
+        opp = dict(_sum_boxes(entry["ob"]))
+        own["blk_received"] = opp.get("blk", 0)
+        opp["blk_received"] = own.get("blk", 0)
+        own["plus_minus"] = own.get("pts", 0) - opp.get("pts", 0)
+        opp["plus_minus"] = opp.get("pts", 0) - own.get("pts", 0)
+        seconds = entry["seconds"]
+        names = [entry["names"].get(pid, str(pid)) for pid in ids]
+        out.append(StatBundle(
+            entity_type="clutch_lineup", entity_id=f"{team_code}:{'-'.join(str(i) for i in ids)}",
+            name=" · ".join(names), own=own, opp=opp, team=None,
+            games=len(counted), minutes=seconds / 60 if seconds else 0.0, team_minutes=None,
+            seconds=seconds, on_court=None, shots=None, possessions_counted=None, null_reasons={},
+            meta={
+                "team_code": team_code, "player_ids": list(ids),
+                "wins": wins, "losses": losses, "games_counted": len(counted),
+                "games_with_segment": len(entry["games"]),
+                "win_pct": round(wins / len(counted), 4) if counted else None,
+                "pts_for": own.get("pts", 0), "pts_against": opp.get("pts", 0),
+                "point_diff": own.get("pts", 0) - opp.get("pts", 0),
+                "margin": margin, "window_secs": window_secs,
+            },
+        ))
+    return out
+
+
+def _game_won(game_id, team_code):
+    """`True`/`False` si el equipo ganó ese partido, leído del marcador final de `games`
+    (`home_score`/`away_score`); `None` si falta el marcador o terminó empatado."""
+    from database import Game
+    g = Game.query.filter_by(game_id=game_id).first()
+    if g is None or g.home_score is None or g.away_score is None:
+        return None
+    own, rival = ((g.home_score, g.away_score) if g.home_code == team_code
+                  else (g.away_score, g.home_score))
+    return None if own == rival else own > rival
+
+
+def _ids_for(team_code, names):
+    """Nombres en cancha → `((player_id, nombre), ...)` por id ascendente (mismo orden que
+    `_lineup_bundles`, para que el id y los nombres del quinteto coincidan entre tablas).
+    `None` si algún nombre no resuelve a una ficha."""
+    import identity
+    pairs = []
+    for name in names:
+        pid = identity.resolve_player_id(team_code, name, create=False)
+        if pid is None:
+            return None
+        pairs.append((identity.canonical_id(pid) or pid, name))
+    return tuple(sorted(pairs))
+
+
+def all_clutch_lineups(team_code: str, comp_id: int | None, ctx) -> list:
+    """Cierres por quinteto de un equipo en una competencia y contexto (memo por petición)."""
+    import context as context_mod
+    import identity
+    import repository as repo
+
+    def build():
+        games = repo.team_pbp_games(team_code, comp_id)
+        games = context_mod.filter_games(games, ctx, team_code)
+        games = identity.canonicalize_pbp_games(games, team_code)
+        return clutch_lineup_bundles(games, team_code)
+
+    key = ("clutch_lineups:" + team_code, comp_id, context_mod.context_key(ctx))
+    return repo.memo(key, build)

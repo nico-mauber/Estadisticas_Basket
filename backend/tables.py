@@ -1022,6 +1022,48 @@ def _build_team_onoff(treq: TableRequest) -> list:
     return out
 
 
+def _build_team_clutch_lineups(treq: TableRequest) -> list:
+    """Una fila por quinteto con minutos en el tramo de cierre (F-06 RF-13…RF-15)."""
+    import lineups
+    import sample as sample_mod
+
+    team_code = (treq.params.get("team") or "").upper()
+    bundles = lineups.all_clutch_lineups(team_code, treq.comp_id, treq.ctx)
+    prior = sample_mod.league_prior(treq.comp_id, treq.ctx)
+
+    out = []
+    for b in bundles:
+        meta = b.meta or {}
+        counted = meta.get("games_counted") or 0
+        badge = sample_mod.sample_level("clutch_lineup", n=counted, unit="partidos",
+                                        games=counted, minutes=b.minutes,
+                                        possessions=stats_engine.pos(b.own))
+        values = sample_mod.adjust_values(compute_standard(b), b, prior)
+        adj = {k: values[k]["adj"] for k in sample_mod.REGRESSED_KEYS
+               if (values.get(k) or {}).get("adj") is not None}
+        wins, losses = meta.get("wins", 0), meta.get("losses", 0)
+        wp = meta.get("win_pct")
+        out.append(TableRow(
+            id=b.entity_id, link=f"lineup:{b.entity_id}",
+            texts={
+                "_players": b.name,
+                "_record": f"{wins}-{losses}",
+                # texto con el signo: la columna es de tipo texto, no una métrica con formato
+                "_win_pct": None if wp is None else f"{round(wp * 100, 1):g}%",
+                "_games_counted": counted,
+                "_pts_for": meta.get("pts_for"),
+                "_pts_against": meta.get("pts_against"),
+                "_point_diff": meta.get("point_diff"),
+            },
+            bundle=b, sample=badge, adj=adj or None,
+            extra={"player_ids": meta.get("player_ids") or [], "win_pct": wp},
+        ))
+    out.sort(key=lambda r: (-(r.texts.get("_games_counted") or 0),
+                            -((r.extra or {}).get("win_pct") or 0)))
+
+    return out
+
+
 # ── Registro de las 6 tablas de T-06 (plan §4.2) ───────────────────────────────
 
 register_table(
@@ -1122,4 +1164,20 @@ register_table(
         f"ON/OFF — {(treq.params.get('team') or '').upper()}"
         + {"on": " (en cancha)", "off": " (fuera de cancha)",
            "diff": " (diferencia)"}.get((treq.params.get('view') or 'on').lower(), "")),
+)
+
+register_table(
+    "team_clutch_lineups", entity_type="lineup", title="Quintetos en cierres",
+    builder=_build_team_clutch_lineups, required_params=("team",),
+    default_columns=("_players", "_record", "_win_pct", "_games_counted", "_pts_for",
+                     "_pts_against", "_point_diff", "possessions", "oer", "der", "net_rating",
+                     "efg_pct", "ts_pct", "to_pct", "or_pct", "ft_rate"),
+    bulk_scopes=("team",), row_kind="entity",
+    extra_columns=(("_players", "Quinteto", "text"), ("_record", "V-D", "text"),
+                   ("_win_pct", "% victorias", "text"), ("_games_counted", "Cierres", "int"),
+                   ("_pts_for", "PF", "int"), ("_pts_against", "PC", "int"),
+                   ("_point_diff", "Dif", "int")),
+    default_sort={"key": "net_rating", "dir": "desc", "use_adjusted": True},
+    totals_mode="none",
+    title_fn=lambda treq: f"Quintetos en cierres — {(treq.params.get('team') or '').upper()}",
 )

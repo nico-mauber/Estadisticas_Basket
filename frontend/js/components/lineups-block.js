@@ -19,6 +19,8 @@ const CATEGORIES = [
   { key: "rebote", label: "Rebote", metrics: ["or_pct", "dr_pct", "trb_pct", "trb"] },
   { key: "cuidado", label: "Cuidado del balón", metrics: ["to_pct", "ast_to"], lowerIsBetter: true },
   { key: "ritmo", label: "Ritmo", metrics: ["pace"] },
+  { key: "cierres", label: "Cierres", metrics: ["net_rating"], source: "clutch" },
+  { key: "volumen", label: "Volumen", metrics: ["minutes", "possessions"] },
 ];
 const TOP = 3;
 const PCT_KEYS = new Set(["efg_pct", "ts_pct", "to_pct", "or_pct", "dr_pct", "trb_pct", "ft_rate"]);
@@ -45,6 +47,11 @@ function _cardHTML(payload, cat, row, pos) {
   const adj = row.adj && row.adj[key];
   const pctIdx = payload.columns.findIndex(c => c.key === key);
   const pct = pctIdx >= 0 ? row.pct?.[pctIdx] : null;
+  const recIdx = payload.columns.findIndex(c => c.key === "_record");
+  const wpIdx = payload.columns.findIndex(c => c.key === "_win_pct");
+  const record = recIdx >= 0
+    ? `<span>Cierres ${esc(row.values[recIdx])}${row.values[wpIdx] != null ? ` · ${DEC1(row.values[wpIdx])}% victorias` : ""}</span>`
+    : "";
   const others = cat.metrics.slice(1).map(k => {
     const i = payload.columns.findIndex(c => c.key === k);
     return i < 0 ? "" : `<span>${esc(metricLabel(k))} ${_fmt(k, _rankValue(payload, row, k))}</span>`;
@@ -55,13 +62,18 @@ function _cardHTML(payload, cat, row, pos) {
         ADJUSTED.has(key) && adj && adj.band != null ? ` <em>± ${DEC2(adj.band)}</em>` : ""}</span>
       ${pct != null ? `<span class="lb-pct">p${Math.round(pct)}</span>` : ""}</div>
     <ol class="lb-names">${names.map(n => `<li>${esc(n)}</li>`).join("")}</ol>
-    <div class="lb-extra">${others}</div>
+    <div class="lb-extra">${record}${others}</div>
     <div class="lb-badge">${sampleBadge(row.sample, { compact: true })}</div>
   </div>`;
 }
 
-function _cardsHTML(payload, catKey) {
+function _cardsHTML(payload, catKey, clutchPayload) {
   const cat = CATEGORIES.find(c => c.key === catKey) || CATEGORIES[0];
+  if (cat.source === "clutch") {
+    if (!clutchPayload) return '<p class="empty"><span class="spinner"></span>Calculando cierres…</p>';
+    if (!clutchPayload.rows.length) return '<p class="empty">Sin partidos cerrados en la selección.</p>';
+    payload = clutchPayload;
+  }
   const key = cat.metrics[0];
   // Solo entran los quintetos que superan el umbral de muestra (RF-17).
   const eligible = payload.rows.filter(r => r.sample?.ranked && _rankValue(payload, r, key) != null);
@@ -125,6 +137,11 @@ export async function renderLineupsBlock(el, teamCode, opts = {}) {
       <div class="lb-table"></div>
     </div>
     <div class="card">
+      <div class="card-title">Quintetos en cierres</div>
+      <p class="td-muted lb-note">Últimos minutos de los partidos cerrados: el récord cuenta un partido cuando el quinteto jugó al menos el mínimo de posesiones del tramo, y el resultado es el del partido.</p>
+      <div class="lb-clutch"></div>
+    </div>
+    <div class="card">
       <div class="card-title">ON/OFF del plantel</div>
       <div class="lb-views" role="group" aria-label="Vista">
         ${[["on", "En cancha"], ["off", "Fuera de cancha"], ["diff", "Diferencia"]].map(([k, l]) =>
@@ -134,12 +151,30 @@ export async function renderLineupsBlock(el, teamCode, opts = {}) {
     </div>`;
 
   const cardsHost = el.querySelector(".lb-cards-host");
-  const drawCards = catKey => { cardsHost.innerHTML = _cardsHTML(payload, catKey); };
-  drawCards(CATEGORIES[0].key);
+  let clutchPayload = null;
+  let currentCat = CATEGORIES[0].key;
+  const drawCards = catKey => {
+    currentCat = catKey;
+    cardsHost.innerHTML = _cardsHTML(payload, catKey, clutchPayload);
+  };
+  drawCards(currentCat);
   el.querySelectorAll(".lb-cat").forEach(btn => btn.addEventListener("click", () => {
     el.querySelectorAll(".lb-cat").forEach(b => b.classList.toggle("active", b === btn));
     drawCards(btn.dataset.cat);   // de la misma respuesta: sin requests
   }));
+
+  // Los cierres salen de otra tabla: se piden una vez, en segundo plano.
+  api.table("team_clutch_lineups", { team: teamCode, ...params, base })
+    .then(p => {
+      if (token !== _token) return;
+      clutchPayload = p;
+      if (currentCat === "cierres") drawCards(currentCat);
+    })
+    .catch(() => {
+      if (token !== _token) return;
+      clutchPayload = { rows: [], columns: [] };
+      if (currentCat === "cierres") drawCards(currentCat);
+    });
 
   const tableHost = el.querySelector(".lb-table");
   const mountLineups = () => mountTable(tableHost,
@@ -151,6 +186,10 @@ export async function renderLineupsBlock(el, teamCode, opts = {}) {
     size = Number(btn.dataset.size);
     mountLineups();
   }));
+
+  mountTable(el.querySelector(".lb-clutch"),
+    () => api.table("team_clutch_lineups", { team: teamCode, ...params, base }),
+    { tableId: "team_clutch_lineups" });
 
   const onoffHost = el.querySelector(".lb-onoff");
   const mountOnoff = () => mountTable(onoffHost,
