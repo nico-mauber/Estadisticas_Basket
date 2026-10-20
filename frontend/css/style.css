@@ -1493,3 +1493,11 @@ tbody tr.fuera-poblacion { opacity: .6; }
   .ctx-fields { flex-direction: column; gap: 8px; }
   .ctx-fields select { width: 100%; }
 }
+
+.ctx-field { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: var(--muted);
+  text-transform: uppercase; letter-spacing: .04em; min-width: 0; }
+.ctx-quarters { display: flex; gap: 4px; flex-wrap: wrap; }
+.ctx-q { padding: 6px 10px; border-radius: 6px; border: 1px solid var(--border); background: transparent;
+  color: var(--text); font-size: 12px; cursor: pointer; text-transform: none; letter-spacing: 0; }
+.ctx-q[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+.ctx-hint { margin: 8px 0 0; font-size: 12px; }

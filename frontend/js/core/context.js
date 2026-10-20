@@ -1,5 +1,6 @@
-// ── Contexto global de filtros (T-03, nivel partido) ─────────────────────────
-// Sede, rival y descanso viajan en la URL (?venue=&opponent=&rest=, mismos nombres que la API),
+// ── Contexto global de filtros (T-03) ────────────────────────────────────────
+// Sede, rival, descanso (nivel partido) y cuarto, marcador, con/sin jugador (nivel evento, solo Equipo)
+// viajan en la URL (?venue=&opponent=&rest=&quarter=&score=&on=&off=, mismos nombres que la API),
 // se recuerdan durante la sesión y se aplican a todas las vistas con estadísticas. El cálculo lo hace
 // siempre el backend; acá solo se guarda la selección. `competition` y `last` los siguen manejando las
 // vistas (selector de competencia y pills de últimos N).
@@ -11,11 +12,30 @@ export const REST_OPTIONS = [
   { key: "", label: "Todos" }, { key: "0", label: "0 días" }, { key: "1", label: "1 día" },
   { key: "2", label: "2 días" }, { key: "3mas", label: "3 o más" },
 ];
+export const QUARTER_OPTIONS = [
+  { key: "1", label: "1.º" }, { key: "2", label: "2.º" }, { key: "3", label: "3.º" },
+  { key: "4", label: "4.º" }, { key: "pr", label: "Prórroga" },
+];
+export const SCORE_OPTIONS = [
+  { key: "", label: "Todos" }, { key: "ajustado", label: "Ajustado" }, { key: "paliza", label: "Paliza" },
+];
+const QUARTERS = QUARTER_OPTIONS.map(o => o.key);
+// CSV válido → CSV normalizado (cuartos en orden, ids sin repetir); "" si algo no se reconoce
+const _csvOf = (v, ok, sortFn) => {
+  const parts = [...new Set(String(v).split(",").map(x => x.trim()).filter(Boolean))];
+  return parts.length && parts.every(ok) ? parts.sort(sortFn).join(",") : "";
+};
 const VALID = {
   venue: new Set(["local", "visitante"]),
   rest: new Set(["0", "1", "2", "3mas"]),
   opponent: null,   // texto libre (código de equipo); el servidor lo valida
+  score: new Set(["ajustado", "paliza"]),
+  quarter: v => _csvOf(v, q => QUARTERS.includes(q), (a, b) => QUARTERS.indexOf(a) - QUARTERS.indexOf(b)),
+  on: v => _csvOf(v, x => /^\d+$/.test(x), (a, b) => a - b),
+  off: v => _csvOf(v, x => /^\d+$/.test(x), (a, b) => a - b),
 };
+// Filtros de nivel evento: solo los calcula Equipo (el servidor los informa como ignorados en el resto)
+export const EVENT_KEYS = ["quarter", "score", "on", "off"];
 const KEYS = Object.keys(VALID);
 const STORAGE_KEY = "sb.ctx";
 
@@ -25,9 +45,13 @@ const _listeners = new Set();
 function _clean(obj) {
   const out = {};
   for (const k of KEYS) {
-    const v = String(obj?.[k] ?? "").trim();
+    const raw = String(obj?.[k] ?? "").trim();
+    if (!raw) continue;
+    const rule = VALID[k];
+    let v = raw;
+    if (typeof rule === "function") v = rule(raw);
+    else if (rule && !rule.has(raw)) v = "";
     if (!v) continue;
-    if (VALID[k] && !VALID[k].has(v)) continue;
     out[k] = k === "opponent" ? v.toUpperCase() : v;
   }
   return out;
@@ -79,6 +103,16 @@ export function clearContext() {
   _state = {};
   _persist();
   _listeners.forEach(fn => fn(getContext()));
+}
+
+// Con/sin jugador pertenecen a un equipo: se limpian al cambiar de equipo (los demás filtros se conservan).
+export function clearPlayerFilters() {
+  if (!("on" in _state) && !("off" in _state)) return;
+  const next = { ..._state };
+  delete next.on;
+  delete next.off;
+  _state = next;
+  _persist();
 }
 
 export function onContextChange(fn) {

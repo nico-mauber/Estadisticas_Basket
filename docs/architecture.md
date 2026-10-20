@@ -103,6 +103,9 @@ Coincidencia en cancha (F-07): cruces entre quintetos/jugadores de un partido. `
 ### `identity.py`
 Identidad de jugador (C-08): una ficha por jugador y equipo (`players`), clave `(equipo, nombre normalizado)`. `resolve_player_id` crea o encuentra la ficha; `assign_game(game_id)` la asocia a cada fila de un partido (la llama `ingest.persist_game`) y `backfill_player_ids()` completa el histórico al arrancar (idempotente). `aliases`/`name_index`/`canonicalize_pbp_games` permiten consultar por nombre en cualquier grafía sobre `shots` y `pbp_events`, que guardan el nombre crudo. `duplicate_candidates` alimenta el panel de calidad y `merge_players` es la fusión manual de un administrador. `norm_name`/`resolve_identity` (puras) siguen en `stats_engine.py`.
 
+### `splits.py`
+Splits de nivel evento (T-03): `event_slices(events, team_code, starters, close_margin)` parte un partido en rebanadas (período, situación de marcador, quinteto del equipo) con sus eventos y segundos exactos; `team_event_bundle(team_code, comp_id, ctx)` arma el `StatBundle` (`entity_type="split"`) agregando solo las rebanadas que cumplen `quarter`/`score`/`on`/`off` (conteos con `clutch._agg`); `all_team_event_bundles` alimenta la población de rankings. `bundles._team_bundle_from_games` lo usa cuando `context.has_event_filters(ctx)`.
+
 ### `rest.py`
 Días de descanso de un equipo antes de cada partido (T-03): `team_rest(team_code)` → `{game_id: "0"|"1"|"2"|"3mas"|None}` sobre todos los partidos publicados del equipo (cualquier competencia); `days_rest(team_code, game_id)`. `None` = primer partido o sin fecha.
 

@@ -6,6 +6,7 @@ entidad en `metrics_catalog` (team, player, lineup, onoff, clutch) al importarse
 importa este módulo al arrancar para que el registro ocurra.
 """
 import clutch
+import dataclasses
 import context
 import identity
 import lineups
@@ -93,6 +94,9 @@ def team_game_bundles(team_code: str, comp_id: int | None, ctx: "context.Context
 
 
 def _team_bundle_from_games(team_code, comp_id, ctx):
+    if context.has_event_filters(ctx):
+        import splits   # nivel evento (T-03): cuarto, marcador, con/sin jugador
+        return splits.team_event_bundle(team_code, comp_id, ctx)
     per_game = team_game_bundles(team_code, comp_id, ctx)
     if not per_game:
         return None
@@ -125,6 +129,8 @@ def all_team_bundles(comp_id, ctx):
     rows = repository.team_game_rows(comp_id)
     codes = sorted({r["team_code"] for r in rows.values()})
     out = []
+    # con/sin jugador solo existe para la entidad consultada: la población usa el resto del contexto
+    ctx = dataclasses.replace(ctx, on=(), off=())
     for code in codes:
         b = _team_bundle_from_games(code, comp_id, ctx)
         if b is not None:

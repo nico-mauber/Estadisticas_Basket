@@ -15,7 +15,7 @@ import { renderGameView } from "./components/game-view.js";
 import { renderLiveView, destroyLiveView } from "./components/live-view.js";
 import { renderPrepare } from "./components/prepare-report.js";
 import { initBase, getBase, setBase } from "./core/base.js";
-import { initContext, contextParams, clearContext, dropInvalid, activeCount } from "./core/context.js";
+import { initContext, contextParams, clearContext, clearPlayerFilters, dropInvalid, activeCount } from "./core/context.js";
 import { mountContextBar, contextNote } from "./components/context-bar.js";
 
 // ── Toast ──────────────────────────────────────────────────────────────────
@@ -104,8 +104,8 @@ function _selectionNote(data, kind) {
 }
 
 // Monta la barra de contexto (T-03) y el botón de la selección vacía dentro de `main`; `reload` recarga la vista.
-function _mountCtxBar(main, competition, reload) {
-  mountContextBar(main.querySelector(".ctx-bar-host"), { competition, onChange: reload });
+function _mountCtxBar(main, competition, reload, teamCode = null) {
+  mountContextBar(main.querySelector(".ctx-bar-host"), { competition, teamCode, onChange: reload });
   main.querySelector(".ctx-empty-clear")?.addEventListener("click", () => { clearContext(); reload(); });
 }
 
@@ -1529,7 +1529,7 @@ function _applyTeamData(main, data) {
     compSel.innerHTML = _compOptions(data.competitions, _teamComp, "Todas las competencias", "all");
   }
   _renderTeamContent(main, data);
-  _mountCtxBar(main, _teamComp, () => _reloadTeam());
+  _mountCtxBar(main, _teamComp, () => _reloadTeam(), data.team_code);
 }
 
 // Cambió la competencia o el filtro de últimos N: se pide el perfil de nuevo al servidor (no se recalcula
@@ -1563,7 +1563,10 @@ async function _reloadTeam({ clutch = false } = {}) {
   if (clutch) renderTeamClutch(code);
 }
 
+let _ctxTeam = null;   // último equipo mostrado: con/sin jugador no viajan a otro equipo
 async function renderTeam(teamCode) {
+  if (_ctxTeam && _ctxTeam !== teamCode) clearPlayerFilters();
+  _ctxTeam = teamCode;
   const main = document.getElementById("team-main");
   main.innerHTML = '<p class="empty"><span class="spinner"></span>Cargando...</p>';
   _teamLastN = 0;

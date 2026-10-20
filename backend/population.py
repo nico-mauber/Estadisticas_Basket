@@ -266,7 +266,7 @@ def _build_population(entity_type, comp_id, ctx, apply_thresholds, variant) -> P
         return _pop([], None)
 
     prior = None
-    if entity_type in sample_mod.REGRESSED_TYPES:
+    if entity_type in sample_mod.REGRESSED_TYPES or any(b.entity_type in sample_mod.REGRESSED_TYPES for b in bundles):
         prior = sample_mod.league_prior(comp_id, ctx)
 
     members = []
@@ -276,7 +276,7 @@ def _build_population(entity_type, comp_id, ctx, apply_thresholds, variant) -> P
             values = stats_engine.apply_base(values, b, "partido")
         except ValueError:
             pass
-        if entity_type in sample_mod.REGRESSED_TYPES:
+        if entity_type in sample_mod.REGRESSED_TYPES or b.entity_type in sample_mod.REGRESSED_TYPES:
             values = sample_mod.adjust_values(values, b, prior)
 
         # Valor de ranking por clave: `adj.value` donde hay ajuste (RF-16), si no el valor por partido.
@@ -303,7 +303,8 @@ def _build_population(entity_type, comp_id, ctx, apply_thresholds, variant) -> P
                 sample_bundles = [b, off_b] if off_b is not None else [b, b]
             else:
                 sample_bundles = [b]
-            badge = sample_mod.sample_for(entity_type, sample_bundles, team_poss=team_poss)
+            stype = "split" if b.entity_type == "split" else entity_type   # equipo con filtros de evento
+            badge = sample_mod.sample_for(stype, sample_bundles, team_poss=team_poss)
 
         in_pop = True
         if apply_thresholds:

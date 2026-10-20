@@ -5,9 +5,10 @@ Contexto de una petición de perfil (C-02, T-03): competencia, últimos N y filt
 query son los definitivos (`?competition=<id>|all|<texto de FIBA>&last=<n>&venue=local|visitante&
 opponent=<team_code>&rest=0|1|2|3mas`).
 
-Alcance actual de T-03: nivel PARTIDO (competencia, últimos N, sede, rival, descanso). Los parámetros de
-nivel evento (`quarter`, `score`, `on`, `off`) y de posesión (`clock`, `clock_start`, `origin`, `ptype`,
-`chance`) se validan pero todavía no se aplican: se informan en `context.ignored`.
+Alcance actual de T-03: nivel PARTIDO (competencia, últimos N, sede, rival, descanso) y nivel EVENTO para el
+equipo (`quarter`, `score`, `on`, `off`, ver `splits.py`). Los de posesión (`clock`, `clock_start`, `origin`,
+`ptype`, `chance`) se validan pero todavía no se aplican: se informan en `context.ignored`. Los endpoints que
+no calculan nivel evento (`event_level=False`) también los informan en `ignored`.
 
 Quién decide qué: este módulo solo interpreta y filtra; la competencia por defecto se resuelve en
 `repository.resolve_competition` y el promedio de liga en `population.py`.
@@ -69,6 +70,10 @@ class Context:
     venue: str | None = None      # "local" | "visitante"
     opponent: str | None = None   # team_code del rival
     rest: str | None = None       # "0" | "1" | "2" | "3mas"
+    quarters: tuple = ()          # subconjunto de ("1", "2", "3", "4", "pr") (nivel evento)
+    score: str | None = None      # "ajustado" | "paliza" (nivel evento)
+    on: tuple = ()                # player_id en cancha (nivel evento)
+    off: tuple = ()               # player_id fuera de cancha (nivel evento)
     # Parámetros válidos pero sin cálculo todavía: ((param, razón), ...). No entra en la clave de caché.
     ignored: tuple = field(default=(), compare=False)
 
@@ -78,9 +83,10 @@ def _invalid(param: str, value) -> ContextError:
 
 
 def parse_context(args: Mapping[str, str], *, team_code: str | None = None,
-                  player_id: int | None = None) -> Context:
+                  player_id: int | None = None, event_level: bool = False) -> Context:
     """Query de la petición → `Context`. `team_code` / `player_id` identifican a la entidad
-    consultada: sin `competition` se usa la de su partido más reciente (DA-14)."""
+    consultada: sin `competition` se usa la de su partido más reciente (DA-14). `event_level`: el
+    endpoint calcula filtros de evento (hoy solo el equipo); si no, se informan en `ignored`."""
     try:
         res = repository.resolve_competition(args.get("competition"), team_code=team_code,
                                              player_id=player_id)
@@ -101,12 +107,24 @@ def parse_context(args: Mapping[str, str], *, team_code: str | None = None,
         raise _invalid("opponent", args.get("opponent"))
 
     ignored = []
+    quarters, score, on, off = (), None, (), ()
     for p in EVENT_PARAMS:
         v = (args.get(p) or "").strip()
         if not v:
             continue
         _validate_event_param(p, v)
-        ignored.append((p, "no_implementado"))
+        if not event_level:
+            ignored.append((p, "no_implementado" if player_id is not None else "no_aplica"))
+        elif p == "quarter":
+            quarters = tuple(q for q in _QUARTER_VALUES if q in {x.strip() for x in v.split(",")})
+        elif p == "score":
+            score = v
+        elif p == "on":
+            on = _parse_players(p, v, team_code)
+        else:
+            off = _parse_players(p, v, team_code)
+    if set(on) & set(off):
+        raise ContextError("Un jugador no puede estar en 'on' y en 'off' a la vez.", 400, "off", args.get("off"))
     for p in POSSESSION_PARAMS:
         v = (args.get(p) or "").strip()
         if not v:
@@ -116,7 +134,8 @@ def parse_context(args: Mapping[str, str], *, team_code: str | None = None,
         ignored.append((p, "requiere_posesiones"))
 
     return Context(res["id"], res["all"], _parse_last(args.get("last")),
-                   venue=venue, opponent=opponent, rest=rest, ignored=tuple(ignored))
+                   venue=venue, opponent=opponent, rest=rest, quarters=quarters, score=score,
+                   on=on, off=off, ignored=tuple(ignored))
 
 
 def _validate_event_param(param: str, value: str) -> None:
@@ -129,6 +148,19 @@ def _validate_event_param(param: str, value: str) -> None:
     else:   # on / off
         if any(not p.strip().isdigit() for p in value.split(",")):
             raise _invalid(param, value)
+
+
+def _parse_players(param: str, value: str, team_code: str | None) -> tuple:
+    """CSV de player_id → tupla ordenada sin repetidos; cada uno debe ser una ficha del equipo."""
+    import identity
+    ids = sorted({int(x) for x in value.split(",") if x.strip()})
+    for pid in ids:
+        card = identity.player_card(pid)
+        if card is None:
+            raise _invalid(param, value)
+        if team_code and card["team_code"] != team_code:
+            raise ContextError(f"El jugador {pid} no pertenece a {team_code}.", 400, param, value)
+    return tuple(ids)
 
 
 def _team_codes(comp_id: int | None) -> set:
@@ -151,7 +183,22 @@ def _parse_last(raw) -> int | None:
 
 def context_key(ctx: Context) -> tuple:
     """Clave de memo/caché del contexto."""
-    return (ctx.competition_id, ctx.competition_all, ctx.last, ctx.venue, ctx.opponent, ctx.rest)
+    return (ctx.competition_id, ctx.competition_all, ctx.last, ctx.venue, ctx.opponent, ctx.rest,
+            ctx.quarters, ctx.score, ctx.on, ctx.off)
+
+
+def has_event_filters(ctx: Context) -> bool:
+    return bool(ctx.quarters or ctx.score or ctx.on or ctx.off)
+
+
+def level(ctx: Context) -> str:
+    return "evento" if has_event_filters(ctx) else "partido"
+
+
+def population_mode(ctx: Context) -> str:
+    """`entity_only` con con/sin jugador: el filtro solo existe para esa entidad (la población de equipos
+    no se puede recalcular con él); si no, el mismo contexto se aplica a toda la población."""
+    return "entity_only" if (ctx.on or ctx.off) else "apply_all"
 
 
 def without_last(ctx: Context) -> Context:
@@ -221,6 +268,30 @@ def rest_excluded(games: list[dict], ctx: Context, team_code: str | None = None)
     return filter_games_ex(games, replace(ctx, last=None), team_code)[1]
 
 
+SCORE_LABELS = {"ajustado": "Ajustado", "paliza": "Paliza"}
+_QUARTER_NAMES = {"1": "1.º", "2": "2.º", "3": "3.º", "4": "4.º"}
+
+
+def _quarters_label(qs) -> str:
+    names = [_QUARTER_NAMES[q] for q in qs if q in _QUARTER_NAMES]
+    parts = []
+    if names:
+        joined = names[0] if len(names) == 1 else ", ".join(names[:-1]) + " y " + names[-1]
+        parts.append(f"{joined} cuarto")
+    if "pr" in qs:
+        parts.append("prórroga")
+    return " y ".join(parts)
+
+
+def _players_label(ids) -> str:
+    import identity
+    names = []
+    for i in ids:
+        card = identity.player_card(i)
+        names.append(card["display_name"] if card and card.get("display_name") else f"jugador {i}")
+    return " y ".join(names)
+
+
 def _last_label(n: int) -> str:
     return "Último partido" if n == 1 else f"Últimos {n}"
 
@@ -243,13 +314,23 @@ def context_echo(ctx: Context, *, games_used: int, games_total: int, games_exclu
     if ctx.rest:
         applied["rest"] = ctx.rest
         parts.append(REST_LABELS[ctx.rest])
+    if ctx.quarters:
+        applied["quarter"] = ",".join(ctx.quarters)
+        parts.append(_quarters_label(ctx.quarters))
+    if ctx.score:
+        applied["score"] = ctx.score
+        parts.append(SCORE_LABELS[ctx.score])
+    for p, ids, word in ("on", ctx.on, "Con"), ("off", ctx.off, "Sin"):
+        if ids:
+            applied[p] = ",".join(str(i) for i in ids)
+            parts.append(f"{word} {_players_label(ids)}")
     all_ignored = list(ignored) + [{"param": p, "reason": r} for p, r in ctx.ignored]
     return {
         "competition": {"id": ctx.competition_id, "label": comp_label},
         "applied": applied,
         "ignored": all_ignored,
-        "level": "partido",
-        "population_mode": "apply_all",
+        "level": level(ctx),
+        "population_mode": population_mode(ctx),
         "games_used": games_used,
         "games_total": games_total,
         "games_excluded": games_excluded,
@@ -266,9 +347,9 @@ def dimensions(comp_id: int | None) -> list[dict]:
         d("venue", "partido", list(VENUES)),
         d("opponent", "partido", sorted(_team_codes(comp_id))),
         d("rest", "partido", list(REST_VALUES)),
-        d("quarter", "evento", list(_QUARTER_VALUES), False),
-        d("score", "evento", list(_SCORE_VALUES), False),
-        d("on", "evento", [], False),
-        d("off", "evento", [], False),
+        d("quarter", "evento", list(_QUARTER_VALUES)),
+        d("score", "evento", list(_SCORE_VALUES)),
+        d("on", "evento", []),
+        d("off", "evento", []),
         *[d(p, "posesion", list(_POSSESSION_VALUES[p]), False) for p in POSSESSION_PARAMS],
     ]
