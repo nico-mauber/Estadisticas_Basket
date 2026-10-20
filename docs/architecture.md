@@ -103,6 +103,9 @@ Coincidencia en cancha (F-07): cruces entre quintetos/jugadores de un partido. `
 ### `identity.py`
 Identidad de jugador (C-08): una ficha por jugador y equipo (`players`), clave `(equipo, nombre normalizado)`. `resolve_player_id` crea o encuentra la ficha; `assign_game(game_id)` la asocia a cada fila de un partido (la llama `ingest.persist_game`) y `backfill_player_ids()` completa el histórico al arrancar (idempotente). `aliases`/`name_index`/`canonicalize_pbp_games` permiten consultar por nombre en cualquier grafía sobre `shots` y `pbp_events`, que guardan el nombre crudo. `duplicate_candidates` alimenta el panel de calidad y `merge_players` es la fusión manual de un administrador. `norm_name`/`resolve_identity` (puras) siguen en `stats_engine.py`.
 
+### `lineups.py` (F-06 cierres)
+`clutch_lineup_bundles(games, team_code)` cruza los partidos cerrados de `clutch._qualified_games` con los tramos de `build_segments`: por cada quinteto suma solo los eventos del cierre, reparte los segundos del tramo en proporción a esos eventos y guarda en `meta` el récord V-D (un partido cuenta con `sample.clutch_lineup.min_poss` posesiones; gana o pierde el PARTIDO, leído de `games.home_score`/`away_score`), `win_pct` y el diferencial propio del tramo. `all_clutch_lineups` lo memoiza por equipo, competencia y contexto.
+
 ### `tables.py` (F-06)
 `_build_team_lineups` y `_build_team_onoff` exponen como tablas T-06 lo que ya calculaban `lineups.all_lineups` y `lineups.all_onoff_bundles`: badge de muestra por fila, `adj` de OER/DER/Net y, en la vista Diferencia, valores precalculados (`TableRow.extra["precomputed"]`, que `_row_values` usa en lugar del bundle). El orden que deja la muestra baja al final lo aplica `data-table.js` sobre `sample.ranked`.
 
