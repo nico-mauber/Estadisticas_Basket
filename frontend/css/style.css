@@ -1539,3 +1539,17 @@ tbody tr.fuera-poblacion { opacity: .6; }
 .pl-head { padding: 14px 16px; }
 .pl-name { font-size: 20px; font-weight: 700; }
 .lb-detail-open .lb-table-card, .lb-detail-open .lb-cards-card { display: none; }
+
+/* ── Comparar jugadores (F-05) ── */
+.cmp-tabs { display: flex; gap: 6px; margin-bottom: 12px; }
+.cmp-note { margin: 8px 0 0; font-size: 12px; }
+.cmp-heads { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+.cmp-name { font-size: 17px; font-weight: 700; }
+.cmp-table { width: 100%; }
+.cmp-table td, .cmp-table th { padding: 6px 8px; }
+.cmp-table .cmp-key { text-align: center; color: var(--muted); font-size: 12px; white-space: nowrap; }
+.cmp-table td:first-child { text-align: right; }
+.cmp-table td:last-child { text-align: left; }
+.cmp-win { font-weight: 700; color: var(--above); }
+.cmp-pct { display: inline-block; padding: 0 5px; border-radius: 4px; font-size: 10px; color: #fff; }
+@media (max-width: 479px) { .cmp-heads { grid-template-columns: 1fr; } }

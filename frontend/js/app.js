@@ -19,6 +19,7 @@ import { initContext, contextParams, clearContext, clearPlayerFilters, dropInval
 import { mountContextBar, contextNote } from "./components/context-bar.js";
 import { renderPeriodBlock, destroyPeriodBlock } from "./components/period-block.js";
 import { renderLineupsBlock } from "./components/lineups-block.js";
+import { renderComparePlayers, comparePlayersFromUrl } from "./components/compare-players.js";
 
 // ── Toast ──────────────────────────────────────────────────────────────────
 function toast(msg, type = "ok") {
@@ -1468,15 +1469,60 @@ async function _loadTeamStandard(teamCode) {
 function _renderTeamRoster(teamCode) {
   const el = document.getElementById("team-roster");
   if (!el) return;
-  el.innerHTML = '<div class="card"><div class="card-title">Plantel</div><div id="team-roster-dt"></div></div>';
+  el.innerHTML = `<div class="card">
+      <div class="map-header">
+        <div class="card-title" style="margin:0">Plantel</div>
+        <button type="button" class="btn btn-ghost btn-sm rs-pick-toggle">Elegir para comparar</button>
+      </div>
+      <p class="td-muted rs-hint">Tocá una fila para abrir la ficha del jugador.</p>
+      <div class="rs-compare" style="display:none">
+        <span class="rs-picked"></span>
+        <button type="button" class="btn btn-ghost btn-sm rs-compare-go" disabled>Comparar</button>
+        <button type="button" class="btn btn-ghost btn-sm rs-compare-clear">Limpiar</button>
+      </div>
+      <div id="team-roster-dt"></div>
+    </div>`;
+  // Selección para comparar (F-08 RF-5 → F-05 RF-9): dos jugadores y se abre Comparar › Jugadores.
+  const picked = [];
+  let pickMode = false;
+  const bar = el.querySelector(".rs-compare");
+  const label = el.querySelector(".rs-picked");
+  const go = el.querySelector(".rs-compare-go");
+  const hint = el.querySelector(".rs-hint");
+  const toggle = el.querySelector(".rs-pick-toggle");
+  const refresh = () => {
+    bar.style.display = pickMode ? "" : "none";
+    label.textContent = picked.length ? picked.map(p => p.name).join(" vs ") : "Elegí dos jugadores.";
+    go.disabled = picked.length !== 2;
+    toggle.textContent = pickMode ? "Salir de comparar" : "Elegir para comparar";
+    hint.textContent = pickMode
+      ? "Tocá dos filas para elegir los jugadores a comparar."
+      : "Tocá una fila para abrir la ficha del jugador.";
+  };
+  toggle.addEventListener("click", () => {
+    pickMode = !pickMode;
+    if (!pickMode) picked.length = 0;
+    refresh();
+  });
+  el.querySelector(".rs-compare-clear").addEventListener("click", () => { picked.length = 0; refresh(); });
+  refresh();
+  go.addEventListener("click", () => { if (picked.length === 2) showComparePlayers(picked[0].id, picked[1].id); });
   mountTable(document.getElementById("team-roster-dt"),
     () => api.table("team_roster", { team: teamCode, ...contextParams(), competition: _teamComp, last: _teamLastN || null, base: getBase() }),
     {
       tableId: "team_roster",
       onRowClick: (row, payload) => {
         const i = payload.columns.findIndex(c => c.key === "_name");
+        const name = i >= 0 ? row.values[i] : "";
+        if (pickMode) {   // modo comparar: la fila se marca en vez de abrir la ficha
+          const at = picked.findIndex(p => String(p.id) === String(row.id));
+          if (at >= 0) picked.splice(at, 1);
+          else if (picked.length < 2) picked.push({ id: row.id, name });
+          refresh();
+          return;
+        }
         setSection("player");
-        renderPlayer(teamCode, i >= 0 ? row.values[i] : "", Number(row.id) || null);
+        renderPlayer(teamCode, name, Number(row.id) || null);
       },
     });
 }
@@ -1728,8 +1774,42 @@ async function renderTeamLineup(teamCode, players, playerIds = []) {
 }
 
 // ── Compare section ────────────────────────────────────────────────────────
+// Pestañas Equipos / Jugadores de la sección Comparar (F-05). La de jugadores se monta la
+// primera vez que se abre (o si la dirección ya trae los dos jugadores).
+let _cmpTabsBound = false;
+function _initCompareTabs(force = null) {
+  const show = which => {
+    document.querySelectorAll(".cmp-tab").forEach(b => b.classList.toggle("active", b.dataset.cmp === which));
+    document.getElementById("cmp-pane-equipos").style.display = which === "equipos" ? "" : "none";
+    const pane = document.getElementById("cmp-pane-jugadores");
+    pane.style.display = which === "jugadores" ? "" : "none";
+    if (which === "jugadores" && !pane.dataset.mounted) {
+      pane.dataset.mounted = "1";
+      renderComparePlayers(pane, { base: getBase(), initial: comparePlayersFromUrl() });
+    }
+  };
+  if (!_cmpTabsBound) {
+    _cmpTabsBound = true;
+    document.querySelectorAll(".cmp-tab").forEach(btn =>
+      btn.addEventListener("click", () => show(btn.dataset.cmp)));
+  }
+  if (force) show(force);
+  else if (comparePlayersFromUrl()) show("jugadores");
+}
+
+// Abre Comparar › Jugadores con dos jugadores ya elegidos (F-08 RF-5 → F-05 RF-9).
+function showComparePlayers(idA, idB) {
+  setSection("compare");
+  const pane = document.getElementById("cmp-pane-jugadores");
+  pane.dataset.mounted = "1";
+  _initCompareTabs("jugadores");
+  renderComparePlayers(pane, { base: getBase(), initial: { a: String(idA), b: String(idB) } });
+}
+
 async function renderCompare() {
   const sec = document.getElementById("sec-compare");
+  if (sec.style.display === "none") setSection("compare");
+  _initCompareTabs();
   await refreshCompareSelectors();
 
   const btnCompare = document.getElementById("btn-compare");
@@ -2407,6 +2487,11 @@ function renderApp() {
 
       <!-- Compare -->
       <div class="section" id="sec-compare">
+        <div class="cmp-tabs">
+          <button class="filter-pill cmp-tab active" data-cmp="equipos">Equipos</button>
+          <button class="filter-pill cmp-tab" data-cmp="jugadores">Jugadores</button>
+        </div>
+        <div id="cmp-pane-equipos">
         <div class="card">
           <div class="card-title">Comparar equipos</div>
           <div class="compare-controls">
@@ -2417,6 +2502,8 @@ function renderApp() {
           </div>
         </div>
         <div id="compare-result"></div>
+        </div>
+        <div id="cmp-pane-jugadores" style="display:none"></div>
       </div>
 
       <!-- Player -->
@@ -2532,6 +2619,11 @@ function renderApp() {
     renderConfig();
   });
 
+  // Una dirección con dos jugadores abre directamente Comparar › Jugadores (F-05 RF-8).
+  if (comparePlayersFromUrl()) {
+    renderCompare();
+    return;
+  }
   setSection("import");
   renderImport();
 }
