@@ -262,6 +262,66 @@ def context_options():
     })
 
 
+@app.route("/api/periods/<team_code>")
+@login_required
+def team_periods(team_code: str):
+    """Estadísticas por tramo del partido (F-04): los 8 tramos (1.º–4.º cuarto, mitades, prórroga y últimos 5
+    minutos) en una sola respuesta, cada uno con el conjunto estándar de T-05, su ficha de T-01 en el mismo
+    tramo, el badge de muestra de split, el récord del tramo y el desglose por partido. Acepta el contexto de
+    T-03 (el filtro `quarter` se ignora: manda el tramo). `?base=` como en `/api/metrics/*`."""
+    import splits
+    team_code = team_code.upper()
+    if not any(r["team_code"] == team_code for r in repository.team_game_rows(None).values()):
+        return jsonify({"error": "Equipo no encontrado", "code": "no_encontrado"}), 404
+    out, echo = [], None
+    for w in splits.WINDOWS:
+        args = dict(request.args)
+        args["id"] = f"{team_code}:{w}"
+        try:
+            payload = metrics_catalog.build_payload("period", args)
+            empty = False
+        except MetricsError as e:
+            if e.code == "sin_partidos":
+                payload, empty = None, True
+            else:
+                return jsonify({"error": e.message, "code": e.code}), e.status
+        ctx = None
+        entry = {"window": w, "label": splits.window_label(w), "empty": empty, "standard": payload,
+                 "summary": None, "games": []}
+        if payload is not None:
+            import context as context_mod
+            kw = {"team_code": team_code}
+            ctx = context_mod.parse_context(request.args, **kw, event_level=True)
+            b = splits.team_event_bundle(team_code, ctx.competition_id, _no_quarter(ctx), w)
+            per_game = (b.meta or {}).get("per_game", []) if b else []
+            pts = b.own.get("pts") if b else None
+            opp = b.opp.get("pts") if b else None
+            entry["games"] = per_game
+            entry["summary"] = {
+                "record": splits.record(per_game), "games_with_window": len(per_game),
+                "pts": pts, "pts_against": opp,
+                "point_diff": None if pts is None or opp is None else pts - opp,
+            }
+            echo = echo or payload["context"]
+        out.append(entry)
+    if echo is None:   # ningún tramo tiene datos: eco de la selección igual (sin partidos que cumplan)
+        import context as context_mod
+        try:
+            ctx = _no_quarter(context_mod.parse_context(request.args, team_code=team_code, event_level=True))
+        except ContextError as e:
+            return jsonify(e.payload()), e.status
+        echo = context_mod.context_echo(ctx, games_used=0, games_total=0, games_excluded={}, ignored=[],
+                                        competition_label=metrics_catalog._competition_label(ctx))
+        echo["level"] = "evento"
+    return jsonify({"team_code": team_code, "windows": out, "context": echo,
+                    "window_secs": config.get("clutch.window_secs")})
+
+
+def _no_quarter(ctx):
+    import dataclasses
+    return dataclasses.replace(ctx, quarters=())
+
+
 @app.route("/api/metrics-catalog")
 @login_required
 def metrics_catalog_route():
@@ -409,7 +469,7 @@ def rankings_route(entity_type: str, metric_key: str):
     raw_id = request.args.get("id")
     kwargs = metrics_catalog._entity_id_kwargs(entity_type, str(raw_id)) if raw_id else {}
     try:
-        ctx = context.parse_context(request.args, **kwargs, event_level=entity_type == "team")
+        ctx = context.parse_context(request.args, **kwargs, event_level=entity_type in ("team", "period"))
     except ContextError as e:
         msg = str(e)
         code = "competencia_inexistente" if "competencia" in msg.lower() else "contexto_invalido"

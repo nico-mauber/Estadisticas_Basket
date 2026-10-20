@@ -17,6 +17,7 @@ import { renderPrepare } from "./components/prepare-report.js";
 import { initBase, getBase, setBase } from "./core/base.js";
 import { initContext, contextParams, clearContext, clearPlayerFilters, dropInvalid, activeCount } from "./core/context.js";
 import { mountContextBar, contextNote } from "./components/context-bar.js";
+import { renderPeriodBlock, destroyPeriodBlock } from "./components/period-block.js";
 
 // ── Toast ──────────────────────────────────────────────────────────────────
 function toast(msg, type = "ok") {
@@ -1511,6 +1512,14 @@ async function _loadTeamStandard(teamCode) {
   }
 }
 
+// Bloque "Por tramo del partido" (F-04): los 8 tramos en una llamada; cambiar de tramo no vuelve a pedir nada.
+function _renderTeamPeriods(teamCode, teamName) {
+  renderPeriodBlock(document.getElementById("team-periods"), teamCode, {
+    params: _teamParams(), base: getBase(), teamName, competitionLabel: _teamCompLabel(),
+    onBaseChange: newBase => { setBase(newBase); _loadTeamStandard(teamCode); _loadTeamGameLog(teamCode); _renderTeamPeriods(teamCode, teamName); },
+  });
+}
+
 // Aplica una respuesta de perfil de equipo: guarda la selección que el servidor resolvió (el eco de
 // `context`), sincroniza pills y selector de competencia y dibuja.
 function _applyTeamData(main, data) {
@@ -1530,6 +1539,7 @@ function _applyTeamData(main, data) {
   }
   _renderTeamContent(main, data);
   _mountCtxBar(main, _teamComp, () => _reloadTeam(), data.team_code);
+  _renderTeamPeriods(data.team_code, data.team_name);
 }
 
 // Cambió la competencia o el filtro de últimos N: se pide el perfil de nuevo al servidor (no se recalcula
@@ -2407,6 +2417,7 @@ function renderApp() {
         </div>
         <div id="team-lineup"></div>
         <div id="team-main"></div>
+        <div id="team-periods"></div>
         <div id="team-clutch"></div>
         <div id="usage-ranking"></div>
       </div>

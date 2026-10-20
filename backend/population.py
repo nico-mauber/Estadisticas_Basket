@@ -203,6 +203,7 @@ _CRITERIA = {
     "lineup": "quintetos con ≥ {min} posesiones",
     "onoff": "jugadores con ON/OFF suficiente",
     "clutch": "equipos con cierres suficientes",
+    "period": "equipos con muestra suficiente en el tramo",
 }
 
 
@@ -229,7 +230,7 @@ def population(entity_type: str, comp_id: int | None, ctx: Context, *,
     entidad con sus últimos N, RF-13), pero el universo es la competencia completa.
 
     Cacheada entre peticiones por versión de datos y de configuración (`cache.memo`)."""
-    if entity_type not in ("team", "player", "lineup", "onoff", "clutch"):
+    if entity_type not in ("team", "player", "lineup", "onoff", "clutch", "period"):
         raise ValueError(f"entity_type inválido: {entity_type}")
 
     key = (comp_id, context_key(ctx), apply_thresholds, variant)

@@ -416,6 +416,31 @@ metrics_catalog.register_entity("lineup", lineup_loader)
 metrics_catalog.register_entity("onoff", onoff_loader)
 metrics_catalog.register_entity("clutch", clutch_loader, game_loader=clutch.clutch_game_bundles)
 
+
+# ── Tramos del partido (F-04): id `<equipo>:<tramo>` ─────────────────────────
+def _parse_period_id(entity_id):
+    import splits
+    team_code, _, window = str(entity_id).partition(":")
+    if window not in splits.WINDOWS:
+        raise metrics_catalog.MetricsError("Tramo inválido. Usá q1, q2, q3, q4, h1, h2, pr o last5", 400, "parametro_invalido")
+    return team_code.upper(), window
+
+
+def period_loader(req):
+    import splits
+    team_code, window = _parse_period_id(req.entity_id)
+    b = splits.team_event_bundle(team_code, req.comp_id, req.ctx, window)
+    return [b] if b is not None else []
+
+
+def all_period_bundles(comp_id, ctx, variant=None):
+    import splits
+    ctx = dataclasses.replace(ctx, on=(), off=(), quarters=())   # el tramo manda; con/sin jugador no tiene población
+    return splits.all_team_event_bundles(comp_id, ctx, variant)
+
+
+metrics_catalog.register_entity("period", period_loader, enumerator=all_period_bundles)
+
 # Enumeradores de los tipos sin enumerador propio en T-05 (T-01 plan §4.2).
 metrics_catalog.set_enumerator("lineup", all_lineup_bundles)
 metrics_catalog.set_enumerator("onoff", all_onoff_bundles)
