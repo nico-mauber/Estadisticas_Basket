@@ -345,7 +345,7 @@ export function createDataTable(el, {
       const row = pageRows[i];
       if (!row) return;
       _on(tr, "click", () => {
-        if (onRowClick) return onRowClick(row);
+        if (onRowClick) return onRowClick(row, _payload);
         if (row.link) _navigate(row.link);
       });
     });

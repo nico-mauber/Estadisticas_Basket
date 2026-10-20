@@ -203,6 +203,8 @@ def _id_kwargs(tdef: TableDef, args: Mapping[str, str]) -> dict:
     if tdef.entity_type in ("team", "clutch"):
         tc = args.get("team")
         return {"team_code": tc.upper()} if tc else {}
+    if tdef.entity_type == "player" and args.get("team") and not args.get("player_id"):
+        return {"team_code": args["team"].upper()}
     if tdef.entity_type == "player":
         raw = args.get("player_id")
         try:
@@ -582,9 +584,10 @@ def _section_slug(tdef) -> str:
 def _meta_entity(tdef, treq) -> tuple:
     """`(id, name, file_entity)` para meta y nombre de archivo."""
     et = tdef.entity_type
-    if et in ("lineup", "onoff") and treq.params.get("team"):
-        code = treq.params["team"].upper()
-        return code, code, code      # quintetos y ON/OFF son de UN equipo (F-06)
+    if et in ("lineup", "onoff") or (et == "player" and treq.table_id == "team_roster"):
+        if treq.params.get("team"):
+            code = treq.params["team"].upper()
+            return code, code, code   # quintetos, ON/OFF y plantel son de UN equipo (F-06, F-08)
     if et in ("team", "clutch"):
         code = (treq.params.get("team") or "").upper()
         return code, code, code or "liga"
@@ -1064,6 +1067,19 @@ def _build_team_clutch_lineups(treq: TableRequest) -> list:
     return out
 
 
+def _build_team_roster(treq: TableRequest) -> list:
+    """Plantel del equipo (F-08): mismos datos que el buscador, acotado a un equipo y sin la
+    columna de equipo (todas las filas son del mismo)."""
+    rows = _build_search_players(treq)
+    out = []
+    for r in rows:
+        if r.bundle is None:
+            continue          # convocado sin minutos en la selección: no es parte del plantel (RF-1)
+        r.texts.pop("_team", None)
+        out.append(r)
+    return out
+
+
 # ── Registro de las 6 tablas de T-06 (plan §4.2) ───────────────────────────────
 
 register_table(
@@ -1180,4 +1196,15 @@ register_table(
     default_sort={"key": "net_rating", "dir": "desc", "use_adjusted": True},
     totals_mode="none",
     title_fn=lambda treq: f"Quintetos en cierres — {(treq.params.get('team') or '').upper()}",
+)
+
+register_table(
+    "team_roster", entity_type="player", title="Plantel", builder=_build_team_roster,
+    required_params=("team",),
+    default_columns=("_name", "_position", "games", "minutes", "pts", "trb", "ast", "stl", "blk",
+                     "tov", "efg_pct", "ts_pct", "uso_pct", "oer", "plus_minus"),
+    bulk_scopes=("team",), row_kind="entity",
+    extra_columns=(("_name", "Jugador", "text"), ("_position", "Pos.", "text")),
+    default_sort={"key": "minutes", "dir": "desc", "use_adjusted": False},
+    title_fn=lambda treq: f"Plantel — {(treq.params.get('team') or '').upper()}",
 )
