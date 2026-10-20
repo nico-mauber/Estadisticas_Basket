@@ -1292,58 +1292,6 @@ function _selectedPlayer() {
   return sel.value && opt ? { id: Number(sel.value), name: opt.dataset.name } : null;
 }
 
-// ── Usage ranking card ──────────────────────────────────────────────────────
-function _renderUsageRanking(players) {
-  const el = document.getElementById("usage-ranking");
-  if (!el || !players?.length) return;
-  const maxUso = players[0]?.uso_pct || 1;   // `|| 1`: solo guarda de la división
-  const rows = players.map(p => {
-    // Un 0 real se muestra como 0; solo el nulo es "—" (C-11 RF-5)
-    const pct = PCT(p.uso_pct);
-    const bar = p.uso_pct != null ? Math.round((p.uso_pct / maxUso) * 100) : 0;
-    const pts = DEC1(p.pts);
-    return `
-      <tr class="clickable-row" data-player-id="${p.player_id ?? ""}" data-player="${esc(p.name)}">
-        <td style="font-weight:600">${esc(p.name)}</td>
-        <td style="width:120px">
-          <div style="background:var(--border);border-radius:3px;height:8px;overflow:hidden">
-            <div style="width:${bar}%;height:100%;background:var(--accent);border-radius:3px"></div>
-          </div>
-        </td>
-        <td style="text-align:right;font-weight:700;color:var(--accent)">${pct}</td>
-        <td style="text-align:right;color:var(--muted)">${pts} pts</td>
-        <td style="text-align:right;color:var(--muted);font-size:11px">${p.games}P</td>
-      </tr>`;
-  }).join("");
-  el.innerHTML = `
-    <div class="card" style="margin-top:8px">
-      <div class="map-header">
-        <div class="card-title" style="margin:0">Jugadores más influyentes — USO%</div>
-        <span class="xm-host" data-xm="usage"></span>
-      </div>
-      <table class="game-log" id="usage-table" style="width:100%">
-        <thead><tr>
-          <th>Jugador</th><th></th>
-          <th style="text-align:right">USO%</th>
-          <th style="text-align:right">PPG</th>
-          <th style="text-align:right">PJ</th>
-        </tr></thead>
-        <tbody>${rows}</tbody>
-      </table>
-    </div>`;
-  el.querySelectorAll(".clickable-row").forEach(tr => {
-    tr.addEventListener("click", () => {
-      document.getElementById("player-select").value = tr.dataset.playerId;
-      document.getElementById("player-select").dispatchEvent(new Event("change"));
-    });
-  });
-  const uHost = el.querySelector('[data-xm="usage"]');
-  if (uHost) {
-    const tname = _teamData?.team_name || document.getElementById("team-select")?.value || "equipo";
-    _mountTableExport(uHost, () => el.querySelector("#usage-table"),
-      _baseMeta({ title: `Ranking de uso — ${tname}`, section: "ranking-uso", entity: tname, entitySlug: _teamData?.team_code, competitionLabel: _teamCompLabel() }));
-  }
-}
 
 function _renderTeamContent(main, data) {
   const av  = { ...data.averages, null_reasons: data.null_reasons };
@@ -1503,7 +1451,8 @@ async function _loadTeamStandard(teamCode) {
       layout: "grid",
       base: getBase(),
       onBaseChange: newBase => { setBase(newBase); _loadTeamStandard(teamCode); _loadTeamGameLog(teamCode);
-        _renderTeamLineups(teamCode, _teamData?.team_name); _renderTeamPeriods(teamCode, _teamData?.team_name); },
+        _renderTeamRoster(teamCode); _renderTeamLineups(teamCode, _teamData?.team_name);
+        _renderTeamPeriods(teamCode, _teamData?.team_name); },
     });
     if (main) bindMetricCards(main, { entityType: "team", contextQuery: { ...ctxQuery, id: teamCode } });
   } catch (e) {
@@ -1512,6 +1461,24 @@ async function _loadTeamStandard(teamCode) {
     _fillFichaGrids(main, _teamCardGroups, "team", null, teamCode);
     renderStandardPanel(el, { error: e.message || "No se pudo cargar el conjunto estándar" }, { layout: "grid", base: getBase() });
   }
+}
+
+// Plantel del equipo (F-08): tabla completa T-06; absorbe el ranking por USO% (RF-8), que ahora es
+// una columna más de esta tabla. Cada fila abre la ficha del jugador.
+function _renderTeamRoster(teamCode) {
+  const el = document.getElementById("team-roster");
+  if (!el) return;
+  el.innerHTML = '<div class="card"><div class="card-title">Plantel</div><div id="team-roster-dt"></div></div>';
+  mountTable(document.getElementById("team-roster-dt"),
+    () => api.table("team_roster", { team: teamCode, ...contextParams(), competition: _teamComp, last: _teamLastN || null, base: getBase() }),
+    {
+      tableId: "team_roster",
+      onRowClick: (row, payload) => {
+        const i = payload.columns.findIndex(c => c.key === "_name");
+        setSection("player");
+        renderPlayer(teamCode, i >= 0 ? row.values[i] : "", Number(row.id) || null);
+      },
+    });
 }
 
 // Bloques "Mejores quintetos" / "Todos los quintetos" / "ON/OFF del plantel" (F-06).
@@ -1549,6 +1516,7 @@ function _applyTeamData(main, data) {
   _renderTeamContent(main, data);
   _mountCtxBar(main, _teamComp, () => _reloadTeam(), data.team_code);
   _renderTeamPeriods(data.team_code, data.team_name);
+  _renderTeamRoster(data.team_code);
   _renderTeamLineups(data.team_code, data.team_name);
 }
 
@@ -1610,7 +1578,6 @@ async function renderTeam(teamCode) {
     const pSel = document.getElementById("player-select");
     pSel.innerHTML = '<option value="">— Seleccionar jugador —</option>' +
       players.map(p => `<option value="${p.player_id ?? ""}" data-name="${esc(p.name)}">${esc(p.name)}</option>`).join("");
-    _renderUsageRanking(players);
 
     const lineupCard = document.getElementById("team-lineup-card");
     const picker = document.getElementById("team-lineup-picker");
@@ -2097,6 +2064,11 @@ function _renderPlayerContent(main, data) {
     ];
     _playerCardGroups = PLAYER_CARD_GROUPS;
     main.innerHTML = `
+      <div class="card pl-head">
+        <div class="pl-name">${esc(data.player || playerName)}</div>
+        <div class="td-muted">${esc(data.team_name || data.team_code || teamCode)}${
+          data.position ? ` · ${esc(data.position)}` : ""} · ${data.games} partido(s)</div>
+      </div>
       ${comps.length > 1 ? `
       <div class="card">
         <select id="player-comp" class="map-select">${_compOptions(comps, _playerComp, "Todas las competencias", "all")}</select>
@@ -2427,10 +2399,10 @@ function renderApp() {
         </div>
         <div id="team-lineup"></div>
         <div id="team-main"></div>
+        <div id="team-roster"></div>
         <div id="team-lineups-block"></div>
         <div id="team-periods"></div>
         <div id="team-clutch"></div>
-        <div id="usage-ranking"></div>
       </div>
 
       <!-- Compare -->

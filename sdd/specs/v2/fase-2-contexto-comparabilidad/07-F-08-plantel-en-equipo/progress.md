@@ -1,60 +1,44 @@
-# Progress — F-08: Plantel dentro de Equipo
+# Progress — F-08: Plantel en Equipo
 
-> **Estado:** ⬜ No iniciado
+> **Estado:** ✅ Implementado (tabla completa del plantel en la vista Equipo, con enlace a la ficha del jugador); pendiente la acción "agregar a comparación" (depende de F-05)
+> **Fecha:** 2026-10-20
 
 ## Estado de tareas
-### Grupo A — Backend: bundles del plantel
-- [ ] T-A1 · `team_roster_bundles()`
-
-### Grupo B — Backend: registro T-06
-- [ ] T-B1 · `register_table("team_roster", …)`
-
-### Grupo C — Frontend: api.js
-- [ ] T-C1 · `api.table()`
-
-### Grupo D — Frontend: UI
-- [ ] T-D1 · Pestaña Plantel con tabla completa
-- [ ] T-D2 · Acción "Ver ficha"
-- [ ] T-D3 · Acción "Comparar"
-- [ ] T-D4 · Retiro/condicional de `_renderUsageRanking`
-
-### Grupo E — Errores, estados vacíos, offline/SW
-- [ ] T-E1 · Estado vacío
-- [ ] T-E2 · `sw.js` (si aplica)
-
-### Grupo F — Verificación de feature
-- [ ] T-F1 · Backend arranca sin traceback
-- [ ] T-F2 · N/A (sin cambio de esquema)
-- [ ] T-F3 · Endpoint probado
-- [ ] T-F4 · Consola sin errores JS
-- [ ] T-F5 · CA recorridos
-- [ ] T-F6..T-F13 · Checks manuales de CA (ver tasks.md)
+- [x] RF-1 · Tabla `team_roster` con todos los jugadores que disputaron minutos (los convocados sin minutos quedan fuera) y el conjunto estándar completo
+- [x] RF-2 · Ficha de T-01 por métrica (percentil contra los jugadores de la competencia)
+- [x] RF-3 · Orden, selector de columnas, totales, promedio de competencia, coloreado y exportación (T-06)
+- [x] RF-4 · Los jugadores bajo el mínimo se muestran con badge de muestra baja, sin ocultarse
+- [🔶] RF-5 · Cada fila abre la ficha del jugador; falta la acción "agregar a comparación" (F-05 no existe todavía)
+- [x] RF-6 · Contexto de T-03 y base de T-04
+- [x] RF-7 · DNP excluidos del cálculo; nulos con razón, nunca 0
+- [x] RF-8 · La tarjeta "Jugadores más influyentes — USO%" se retira; USO% es una columna ordenable de la tabla
+- [x] RF-9 · `player_id` entero como id de fila y en el enlace
 
 ## Estado de CA (gate de aceptación)
 | CA | Estado | Evidencia |
 |---|---|---|
-| CA-1 | ⬜ | |
-| CA-2 | ⬜ | |
-| CA-3 | ⬜ | |
-| CA-4 | ⬜ | |
-| CA-5 | ⬜ | |
-| CA-6 | ⬜ | |
-| CA-7 | ⬜ | |
-| CA-8 | ⬜ | |
+| Tabla del plantel | ✅ | LBO: 9 jugadores con minutos; 81 columnas de métricas; sin columna de equipo |
+| Percentiles y badge | ✅ | Percentiles por fila; badge en minutos con el umbral de jugador |
+| Enlace a la ficha | ✅ | Chromium: tocar una fila abre la ficha del jugador correcto |
+| USO% absorbido | ✅ | La tarjeta suelta ya no existe; `uso_pct` es columna de la tabla |
+| Contexto y base | ✅ | `venue=local` aplicado; `base=por100` aplicada |
+| Exportación | ✅ | CSV con el equipo en el nombre del archivo |
 
 ## Gates técnicos
-- Backend arranca sin traceback: ⬜
-- `upgrade_db()` idempotente (si aplica): N/A — F-08 no toca esquema
-- Endpoints probados manualmente: ⬜
-- Consola del navegador sin errores JS: ⬜
+- Backend arranca sin traceback: ✅
+- Sin cambios de esquema: ✅
+- Consola del navegador sin errores JS: ✅ (1280 y 360 px)
+- Verificación: `f08_sim.py` 17/17, `f08_browser.py` 26/26, regresión completa en verde
 
 ## Desviaciones respecto a docs/ o plan
-(vacío hasta implementación)
+- **Sin pestaña propia:** no hay router X-01, así que el plantel es un bloque de la vista Equipo, arriba de los quintetos.
+- **Reutiliza el buscador:** `team_roster` comparte builder con `search_players` (misma consulta acotada a un equipo), en vez de un builder nuevo.
+- **Arreglo de paso:** la ficha de jugador no mostraba el nombre del jugador en ningún lado visible al abrirla; ahora tiene un encabezado con nombre, equipo, posición y partidos.
+- **Arreglo de paso:** `onRowClick` de las tablas ahora recibe también el payload, para que una fila pueda leer sus columnas de texto.
 
-## Docs a actualizar
-- [ ] `docs/api.md` — `GET /api/table/team_roster` (nuevo)
-- [ ] `docs/frontend.md` — pestaña Plantel de S3, retiro de la tarjeta "Jugadores más influyentes — USO%"
-- [ ] `docs/architecture.md` — `team_roster_bundles` (ubicación final del módulo)
+## Docs actualizados
+- ✅ `docs/api.md` · ✅ `docs/frontend.md`
 
 ## Deuda / TODO
-(vacío hasta implementación; ver spec.md §8 para fuera de alcance: ficha de identidad F-16, comparación en sí F-05, cabecera de contexto F-19)
+- Acción "agregar a comparación" en cada fila (RF-5), cuando exista F-05.
+- `t()` para el copy (F-21).
