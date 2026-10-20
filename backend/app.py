@@ -409,7 +409,7 @@ def rankings_route(entity_type: str, metric_key: str):
     raw_id = request.args.get("id")
     kwargs = metrics_catalog._entity_id_kwargs(entity_type, str(raw_id)) if raw_id else {}
     try:
-        ctx = context.parse_context(request.args, **kwargs)
+        ctx = context.parse_context(request.args, **kwargs, event_level=entity_type == "team")
     except ContextError as e:
         msg = str(e)
         code = "competencia_inexistente" if "competencia" in msg.lower() else "contexto_invalido"
@@ -434,7 +434,7 @@ def team_stats(team_code: str):
     partido más reciente) y `?last=<n>`. El promedio de liga es el de la competencia (C-02)."""
     team_code = team_code.upper()
     try:
-        ctx = context.parse_context(request.args, team_code=team_code)
+        ctx = context.parse_context(request.args, team_code=team_code, event_level=True)
     except ContextError as e:
         return jsonify(e.payload()), e.status
     profile = population.team_profile(team_code, ctx)

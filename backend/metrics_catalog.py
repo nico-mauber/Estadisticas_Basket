@@ -426,7 +426,8 @@ def build_payload(entity_type: str, args) -> dict:
     from competitions import CompetitionError
 
     try:
-        ctx = context_mod.parse_context(args, **_entity_id_kwargs(entity_type, str(entity_id)))
+        ctx = context_mod.parse_context(args, **_entity_id_kwargs(entity_type, str(entity_id)),
+                                        event_level=entity_type == "team")
     except context_mod.ContextError as e:
         # `context.parse_context` envuelve tanto `CompetitionError` (competencia inexistente o en
         # borrador) como su propio `ContextError` (p. ej. `last` inválido) en `ContextError`; se
@@ -451,7 +452,7 @@ def build_payload(entity_type: str, args) -> dict:
 
     bundles = reg.loader(req)
     if not bundles:
-        if ctx.last or ctx.venue or ctx.opponent or ctx.rest:
+        if ctx.last or ctx.venue or ctx.opponent or ctx.rest or context_mod.has_event_filters(ctx):
             # La entidad existe pero ningún partido cumple los filtros (T-03 RF-18): estado vacío, no "no existe".
             raise MetricsError("No hay partidos que cumplan estos filtros.", 404, "sin_partidos")
         raise MetricsError("Entidad no encontrada", 404, "no_encontrado")
@@ -461,7 +462,7 @@ def build_payload(entity_type: str, args) -> dict:
     def _values_for(bundle):
         values = compute_standard(bundle)
         prior = None
-        if entity_type in sample_mod.REGRESSED_TYPES:
+        if bundle.entity_type in sample_mod.REGRESSED_TYPES or entity_type in sample_mod.REGRESSED_TYPES:
             prior = sample_mod.league_prior(ctx.competition_id, ctx)
         values = sample_mod.adjust_values(values, bundle, prior)
         try:
@@ -488,7 +489,9 @@ def build_payload(entity_type: str, args) -> dict:
             team_poss = sample_mod.team_offensive_possessions(team_code, ctx.competition_id, ctx)
 
     if entity_type in sample_mod.ENTITY_SAMPLE:
-        badge = sample_mod.sample_for(entity_type, bundles, team_poss=team_poss)
+        # un equipo con filtros de evento se mide como split (posesiones, umbrales sample.split.*)
+        stype = "split" if b0.entity_type == "split" else entity_type
+        badge = sample_mod.sample_for(stype, bundles, team_poss=team_poss)
     else:
         badge = None
 
@@ -558,6 +561,10 @@ def _attach_fichas(payload, entity_type, b0, ctx, base, *, prior_fn) -> None:
     import population
     try:
         variant = _population_variant(entity_type, b0)
+        if ctx.on or ctx.off:
+            # con/sin jugador: la población de equipos no se puede recalcular con ese filtro (population_mode entity_only)
+            payload["population"] = {"size": 0, "criterion": "", "context_label": "", "reason": "contexto_no_comparable"}
+            return
         pop = population.population(entity_type, ctx.competition_id, ctx, variant=variant)
         rank_values = _ranking_values(b0, ctx, sample_mod=prior_fn)
         population.attach_fichas(payload["metrics"], entity_type, b0.entity_id, pop,
