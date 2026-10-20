@@ -371,7 +371,9 @@ def standard_payload(bundle: "StatBundle", values: dict, *, context_echo: dict, 
         values_completos[key] = obj
 
     entity = {
-        "type": bundle.entity_type,
+        # un split de equipo (filtros de evento / tramo) se presenta como equipo: mismas métricas y grupos
+        "type": "team" if bundle.entity_type == "split" else bundle.entity_type,
+        "split": bundle.entity_type == "split",
         "id": bundle.entity_id,
         "name": bundle.name,
         "team_code": (bundle.meta or {}).get("team_code"),
@@ -404,6 +406,8 @@ def _entity_id_kwargs(entity_type: str, raw_id: str) -> dict:
         return {"team_code": team_code.upper()}
     if entity_type == "clutch":
         return {"team_code": raw_id.upper()}
+    if entity_type == "period":
+        return {"team_code": raw_id.split(":", 1)[0].upper()}
     return {}
 
 
@@ -427,7 +431,7 @@ def build_payload(entity_type: str, args) -> dict:
 
     try:
         ctx = context_mod.parse_context(args, **_entity_id_kwargs(entity_type, str(entity_id)),
-                                        event_level=entity_type == "team")
+                                        event_level=entity_type in ("team", "period"))
     except context_mod.ContextError as e:
         # `context.parse_context` envuelve tanto `CompetitionError` (competencia inexistente o en
         # borrador) como su propio `ContextError` (p. ej. `last` inválido) en `ContextError`; se
@@ -437,6 +441,11 @@ def build_payload(entity_type: str, args) -> dict:
         raise MetricsError(msg, e.status, code) from e
     except CompetitionError as e:
         raise MetricsError(str(e), e.status, "competencia_inexistente") from e
+
+    if entity_type == "period" and ctx.quarters:
+        # el tramo elegido manda: el filtro `quarter` de la barra no se combina con él (F-04 RF-9)
+        import dataclasses
+        ctx = dataclasses.replace(ctx, quarters=(), ignored=ctx.ignored + (("quarter", "no_aplica"),))
 
     params = {}
     if entity_type == "clutch":
@@ -452,7 +461,8 @@ def build_payload(entity_type: str, args) -> dict:
 
     bundles = reg.loader(req)
     if not bundles:
-        if ctx.last or ctx.venue or ctx.opponent or ctx.rest or context_mod.has_event_filters(ctx):
+        if (ctx.last or ctx.venue or ctx.opponent or ctx.rest or context_mod.has_event_filters(ctx)
+                or entity_type == "period"):
             # La entidad existe pero ningún partido cumple los filtros (T-03 RF-18): estado vacío, no "no existe".
             raise MetricsError("No hay partidos que cumplan estos filtros.", 404, "sin_partidos")
         raise MetricsError("Entidad no encontrada", 404, "no_encontrado")
@@ -481,6 +491,9 @@ def build_payload(entity_type: str, args) -> dict:
         ctx, games_used=b0.games, games_total=meta0.get("games_total", b0.games),
         games_excluded=meta0.get("games_excluded", {}), ignored=[],
         competition_label=comp_label)
+
+    if entity_type == "period":
+        echo["level"] = "evento"   # el tramo es un filtro de evento aunque no haya filtros en la barra
 
     team_poss = None
     if entity_type in ("lineup", "pair", "onoff", "split", "clutch"):
