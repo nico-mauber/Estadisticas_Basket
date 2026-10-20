@@ -100,6 +100,15 @@ export function createDataTable(el, {
     return row.values[idx];
   }
 
+  // T-02: al ordenar por una métrica de rendimiento, las filas de muestra baja van siempre al final
+  // (no entran en rankings, pero tampoco se ocultan). Las columnas de texto y de tamaño de muestra
+  // (partidos, minutos, posesiones) ordenan sin esa separación: ahí la muestra ES el dato.
+  const SAMPLE_KEYS = new Set(["games", "minutes", "possessions", "_sample"]);
+  function _lowSampleLast(col) {
+    return col.type === "metric" && !SAMPLE_KEYS.has(col.key)
+      && _payload.rows.some(r => r.sample && r.sample.ranked === false);
+  }
+
   function _sortedRows() {
     let rows = _payload.rows.slice();
     if (typeof _rowFilter === "function") {
@@ -109,8 +118,14 @@ export function createDataTable(el, {
       const col = _colByKey(sort.key);
       const dir = sort.dir === "asc" ? 1 : -1;
       if (col) {
+        const lowLast = _lowSampleLast(col);
         const indexed = rows.map((r, i) => [r, i]);
         indexed.sort((A, B) => {
+          if (lowLast) {
+            const lowA = A[0].sample?.ranked === false ? 1 : 0;
+            const lowB = B[0].sample?.ranked === false ? 1 : 0;
+            if (lowA !== lowB) return lowA - lowB;
+          }
           const c = cmpNullsLast(_sortValue(A[0], col), _sortValue(B[0], col), dir);
           return c !== 0 ? c : A[1] - B[1];   // desempate estable por índice
         });

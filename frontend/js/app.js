@@ -18,6 +18,7 @@ import { initBase, getBase, setBase } from "./core/base.js";
 import { initContext, contextParams, clearContext, clearPlayerFilters, dropInvalid, activeCount } from "./core/context.js";
 import { mountContextBar, contextNote } from "./components/context-bar.js";
 import { renderPeriodBlock, destroyPeriodBlock } from "./components/period-block.js";
+import { renderLineupsBlock } from "./components/lineups-block.js";
 
 // ── Toast ──────────────────────────────────────────────────────────────────
 function toast(msg, type = "ok") {
@@ -1501,7 +1502,8 @@ async function _loadTeamStandard(teamCode) {
     renderStandardPanel(el, payload, {
       layout: "grid",
       base: getBase(),
-      onBaseChange: newBase => { setBase(newBase); _loadTeamStandard(teamCode); _loadTeamGameLog(teamCode); },
+      onBaseChange: newBase => { setBase(newBase); _loadTeamStandard(teamCode); _loadTeamGameLog(teamCode);
+        _renderTeamLineups(teamCode, _teamData?.team_name); _renderTeamPeriods(teamCode, _teamData?.team_name); },
     });
     if (main) bindMetricCards(main, { entityType: "team", contextQuery: { ...ctxQuery, id: teamCode } });
   } catch (e) {
@@ -1510,6 +1512,13 @@ async function _loadTeamStandard(teamCode) {
     _fillFichaGrids(main, _teamCardGroups, "team", null, teamCode);
     renderStandardPanel(el, { error: e.message || "No se pudo cargar el conjunto estándar" }, { layout: "grid", base: getBase() });
   }
+}
+
+// Bloques "Mejores quintetos" / "Todos los quintetos" / "ON/OFF del plantel" (F-06).
+function _renderTeamLineups(teamCode, teamName) {
+  renderLineupsBlock(document.getElementById("team-lineups-block"), teamCode, {
+    params: _teamParams(), base: getBase(), teamName, competitionLabel: _teamCompLabel(),
+  });
 }
 
 // Bloque "Por tramo del partido" (F-04): los 8 tramos en una llamada; cambiar de tramo no vuelve a pedir nada.
@@ -1540,6 +1549,7 @@ function _applyTeamData(main, data) {
   _renderTeamContent(main, data);
   _mountCtxBar(main, _teamComp, () => _reloadTeam(), data.team_code);
   _renderTeamPeriods(data.team_code, data.team_name);
+  _renderTeamLineups(data.team_code, data.team_name);
 }
 
 // Cambió la competencia o el filtro de últimos N: se pide el perfil de nuevo al servidor (no se recalcula
@@ -2417,6 +2427,7 @@ function renderApp() {
         </div>
         <div id="team-lineup"></div>
         <div id="team-main"></div>
+        <div id="team-lineups-block"></div>
         <div id="team-periods"></div>
         <div id="team-clutch"></div>
         <div id="usage-ranking"></div>

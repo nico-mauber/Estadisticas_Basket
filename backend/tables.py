@@ -337,6 +337,12 @@ def _build_columns(tdef: TableDef, has_sample: bool) -> list:
 def _row_values(row: TableRow, base: str) -> tuple:
     """`(values_map, reasons)` de una fila. `bundle is None` (DNP) → todas nulas con
     `row.reason_if_null`."""
+    pre = (row.extra or {}).get("precomputed")
+    if pre is not None:
+        values_map = {k: (pre.get(k) or {"value": None, "reason": row.reason_if_null}) for k in METRICS}
+        reasons = {k: v.get("reason") for k, v in values_map.items() if v.get("value") is None}
+        return values_map, reasons
+
     if row.bundle is None:
         reason = row.reason_if_null
         values_map = {k: {"value": None, "reason": reason} for k in METRICS}
@@ -576,6 +582,9 @@ def _section_slug(tdef) -> str:
 def _meta_entity(tdef, treq) -> tuple:
     """`(id, name, file_entity)` para meta y nombre de archivo."""
     et = tdef.entity_type
+    if et in ("lineup", "onoff") and treq.params.get("team"):
+        code = treq.params["team"].upper()
+        return code, code, code      # quintetos y ON/OFF son de UN equipo (F-06)
     if et in ("team", "clutch"):
         code = (treq.params.get("team") or "").upper()
         return code, code, code or "liga"
@@ -898,6 +907,121 @@ def _build_clutch_games(treq: TableRequest) -> list:
     return out
 
 
+# ── Quintetos y ON/OFF del plantel (F-06) ─────────────────────────────────────
+
+def _lineup_rows(treq: TableRequest, size: int) -> list:
+    """Filas de las combinaciones de `size` jugadores del equipo (F-06 RF-3, RF-5, RF-6)."""
+    import lineups
+    import sample as sample_mod
+
+    team_code = (treq.params.get("team") or "").upper()
+    bundles = lineups.all_lineups(team_code, treq.comp_id, treq.ctx, size=size)
+    team_poss = sample_mod.team_offensive_possessions(team_code, treq.comp_id, treq.ctx)
+    prior = sample_mod.league_prior(treq.comp_id, treq.ctx)
+
+    out = []
+    for b in bundles:
+        badge = sample_mod.sample_for("lineup", [b], team_poss=team_poss)
+        values = sample_mod.adjust_values(compute_standard(b), b, prior)
+        adj = {k: values[k]["adj"] for k in sample_mod.REGRESSED_KEYS
+               if (values.get(k) or {}).get("adj") is not None}
+        pids = (b.meta or {}).get("player_ids") or []
+        out.append(TableRow(
+            id=b.entity_id, link=f"lineup:{b.entity_id}",
+            texts={"_players": b.name, "_size": len(pids)},
+            bundle=b, sample=badge, adj=adj or None,
+            extra={"player_ids": pids},
+        ))
+    return out
+
+
+def _build_team_lineups(treq: TableRequest) -> list:
+    raw = (treq.params.get("size") or "5").strip()
+    try:
+        size = int(raw)
+    except ValueError:
+        raise TableError(400, "El parámetro size debe ser 3, 4 o 5", "parametro_invalido",
+                         {"param": "size"}) from None
+    if size not in (3, 4, 5):
+        raise TableError(400, "El parámetro size debe ser 3, 4 o 5", "parametro_invalido",
+                         {"param": "size"})
+    return _lineup_rows(treq, size)
+
+
+def _build_team_onoff(treq: TableRequest) -> list:
+    """Una fila por jugador del plantel: ON, OFF o la diferencia ON − OFF (`view`, F-06 RF-12)."""
+    import identity
+    import lineups
+    import repository
+    import sample as sample_mod
+
+    team_code = (treq.params.get("team") or "").upper()
+    view = (treq.params.get("view") or "on").strip().lower()
+    if view not in ("on", "off", "diff"):
+        raise TableError(400, "El parámetro view debe ser on, off o diff", "parametro_invalido",
+                         {"param": "view"})
+
+    games = repository.team_pbp_games(team_code, treq.comp_id)
+    games = context_mod.filter_games(games, treq.ctx, team_code)
+    games = identity.canonicalize_pbp_games(games, team_code)
+    on_bundles = lineups.all_onoff_bundles(games, team_code)
+    team_poss = sample_mod.team_offensive_possessions(team_code, treq.comp_id, treq.ctx)
+    prior = sample_mod.league_prior(treq.comp_id, treq.ctx)
+    name_idx = identity.name_index(team_code)
+
+    out = []
+    for on_b in on_bundles:
+        off_b = (on_b.meta or {}).get("off")
+        player_name = (on_b.meta or {}).get("player_name") or on_b.name
+        pid = name_idx.get(player_name)
+        badge = sample_mod.sample_for("onoff", [on_b, off_b or on_b], team_poss=team_poss)
+        row_id = f"{team_code}:{pid if pid is not None else player_name}"
+
+        if view == "diff":
+            # La diferencia no es un bundle: se calcula clave por clave sobre los valores ya escalados.
+            on_v = sample_mod.adjust_values(compute_standard(on_b), on_b, prior)
+            off_v = sample_mod.adjust_values(compute_standard(off_b), off_b, prior) if off_b else {}
+            try:
+                on_v = apply_base(on_v, on_b, treq.base)
+                if off_b is not None:
+                    off_v = apply_base(off_v, off_b, treq.base)
+            except ValueError as e:
+                raise TableError(400, "Base inválida", "parametro_invalido") from e
+            diff = {}
+            for k in METRICS:
+                a = (on_v.get(k) or {}).get("value")
+                c = (off_v.get(k) or {}).get("value")
+                # Nulo de cualquier lado → diferencia nula con razón (nunca 0, F-06 RF-23)
+                diff[k] = ({"value": round(a - c, 4), "reason": None}
+                           if a is not None and c is not None
+                           else {"value": None, "reason": "sin_datos"})
+            out.append(TableRow(
+                id=row_id, link=None, texts={"_player": player_name},
+                bundle=None, sample=badge,
+                extra={"precomputed": diff, "player_id": pid, "minutes": on_b.minutes},
+                reason_if_null="sin_datos",
+            ))
+            continue
+
+        shown = on_b if view == "on" else off_b
+        if shown is None:
+            out.append(TableRow(id=row_id, link=None, texts={"_player": player_name},
+                                bundle=None, sample=badge, extra={"player_id": pid},
+                                reason_if_null="sin_datos"))
+            continue
+        values = sample_mod.adjust_values(compute_standard(shown), shown, prior)
+        adj = {k: values[k]["adj"] for k in sample_mod.REGRESSED_KEYS
+               if (values.get(k) or {}).get("adj") is not None}
+        out.append(TableRow(
+            id=row_id, link=None, texts={"_player": player_name},
+            bundle=shown, sample=badge, adj=adj or None,
+            extra={"player_id": pid, "minutes": shown.minutes},
+        ))
+
+    out.sort(key=lambda r: -((r.extra or {}).get("minutes") or 0))
+    return out
+
+
 # ── Registro de las 6 tablas de T-06 (plan §4.2) ───────────────────────────────
 
 register_table(
@@ -969,4 +1093,33 @@ register_table(
                    ("_result", "Result.", "text")),
     default_sort={"key": "_date", "dir": "desc", "use_adjusted": False},
     title_fn=lambda treq: f"Cierres por partido — {(treq.params.get('team') or '').upper()}",
+)
+
+register_table(
+    "team_lineups", entity_type="lineup", title="Quintetos", builder=_build_team_lineups,
+    required_params=("team",),
+    default_columns=("_players", "games", "minutes", "possessions", "oer", "der", "net_rating",
+                     "efg_pct", "ts_pct", "to_pct", "or_pct", "dr_pct", "plus_minus"),
+    bulk_scopes=("team",), row_kind="entity",
+    extra_columns=(("_players", "Quinteto", "text"), ("_size", "Jugadores", "int")),
+    default_sort={"key": "net_rating", "dir": "desc", "use_adjusted": True},
+    title_fn=lambda treq: (
+        f"Quintetos — {(treq.params.get('team') or '').upper()}"
+        if (treq.params.get('size') or '5') == '5'
+        else f"Combinaciones de {treq.params.get('size')} — {(treq.params.get('team') or '').upper()}"),
+)
+
+register_table(
+    "team_onoff", entity_type="onoff", title="ON/OFF del plantel", builder=_build_team_onoff,
+    required_params=("team",),
+    default_columns=("_player", "games", "minutes", "possessions", "oer", "der", "net_rating",
+                     "efg_pct", "ts_pct", "to_pct", "or_pct", "dr_pct", "plus_minus"),
+    bulk_scopes=("team",), row_kind="entity",
+    extra_columns=(("_player", "Jugador", "text"),),
+    default_sort={"key": "net_rating", "dir": "desc", "use_adjusted": True},
+    totals_mode="none",
+    title_fn=lambda treq: (
+        f"ON/OFF — {(treq.params.get('team') or '').upper()}"
+        + {"on": " (en cancha)", "off": " (fuera de cancha)",
+           "diff": " (diferencia)"}.get((treq.params.get('view') or 'on').lower(), "")),
 )
