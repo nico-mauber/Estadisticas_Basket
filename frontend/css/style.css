@@ -1536,8 +1536,6 @@ tbody tr.fuera-poblacion { opacity: .6; }
 .lb-adj { font-size: 11px; color: var(--muted); font-weight: 400; }
 .lb-card { cursor: pointer; }
 .lb-cards-export { float: right; }
-.pl-head { padding: 14px 16px; }
-.pl-name { font-size: 20px; font-weight: 700; }
 .lb-detail-open .lb-table-card, .lb-detail-open .lb-cards-card { display: none; }
 
 /* ── Comparar jugadores (F-05) ── */
@@ -1554,3 +1552,27 @@ tbody tr.fuera-poblacion { opacity: .6; }
 .cmp-pct { display: inline-block; padding: 0 5px; border-radius: 4px; font-size: 10px; color: #fff; }
 @media (max-width: 479px) { .cmp-heads { grid-template-columns: 1fr; } }
 .dt-ignored { margin: 8px 0 0; font-size: 12px; }
+
+/* ── Ficha de identidad del jugador (F-16) ── */
+.ph-card { padding: 16px; }
+.ph-main { display: flex; align-items: center; gap: 14px; }
+.ph-photo { width: 56px; height: 56px; border-radius: 50%; object-fit: cover; flex: 0 0 auto; }
+.ph-initials { display: flex; align-items: center; justify-content: center; background: var(--border);
+  color: var(--text); font-weight: 700; font-size: 18px; }
+.ph-text { min-width: 0; flex: 1; }
+.ph-name { font-size: 19px; font-weight: 700; }
+.ph-context { font-size: 13px; margin-top: 2px; }
+.ph-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px 16px; margin-top: 12px; }
+.ph-fields > div { font-size: 14px; }
+.ph-label { display: block; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.ph-notes { margin: 10px 0 0; font-size: 13px; }
+.ph-audit { margin: 8px 0 0; font-size: 11px; }
+.ph-edit-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; margin-top: 12px; }
+.ph-edit-form label { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: var(--muted);
+  text-transform: uppercase; letter-spacing: .04em; }
+.ph-edit-form input, .ph-edit-form textarea { padding: 6px 8px; border-radius: 6px; border: 1px solid var(--border);
+  background: var(--bg); color: var(--text); font-size: 13px; font-family: inherit; }
+.ph-notes-field { grid-column: 1 / -1; }
+.ph-form-actions { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; }
+.ph-form-msg { font-size: 12px; }
+@media (max-width: 479px) { .ph-main { flex-wrap: wrap; } }

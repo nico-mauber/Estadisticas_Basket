@@ -92,6 +92,8 @@ export const api = {
   // Ficha de métrica: ranking completo de la población (T-01)
   ranking:       (type, metric, params = {}) => apiFetch(`/api/rankings/${encodeURIComponent(type)}/${encodeURIComponent(metric)}${qs(params)}`),
   periods:       (code, params = {}) => apiFetch(`/api/periods/${encodeURIComponent(code)}${qs(params)}`),
+  playerProfile: (id, params = {}) => apiFetch(`/api/player-profile/${encodeURIComponent(id)}${qs(params)}`),
+  updatePlayerProfile: (id, body) => send(`/api/player-profile/${encodeURIComponent(id)}`, "PUT", body),
   contextOptions: (params = {}) => apiFetch(`/api/context/options${qs(params)}`),
   deleteGames:   (ids) => send("/api/games", "DELETE", { game_ids: ids }),
   seed:          ()   => apiFetch("/api/seed", { method: "POST" }),

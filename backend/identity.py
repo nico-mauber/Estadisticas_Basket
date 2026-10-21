@@ -256,6 +256,152 @@ def player_card(player_id: int) -> dict | None:
     }
 
 
+
+# ── Ficha de identidad del jugador (F-16) ────────────────────────────────────
+
+# Rangos de los datos cargados a mano. Fuera de rango se rechaza con 400: un dorsal o una altura
+# absurdos ensucian la ficha y no hay forma de distinguirlos de un dato real después.
+HEIGHT_RANGE = (140, 240)          # cm
+BIRTH_YEAR_RANGE = (1940, 2020)
+NATIONALITY_MAX = 60
+NOTES_MAX = 2000
+
+PROFILE_FIELDS = ("height_cm", "birth_year", "nationality", "profile_notes")
+
+
+class ProfileError(ValueError):
+    """Dato de ficha inválido; `message` es el texto que ve el usuario."""
+
+    def __init__(self, message: str, field: str | None = None):
+        super().__init__(message)
+        self.message = message
+        self.field = field
+
+
+def _validate_profile_fields(fields: dict) -> dict:
+    """Normaliza y valida los campos manuales. Vacío o None → None (borra el dato, queda "no registrado")."""
+    out = {}
+    for key, raw in fields.items():
+        if key not in PROFILE_FIELDS:
+            raise ProfileError(f"Campo desconocido: {key}", key)
+        if raw is None or (isinstance(raw, str) and not raw.strip()):
+            out[key] = None
+            continue
+        if key in ("height_cm", "birth_year"):
+            try:
+                value = int(raw)
+            except (TypeError, ValueError):
+                raise ProfileError(
+                    "La altura debe ser un número en centímetros." if key == "height_cm"
+                    else "El año de nacimiento debe ser un número.", key) from None
+            lo, hi = HEIGHT_RANGE if key == "height_cm" else BIRTH_YEAR_RANGE
+            if not lo <= value <= hi:
+                raise ProfileError(
+                    f"La altura debe estar entre {lo} y {hi} cm." if key == "height_cm"
+                    else f"El año de nacimiento debe estar entre {lo} y {hi}.", key)
+            out[key] = value
+        else:
+            value = str(raw).strip()
+            limit = NATIONALITY_MAX if key == "nationality" else NOTES_MAX
+            if len(value) > limit:
+                raise ProfileError(
+                    f"La nacionalidad no puede superar los {limit} caracteres." if key == "nationality"
+                    else f"Las notas no pueden superar los {limit} caracteres.", key)
+            out[key] = value
+    return out
+
+
+def _player_competitions(player_id: int) -> list:
+    """Competencias en las que la ficha tiene partidos, con su etiqueta."""
+    import repository
+    labels = repository.competition_labels()
+    pid = canonical_id(player_id)
+    comp_ids = sorted({cid for (cid,) in db.session.query(Game.competition_id)
+                       .join(PlayerGameStats, PlayerGameStats.game_id == Game.game_id)
+                       .filter(PlayerGameStats.player_id == pid,
+                               Game.competition_id.isnot(None)).distinct()})
+    return [{"id": cid, "label": labels.get(cid)} for cid in comp_ids]
+
+
+def player_profile(player_id: int, ctx=None) -> dict | None:
+    """Ficha completa del jugador (F-16): identidad, datos manuales y línea de contexto.
+
+    `ctx`: contexto de T-03; los partidos de la línea de contexto son los de la SELECCIÓN activa.
+    `None` si la ficha no existe. Los datos que FIBA no publica y nadie cargó van en `None` con su
+    razón en `fields_null_reasons` (C-11: nunca 0 ni cadena vacía)."""
+    import repository
+    card = player_card(player_id)
+    if card is None:
+        return None
+    pid = card["player_id"]
+    ficha = db.session.get(Player, pid)
+
+    comp_id = getattr(ctx, "competition_id", None) if ctx is not None else None
+    rows = [r for r in repository.player_game_rows(comp_id)
+            if canonical_id(r.get("player_id")) == pid]
+    if ctx is not None:
+        import context as context_mod
+        rows = context_mod.filter_games(rows, ctx, card["team_code"])
+    games = sum(1 for r in rows if played(r.get("minutes")))
+
+    labels = repository.competition_labels()
+    comp_label = labels.get(comp_id) if comp_id is not None else None
+    team_name = card.get("team_name") or card["team_code"]
+    parts = [p for p in (comp_label, team_name) if p]
+    parts.append(f"{games} partido{'' if games == 1 else 's'}")
+
+    manual = {k: getattr(ficha, k, None) for k in PROFILE_FIELDS}
+    reasons = {k: "no_registrado" for k, v in manual.items() if v is None}
+    if card.get("jersey") is None:
+        reasons["jersey"] = "no_registrado"
+    if not card.get("position"):
+        reasons["position"] = "no_registrado"
+
+    full_name = " ".join(p for p in (ficha.first_name, ficha.family_name) if p) or None
+    return {
+        "player_id": pid,
+        "display_name": card["display_name"],
+        "full_name": full_name,
+        "first_name": ficha.first_name,
+        "family_name": ficha.family_name,
+        "jersey": card.get("jersey"),
+        "position": card.get("position") or None,
+        "position_group": card.get("position_group"),
+        "photo_url": ficha.photo_url,
+        "team": {"code": card["team_code"], "name": team_name},
+        "competition": {"id": comp_id, "label": comp_label},
+        "games": games,
+        "context_line": " · ".join(parts),
+        "competitions": _player_competitions(pid),
+        "fields_null_reasons": reasons,
+        "profile_updated_at": ficha.profile_updated_at,
+        "profile_updated_by": ficha.profile_updated_by,
+        **manual,
+    }
+
+
+def update_player_profile(player_id: int, fields: dict, *, user: str) -> dict | None:
+    """Carga o corrige los datos manuales de la ficha (F-16 RF-6). `None` si la ficha no existe.
+
+    Los datos viven en la FICHA (identidad de C-08), no en un partido: sobreviven a reimportaciones
+    y reprocesos. Sube la versión de datos para que las vistas con caché se rearmen."""
+    import cache
+    pid = canonical_id(player_id)
+    if pid is None:
+        return None
+    ficha = db.session.get(Player, pid)
+    if ficha is None:
+        return None
+
+    clean = _validate_profile_fields(fields)
+    for key, value in clean.items():
+        setattr(ficha, key, value)
+    ficha.profile_updated_at = datetime.utcnow().isoformat(timespec="seconds")
+    ficha.profile_updated_by = user or ""
+    db.session.commit()
+    cache.bump_data_version("player_profile")
+    return player_profile(pid)
+
 # ── Duplicados y fusión ────────────────────────────────────────────────────
 
 def _name_parts(display: str) -> tuple[str, str]:

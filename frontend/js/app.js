@@ -20,6 +20,7 @@ import { mountContextBar, contextNote, invalidateContextOptions } from "./compon
 import { renderPeriodBlock, destroyPeriodBlock } from "./components/period-block.js";
 import { renderLineupsBlock } from "./components/lineups-block.js";
 import { renderComparePlayers, comparePlayersFromUrl } from "./components/compare-players.js";
+import { renderPlayerHeader } from "./components/player-header.js";
 
 // ── Toast ──────────────────────────────────────────────────────────────────
 function toast(msg, type = "ok") {
@@ -2043,6 +2044,13 @@ function _applyPlayerData(main, data) {
   _playerComp = String(data.context.competition.id ?? "all");
   _playerCtx  = { teamCode: data.team_code, playerName: data.player };   // grafía de la ficha
   _renderPlayerContent(main, data);
+  // RF-1: la identidad se dibuja antes que cualquier card de métricas.
+  if (data.player_id != null) {
+    renderPlayerHeader(document.getElementById("player-identity"), data.player_id, {
+      params: { competition: _playerComp, ...contextParams() },
+      onSaved: () => toast("Ficha actualizada"),
+    });
+  }
   _mountCtxBar(main, _playerComp, _reloadPlayer);
   _loadPlayerStandard(data.player_id);
 }
@@ -2149,11 +2157,7 @@ function _renderPlayerContent(main, data) {
     ];
     _playerCardGroups = PLAYER_CARD_GROUPS;
     main.innerHTML = `
-      <div class="card pl-head">
-        <div class="pl-name">${esc(data.player || playerName)}</div>
-        <div class="td-muted">${esc(data.team_name || data.team_code || teamCode)}${
-          data.position ? ` · ${esc(data.position)}` : ""} · ${data.games} partido(s)</div>
-      </div>
+      <div id="player-identity"></div>
       ${comps.length > 1 ? `
       <div class="card">
         <select id="player-comp" class="map-select">${_compOptions(comps, _playerComp, "Todas las competencias", "all")}</select>

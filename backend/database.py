@@ -59,6 +59,13 @@ class Player(db.Model):
     photo_url    = db.Column(db.String)
     merged_into  = db.Column(db.Integer, db.ForeignKey("players.id"))
     created_at   = db.Column(db.String,  default=lambda: datetime.utcnow().isoformat())
+    # F-16 — datos de ficha cargados a mano (FIBA no los publica). NULL = no registrado, nunca 0 ni "".
+    height_cm          = db.Column(db.Integer)
+    birth_year         = db.Column(db.Integer)
+    nationality        = db.Column(db.String)
+    profile_notes      = db.Column(db.Text)
+    profile_updated_at = db.Column(db.String)
+    profile_updated_by = db.Column(db.String)
 
 
 class Game(db.Model):
@@ -303,6 +310,13 @@ def upgrade_db(app):
         ("team_game_stats",   "fouls_drawn",  "INTEGER"),
         ("player_game_stats", "blk_received", "INTEGER"),
         ("player_game_stats", "fouls_drawn",  "INTEGER"),
+        # F-16 — ficha de identidad cargada a mano (sin DEFAULT: NULL = "no registrado")
+        ("players", "height_cm",          "INTEGER"),
+        ("players", "birth_year",         "INTEGER"),
+        ("players", "nationality",        "TEXT"),
+        ("players", "profile_notes",      "TEXT"),
+        ("players", "profile_updated_at", "TEXT"),
+        ("players", "profile_updated_by", "TEXT"),
     ]
     with app.app_context():
         conn = db.engine.raw_connection()

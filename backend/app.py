@@ -312,6 +312,45 @@ def _no_quarter(ctx):
     return dataclasses.replace(ctx, quarters=())
 
 
+@app.route("/api/player-profile/<int:player_id>")
+@login_required
+def player_profile_route(player_id: int):
+    """Ficha de identidad del jugador (F-16): nombre, dorsal, posición, club, línea de contexto y los
+    datos cargados a mano. Acepta el contexto de T-03 (la línea de contexto cuenta los partidos de la
+    selección activa). `editable` dice si el usuario puede cargar datos."""
+    try:
+        ctx = context.parse_context(request.args, player_id=player_id)
+    except ContextError as e:
+        return jsonify(e.payload()), e.status
+    except CompetitionError as e:
+        return jsonify({"error": str(e), "code": "competencia_inexistente"}), e.status
+    profile = identity.player_profile(player_id, ctx)
+    if profile is None:
+        return jsonify({"error": "Jugador no encontrado", "code": "no_encontrado"}), 404
+    profile["editable"] = is_admin()
+    return jsonify(profile)
+
+
+@app.route("/api/player-profile/<int:player_id>", methods=["PUT"])
+@admin_required
+def update_player_profile_route(player_id: int):
+    """Carga o corrige los datos manuales de la ficha (F-16 RF-6). Body parcial; `null` o vacío borra
+    el dato y vuelve a "no registrado". Solo administradores."""
+    body = request.get_json(silent=True) or {}
+    fields = {k: v for k, v in body.items() if k in identity.PROFILE_FIELDS}
+    if not fields:
+        return jsonify({"error": "No hay datos para guardar", "code": "parametro_invalido"}), 400
+    try:
+        profile = identity.update_player_profile(player_id, fields, user=prefs.current_owner())
+    except identity.ProfileError as e:
+        return jsonify({"error": e.message, "code": "parametro_invalido",
+                        "details": {"param": e.field}}), 400
+    if profile is None:
+        return jsonify({"error": "Jugador no encontrado", "code": "no_encontrado"}), 404
+    profile["editable"] = True
+    return jsonify(profile)
+
+
 @app.route("/api/metrics-catalog")
 @login_required
 def metrics_catalog_route():
