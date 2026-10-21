@@ -191,6 +191,65 @@ export function drawCompareRadar(canvasId, avgA, avgB, league, labelA, labelB) {
   });
 }
 
+// ── Radar — comparación de jugadores en percentiles (F-05) ──────────────────
+// A diferencia de `drawCompareRadar`, los valores YA vienen normalizados: cada eje es el percentil
+// del jugador en SU propia competencia, así que dos jugadores de ligas distintas son comparables.
+export function drawComparePlayersRadar(canvasId, pctA, pctB, labels, labelA, labelB) {
+  _applyDefaults();
+  _destroy(canvasId);
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+
+  _instances[canvasId] = new Chart(canvas, {
+    type: "radar",
+    data: {
+      labels,
+      datasets: [
+        {
+          label: labelA || "A",
+          data: pctA,
+          borderColor: C.accent, backgroundColor: C.accentA,
+          borderWidth: 2, pointBackgroundColor: C.accent, pointRadius: 3,
+        },
+        {
+          label: labelB || "B",
+          data: pctB,
+          borderColor: C.blue, backgroundColor: C.blueA,
+          borderWidth: 2, pointBackgroundColor: C.blue, pointRadius: 3,
+        },
+        {
+          label: "Promedio de su liga",
+          data: Array(labels.length).fill(50),
+          borderColor: C.muted, backgroundColor: C.mutedA,
+          borderDash: [4, 4], borderWidth: 1.5,
+          pointBackgroundColor: C.muted, pointRadius: 2,
+        },
+      ],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: true,
+      scales: {
+        r: {
+          min: 0, max: 100,
+          ticks: { display: false, stepSize: 25 },
+          grid: { color: C.grid }, angleLines: { color: C.grid },
+          pointLabels: { color: C.text, font: { size: 11 } },
+        },
+      },
+      plugins: {
+        legend: { position: "bottom", labels: { boxWidth: 12, padding: 16 } },
+        tooltip: {
+          callbacks: {
+            label: ctx => (ctx.raw == null
+              ? `${ctx.dataset.label}: sin percentil`
+              : `${ctx.dataset.label}: percentil ${fmtNumber(ctx.raw, 0)}`),
+          },
+        },
+      },
+    },
+  });
+}
+
 // ── Line — evolution per game ───────────────────────────────────────────────
 export function drawEvolution(canvasId, gameLog, leagueOerAvg) {
   _applyDefaults();

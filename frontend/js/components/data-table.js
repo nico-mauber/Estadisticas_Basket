@@ -100,6 +100,15 @@ export function createDataTable(el, {
     return row.values[idx];
   }
 
+  // T-02: al ordenar por una métrica de rendimiento, las filas de muestra baja van siempre al final
+  // (no entran en rankings, pero tampoco se ocultan). Las columnas de texto y de tamaño de muestra
+  // (partidos, minutos, posesiones) ordenan sin esa separación: ahí la muestra ES el dato.
+  const SAMPLE_KEYS = new Set(["games", "minutes", "possessions", "_sample"]);
+  function _lowSampleLast(col) {
+    return col.type === "metric" && !SAMPLE_KEYS.has(col.key)
+      && _payload.rows.some(r => r.sample && r.sample.ranked === false);
+  }
+
   function _sortedRows() {
     let rows = _payload.rows.slice();
     if (typeof _rowFilter === "function") {
@@ -109,8 +118,14 @@ export function createDataTable(el, {
       const col = _colByKey(sort.key);
       const dir = sort.dir === "asc" ? 1 : -1;
       if (col) {
+        const lowLast = _lowSampleLast(col);
         const indexed = rows.map((r, i) => [r, i]);
         indexed.sort((A, B) => {
+          if (lowLast) {
+            const lowA = A[0].sample?.ranked === false ? 1 : 0;
+            const lowB = B[0].sample?.ranked === false ? 1 : 0;
+            if (lowA !== lowB) return lowA - lowB;
+          }
           const c = cmpNullsLast(_sortValue(A[0], col), _sortValue(B[0], col), dir);
           return c !== 0 ? c : A[1] - B[1];   // desempate estable por índice
         });
@@ -330,7 +345,7 @@ export function createDataTable(el, {
       const row = pageRows[i];
       if (!row) return;
       _on(tr, "click", () => {
-        if (onRowClick) return onRowClick(row);
+        if (onRowClick) return onRowClick(row, _payload);
         if (row.link) _navigate(row.link);
       });
     });
@@ -542,5 +557,28 @@ export async function mountTable(el, loader, opts = {}) {
     dtEmpty(el, { trimmed });
     return null;
   }
-  return createDataTable(el, { ...opts, payload });
+  const dt = createDataTable(el, { ...opts, payload });
+  _noteIgnored(el, payload);
+  return dt;
+}
+
+// Etiquetas de los filtros que el backend informó como no aplicados en ESTA tabla (T-03 `context.ignored`).
+const _IGNORED_LABELS = {
+  quarter: "cuarto", score: "marcador", on: "con jugador", off: "sin jugador",
+  venue: "sede", opponent: "rival", rest: "descanso", last: "período",
+};
+
+// Aviso al pie de la tabla: qué filtros activos NO se aplicaron acá. Sin él, la tabla muestra
+// números de partido completo debajo de una barra que dice "4.º cuarto" (T-03 RF-16).
+function _noteIgnored(el, payload) {
+  const ignored = (payload?.context?.ignored || [])
+    .filter(i => i.reason === "no_aplica" || i.reason === "no_implementado");
+  if (!ignored.length) return;
+  const names = [...new Set(ignored.map(i => _IGNORED_LABELS[i.param] || i.param))];
+  const note = document.createElement("p");
+  note.className = "td-muted dt-ignored";
+  note.textContent = names.length === 1
+    ? `Esta tabla no aplica el filtro de ${names[0]}.`
+    : `Esta tabla no aplica los filtros de ${names.slice(0, -1).join(", ")} y ${names[names.length - 1]}.`;
+  el.appendChild(note);
 }

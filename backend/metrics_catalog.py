@@ -8,6 +8,7 @@ entidad (`register_entity`, Grupo C: bundles.py/lineups.py/clutch.py).
 
 Plan §4.1/§4.2/§4.5/§4.8.
 """
+import dataclasses
 from dataclasses import dataclass, field
 from typing import Callable
 
@@ -371,7 +372,9 @@ def standard_payload(bundle: "StatBundle", values: dict, *, context_echo: dict, 
         values_completos[key] = obj
 
     entity = {
-        "type": bundle.entity_type,
+        # un split de equipo (filtros de evento / tramo) se presenta como equipo: mismas métricas y grupos
+        "type": "team" if bundle.entity_type == "split" else bundle.entity_type,
+        "split": bundle.entity_type == "split",
         "id": bundle.entity_id,
         "name": bundle.name,
         "team_code": (bundle.meta or {}).get("team_code"),
@@ -404,6 +407,8 @@ def _entity_id_kwargs(entity_type: str, raw_id: str) -> dict:
         return {"team_code": team_code.upper()}
     if entity_type == "clutch":
         return {"team_code": raw_id.upper()}
+    if entity_type == "period":
+        return {"team_code": raw_id.split(":", 1)[0].upper()}
     return {}
 
 
@@ -426,7 +431,8 @@ def build_payload(entity_type: str, args) -> dict:
     from competitions import CompetitionError
 
     try:
-        ctx = context_mod.parse_context(args, **_entity_id_kwargs(entity_type, str(entity_id)))
+        ctx = context_mod.parse_context(args, **_entity_id_kwargs(entity_type, str(entity_id)),
+                                        event_level=entity_type in ("team", "period"))
     except context_mod.ContextError as e:
         # `context.parse_context` envuelve tanto `CompetitionError` (competencia inexistente o en
         # borrador) como su propio `ContextError` (p. ej. `last` inválido) en `ContextError`; se
@@ -436,6 +442,10 @@ def build_payload(entity_type: str, args) -> dict:
         raise MetricsError(msg, e.status, code) from e
     except CompetitionError as e:
         raise MetricsError(str(e), e.status, "competencia_inexistente") from e
+
+    if entity_type == "period" and ctx.quarters:
+        # el tramo elegido manda: el filtro `quarter` de la barra no se combina con él (F-04 RF-9)
+        ctx = dataclasses.replace(ctx, quarters=(), ignored=ctx.ignored + (("quarter", "no_aplica"),))
 
     params = {}
     if entity_type == "clutch":
@@ -451,6 +461,28 @@ def build_payload(entity_type: str, args) -> dict:
 
     bundles = reg.loader(req)
     if not bundles:
+        # Sin resultados puede ser por los filtros o porque la entidad no existe. Se distingue
+        # rehaciendo la consulta SIN filtros: si tampoco así aparece, no existe (un código de equipo
+        # mal escrito no debe reportarse como "no hay partidos que cumplan estos filtros").
+        filtered = (ctx.last or ctx.venue or ctx.opponent or ctx.rest
+                    or context_mod.has_event_filters(ctx) or entity_type == "period")
+        if filtered:
+            bare_ctx = dataclasses.replace(
+                ctx, last=None, venue=None, opponent=None, rest=None,
+                quarters=(), score=None, on=(), off=())
+            bare_type = "team" if entity_type == "period" else entity_type
+            bare_id = str(entity_id).split(":", 1)[0] if entity_type == "period" else entity_id
+            bare_reg = _REGISTRY.get(bare_type)
+            exists = False
+            if bare_reg is not None:
+                try:
+                    exists = bool(bare_reg.loader(EntityRequest(
+                        entity_type=bare_type, entity_id=bare_id, comp_id=bare_ctx.competition_id,
+                        ctx=bare_ctx, base=base, params=params)))
+                except Exception:
+                    exists = True      # ante la duda, se informa como selección vacía (no se afirma que no existe)
+            if exists:
+                raise MetricsError("No hay partidos que cumplan estos filtros.", 404, "sin_partidos")
         raise MetricsError("Entidad no encontrada", 404, "no_encontrado")
 
     import sample as sample_mod
@@ -458,7 +490,7 @@ def build_payload(entity_type: str, args) -> dict:
     def _values_for(bundle):
         values = compute_standard(bundle)
         prior = None
-        if entity_type in sample_mod.REGRESSED_TYPES:
+        if bundle.entity_type in sample_mod.REGRESSED_TYPES or entity_type in sample_mod.REGRESSED_TYPES:
             prior = sample_mod.league_prior(ctx.competition_id, ctx)
         values = sample_mod.adjust_values(values, bundle, prior)
         try:
@@ -478,6 +510,20 @@ def build_payload(entity_type: str, args) -> dict:
         games_excluded=meta0.get("games_excluded", {}), ignored=[],
         competition_label=comp_label)
 
+    if entity_type == "period":
+        echo["level"] = "evento"   # el tramo es un filtro de evento aunque no haya filtros en la barra
+        # Resumen del tramo (récord, puntos, desglose por partido) para que el llamador no tenga que
+        # volver a recorrer el pbp: el bundle ya está calculado acá.
+        import splits
+        meta0 = b0.meta or {}
+        per_game = meta0.get("per_game", [])
+        pts, opp_pts = b0.own.get("pts"), (b0.opp or {}).get("pts")
+        payload_summary = {
+            "record": splits.record(per_game), "games_with_window": len(per_game),
+            "pts": pts, "pts_against": opp_pts,
+            "point_diff": None if pts is None or opp_pts is None else pts - opp_pts,
+        }
+
     team_poss = None
     if entity_type in ("lineup", "pair", "onoff", "split", "clutch"):
         team_code = meta0.get("team_code")
@@ -485,11 +531,16 @@ def build_payload(entity_type: str, args) -> dict:
             team_poss = sample_mod.team_offensive_possessions(team_code, ctx.competition_id, ctx)
 
     if entity_type in sample_mod.ENTITY_SAMPLE:
-        badge = sample_mod.sample_for(entity_type, bundles, team_poss=team_poss)
+        # un equipo con filtros de evento se mide como split (posesiones, umbrales sample.split.*)
+        stype = "split" if b0.entity_type == "split" else entity_type
+        badge = sample_mod.sample_for(stype, bundles, team_poss=team_poss)
     else:
         badge = None
 
     payload = standard_payload(b0, values0, context_echo=echo, base=base, sample=badge, fichas=None)
+    if entity_type == "period":
+        payload["summary"] = payload_summary
+        payload["games"] = (b0.meta or {}).get("per_game", [])
 
     if entity_type == "onoff":
         if len(bundles) < 2:
@@ -555,6 +606,10 @@ def _attach_fichas(payload, entity_type, b0, ctx, base, *, prior_fn) -> None:
     import population
     try:
         variant = _population_variant(entity_type, b0)
+        if ctx.on or ctx.off:
+            # con/sin jugador: la población de equipos no se puede recalcular con ese filtro (population_mode entity_only)
+            payload["population"] = {"size": 0, "criterion": "", "context_label": "", "reason": "contexto_no_comparable"}
+            return
         pop = population.population(entity_type, ctx.competition_id, ctx, variant=variant)
         rank_values = _ranking_values(b0, ctx, sample_mod=prior_fn)
         population.attach_fichas(payload["metrics"], entity_type, b0.entity_id, pop,
@@ -573,7 +628,10 @@ def _attach_fichas(payload, entity_type, b0, ctx, base, *, prior_fn) -> None:
 
 
 def _population_variant(entity_type, bundle):
-    """`variant` de la población: para `lineup`, el nº de jugadores de la combinación; si no, None."""
+    """`variant` de la población: para `lineup`, el nº de jugadores de la combinación; para `period`,
+    el tramo (cada ventana tiene su propia población); si no, None."""
+    if entity_type == "period":
+        return (bundle.meta or {}).get("window")
     if entity_type == "lineup":
         pids = (bundle.meta or {}).get("player_ids")
         if pids:

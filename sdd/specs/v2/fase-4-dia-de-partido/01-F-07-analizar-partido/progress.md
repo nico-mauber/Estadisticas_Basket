@@ -28,11 +28,11 @@
 - [x] T-D6 · Bloque Tiros (mapa de tiro home/away side-by-side)
 - [x] T-D7 · Bloque Jugadas (PBP filtrable por período/tipo/jugador, 200 eventos máx)
 - [x] T-D8 · Bloques Quintetos y Cruces (lineup table con OER/DER/Net/eFG/muestra, matchups con PPP)
-- [ ] T-D9 · Exportación e informe de scouting (diferido)
+- [x] T-D9 · Menú Exportar en el encabezado: CSV/XLSX con el box de ambos equipos; PNG (1080 px) y PDF A4 de 2 páginas con el informe de scouting (`game-report.js`)
 - [x] T-D10 · Sección `partido` habilitada en app.js (sin botón nav, acceso desde catálogo)
 - [x] T-D11 · Click en fila del catálogo abre vista partido
 - [x] T-D12 · Estilos game-view en `style.css` (responsive, tabs, tablas, shots grid)
-- [ ] T-E1 · Estados de bloques (loading/error implementados en game-view.js, offline/retry pendiente)
+- [x] T-E1 · Estados de bloque: loading, error con «Reintentar» y aviso de sin conexión (`_blockError`); guarda de pestaña contra respuestas tardías
 - [x] T-E2 · `sw.js` v26 → v27 (game-view.js en STATIC)
 - [ ] T-F1 … T-F23 · Verificación
 - [ ] T-G1 (diferido → F-12) · Enlace desde calendario
@@ -84,8 +84,8 @@
 - ✅ `docs/architecture.md` — `game_analysis.py` y `matchups.py` descritos
 
 ## Deuda / TODO
-- T-D9: Exportación e informe de scouting
-- T-E1: Estados offline/retry de cada bloque (loading/error ya implementados)
+- Menú de exportación por tabla (RF-25) solo existe a nivel partido (box); quintetos y cruces no tienen menú propio
+- Copy con `t()` (F-21)
 - T-F1..T-F23: Verificación completa
 - Tablas T-06 formales (register_table)
 - load_matchup_bundles completo

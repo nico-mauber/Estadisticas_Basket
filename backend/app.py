@@ -241,6 +241,116 @@ def _standard_block(entity_type: str, entity_id) -> dict | None:
         return None
 
 
+@app.route("/api/context/options")
+@login_required
+def context_options():
+    """Opciones del selector de contexto (T-03 RF-15): competencias, equipos de la competencia elegida y
+    las dimensiones con su nivel, valores válidos y disponibilidad. `?competition=<id>|all|<texto>`."""
+    try:
+        res = repository.resolve_competition(request.args.get("competition"))
+    except CompetitionError as e:
+        return jsonify({"error": str(e), "code": "competencia_inexistente"}), e.status
+    comp_id = None if res["all"] else res["id"]
+    teams = {}
+    for r in repository.team_game_rows(comp_id).values():
+        teams[r["team_code"]] = r["team_name"]
+    return jsonify({
+        "competition": {"id": res["id"], "all": res["all"]},
+        "competitions": [{"id": cid, "label": label} for cid, label in repository.competition_labels().items()],
+        "teams": [{"code": c, "name": n} for c, n in sorted(teams.items(), key=lambda t: t[1])],
+        "dimensions": context.dimensions(comp_id),
+    })
+
+
+@app.route("/api/periods/<team_code>")
+@login_required
+def team_periods(team_code: str):
+    """Estadísticas por tramo del partido (F-04): los 8 tramos (1.º–4.º cuarto, mitades, prórroga y últimos 5
+    minutos) en una sola respuesta, cada uno con el conjunto estándar de T-05, su ficha de T-01 en el mismo
+    tramo, el badge de muestra de split, el récord del tramo y el desglose por partido. Acepta el contexto de
+    T-03 (el filtro `quarter` se ignora: manda el tramo). `?base=` como en `/api/metrics/*`."""
+    import splits
+    team_code = team_code.upper()
+    if not any(r["team_code"] == team_code for r in repository.team_game_rows(None).values()):
+        return jsonify({"error": "Equipo no encontrado", "code": "no_encontrado"}), 404
+    out, echo = [], None
+    for w in splits.WINDOWS:
+        args = dict(request.args)
+        args["id"] = f"{team_code}:{w}"
+        try:
+            payload = metrics_catalog.build_payload("period", args)
+            empty = False
+        except MetricsError as e:
+            if e.code == "sin_partidos":
+                payload, empty = None, True
+            else:
+                return jsonify({"error": e.message, "code": e.code}), e.status
+        entry = {"window": w, "label": splits.window_label(w), "empty": empty, "standard": payload,
+                 "summary": None, "games": []}
+        if payload is not None:
+            # `build_payload` ya calculó el bundle del tramo: su resumen y su desglose vienen en el
+            # payload, no se vuelve a recorrer el play-by-play.
+            entry["summary"] = payload.get("summary")
+            entry["games"] = payload.get("games", [])
+            echo = echo or payload["context"]
+        out.append(entry)
+    if echo is None:   # ningún tramo tiene datos: eco de la selección igual (sin partidos que cumplan)
+        import context as context_mod
+        try:
+            ctx = _no_quarter(context_mod.parse_context(request.args, team_code=team_code, event_level=True))
+        except ContextError as e:
+            return jsonify(e.payload()), e.status
+        echo = context_mod.context_echo(ctx, games_used=0, games_total=0, games_excluded={}, ignored=[],
+                                        competition_label=metrics_catalog._competition_label(ctx))
+        echo["level"] = "evento"
+    return jsonify({"team_code": team_code, "windows": out, "context": echo,
+                    "window_secs": config.get("clutch.window_secs")})
+
+
+def _no_quarter(ctx):
+    import dataclasses
+    return dataclasses.replace(ctx, quarters=())
+
+
+@app.route("/api/player-profile/<int:player_id>")
+@login_required
+def player_profile_route(player_id: int):
+    """Ficha de identidad del jugador (F-16): nombre, dorsal, posición, club, línea de contexto y los
+    datos cargados a mano. Acepta el contexto de T-03 (la línea de contexto cuenta los partidos de la
+    selección activa). `editable` dice si el usuario puede cargar datos."""
+    try:
+        ctx = context.parse_context(request.args, player_id=player_id)
+    except ContextError as e:
+        return jsonify(e.payload()), e.status
+    except CompetitionError as e:
+        return jsonify({"error": str(e), "code": "competencia_inexistente"}), e.status
+    profile = identity.player_profile(player_id, ctx)
+    if profile is None:
+        return jsonify({"error": "Jugador no encontrado", "code": "no_encontrado"}), 404
+    profile["editable"] = is_admin()
+    return jsonify(profile)
+
+
+@app.route("/api/player-profile/<int:player_id>", methods=["PUT"])
+@admin_required
+def update_player_profile_route(player_id: int):
+    """Carga o corrige los datos manuales de la ficha (F-16 RF-6). Body parcial; `null` o vacío borra
+    el dato y vuelve a "no registrado". Solo administradores."""
+    body = request.get_json(silent=True) or {}
+    fields = {k: v for k, v in body.items() if k in identity.PROFILE_FIELDS}
+    if not fields:
+        return jsonify({"error": "No hay datos para guardar", "code": "parametro_invalido"}), 400
+    try:
+        profile = identity.update_player_profile(player_id, fields, user=prefs.current_owner())
+    except identity.ProfileError as e:
+        return jsonify({"error": e.message, "code": "parametro_invalido",
+                        "details": {"param": e.field}}), 400
+    if profile is None:
+        return jsonify({"error": "Jugador no encontrado", "code": "no_encontrado"}), 404
+    profile["editable"] = True
+    return jsonify(profile)
+
+
 @app.route("/api/metrics-catalog")
 @login_required
 def metrics_catalog_route():
@@ -388,7 +498,7 @@ def rankings_route(entity_type: str, metric_key: str):
     raw_id = request.args.get("id")
     kwargs = metrics_catalog._entity_id_kwargs(entity_type, str(raw_id)) if raw_id else {}
     try:
-        ctx = context.parse_context(request.args, **kwargs)
+        ctx = context.parse_context(request.args, **kwargs, event_level=entity_type in ("team", "period"))
     except ContextError as e:
         msg = str(e)
         code = "competencia_inexistente" if "competencia" in msg.lower() else "contexto_invalido"
@@ -413,9 +523,9 @@ def team_stats(team_code: str):
     partido más reciente) y `?last=<n>`. El promedio de liga es el de la competencia (C-02)."""
     team_code = team_code.upper()
     try:
-        ctx = context.parse_context(request.args, team_code=team_code)
+        ctx = context.parse_context(request.args, team_code=team_code, event_level=True)
     except ContextError as e:
-        return jsonify({"error": str(e)}), e.status
+        return jsonify(e.payload()), e.status
     profile = population.team_profile(team_code, ctx)
     if profile is None:
         return jsonify({"error": "Equipo no encontrado"}), 404
@@ -492,7 +602,7 @@ def _player_response(pid: int | None):
     try:
         ctx = context.parse_context(request.args, player_id=pid)
     except ContextError as e:
-        return jsonify({"error": str(e)}), e.status
+        return jsonify(e.payload()), e.status
     payload = population.player_profile(pid, ctx)
     if payload is None:
         return jsonify({"error": "Jugador no encontrado"}), 404
@@ -662,6 +772,9 @@ def shot_zones_route():
     result["context"] = {
         "competition": {"id": comp_id, "label": comp_label},
         "applied": {"last": last} if last else {},
+        # Sede, rival y descanso (T-03) todavía no recortan los tiros: se informa, no se calla.
+        "ignored": [{"param": p, "reason": "no_aplica"} for p in ("venue", "opponent", "rest")
+                    if request.args.get(p)],
     }
 
     return jsonify(result)

@@ -1237,6 +1237,9 @@ tbody tr.fuera-poblacion { opacity: .6; }
 .gv-winner { color: var(--accent); }
 .gv-pts { font-size: 28px; font-weight: 800; }
 .gv-sep { font-size: 22px; color: var(--muted); }
+
+.gv-export { margin-top: 12px; display: flex; justify-content: center; }
+.gv-block-error p { margin: 0 0 8px; }
 .gv-warn { margin-top: 8px; color: var(--below); font-size: 12px; }
 .gv-tabs { display: flex; gap: 2px; overflow-x: auto; margin-bottom: 12px; padding: 0 4px; }
 .gv-tab { background: var(--card); border: 1px solid var(--border); border-radius: 6px 6px 0 0;
@@ -1474,3 +1477,102 @@ tbody tr.fuera-poblacion { opacity: .6; }
   }
 }
 
+/* ── Barra de contexto (T-03) ── */
+.ctx-bar { padding: 8px 12px; }
+.ctx-bar > summary { display: flex; align-items: center; justify-content: space-between; gap: 8px; cursor: pointer;
+  font-weight: 600; font-size: 13px; list-style: none; }
+.ctx-bar > summary::-webkit-details-marker { display: none; }
+.ctx-bar > summary > span::before { content: "▸ "; color: var(--muted); }
+.ctx-bar[open] > summary > span::before { content: "▾ "; }
+.ctx-fields { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 10px; }
+.ctx-fields label { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: var(--muted);
+  text-transform: uppercase; letter-spacing: .04em; min-width: 0; }
+.ctx-fields select { min-width: 130px; max-width: 100%; }
+.ctx-note { margin: 0 0 8px; font-size: 12px; }
+@media (max-width: 479px) {
+  .ctx-fields { flex-direction: column; gap: 8px; }
+  .ctx-fields select { width: 100%; }
+}
+
+.ctx-field { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: var(--muted);
+  text-transform: uppercase; letter-spacing: .04em; min-width: 0; }
+.ctx-quarters { display: flex; gap: 4px; flex-wrap: wrap; }
+.ctx-q { padding: 6px 10px; border-radius: 6px; border: 1px solid var(--border); background: transparent;
+  color: var(--text); font-size: 12px; cursor: pointer; text-transform: none; letter-spacing: 0; }
+.ctx-q[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+.ctx-hint { margin: 8px 0 0; font-size: 12px; }
+
+/* ── Por tramo del partido (F-04) ── */
+.pb-chips { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 6px; margin-bottom: 8px; scroll-snap-type: x proximity; }
+.pb-chip { white-space: nowrap; scroll-snap-align: start; flex: 0 0 auto; }
+.pb-chip:disabled { opacity: .4; cursor: not-allowed; }
+.pb-summary { display: flex; flex-wrap: wrap; gap: 8px 18px; margin: 4px 0 10px; font-size: 13px; }
+.pb-summary em { font-style: normal; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; margin-right: 4px; }
+.pb-games-wrap { margin-top: 12px; }
+.pb-games-wrap > summary { cursor: pointer; font-weight: 600; font-size: 13px; margin-bottom: 8px; }
+.pb-games { width: 100%; border-collapse: collapse; font-size: 13px; }
+.pb-games th, .pb-games td { padding: 6px 8px; text-align: left; border-bottom: 1px solid var(--border); }
+
+/* ── Quintetos y ON/OFF del plantel (F-06) ── */
+.lb-cats, .lb-sizes, .lb-views { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 6px; margin-bottom: 10px; }
+.lb-cats button, .lb-sizes button, .lb-views button { white-space: nowrap; flex: 0 0 auto; }
+.lb-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; }
+.lb-card { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
+.lb-card-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
+.lb-pos { color: var(--accent); font-weight: 700; }
+.lb-metric { font-size: 13px; color: var(--muted); }
+.lb-metric strong { color: var(--text); font-size: 15px; }
+.lb-metric em { font-style: normal; color: var(--muted2); font-size: 11px; }
+.lb-pct { margin-left: auto; font-size: 11px; color: var(--muted); }
+.lb-names { margin: 0 0 6px; padding-left: 18px; font-size: 13px; }
+.lb-names li { margin: 1px 0; }
+.lb-extra { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 11px; color: var(--muted); }
+.lb-badge { margin-top: 6px; }
+@media (max-width: 767px) { .lb-cards { grid-template-columns: 1fr; } }
+
+.lb-detail-names { color: var(--muted2); font-weight: 400; text-transform: none; letter-spacing: 0; }
+.lb-detail-badge { margin: 4px 0 10px; }
+.lb-detail-block + .lb-detail-block { margin-top: 14px; }
+.lb-adj { font-size: 11px; color: var(--muted); font-weight: 400; }
+.lb-card { cursor: pointer; }
+.lb-cards-export { float: right; }
+.lb-detail-open .lb-table-card, .lb-detail-open .lb-cards-card { display: none; }
+
+/* ── Comparar jugadores (F-05) ── */
+.cmp-tabs { display: flex; gap: 6px; margin-bottom: 12px; }
+.cmp-note { margin: 8px 0 0; font-size: 12px; }
+.cmp-heads { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+.cmp-name { font-size: 17px; font-weight: 700; }
+.cmp-table { width: 100%; }
+.cmp-table td, .cmp-table th { padding: 6px 8px; }
+.cmp-table .cmp-key { text-align: center; color: var(--muted); font-size: 12px; white-space: nowrap; }
+.cmp-table td:first-child { text-align: right; }
+.cmp-table td:last-child { text-align: left; }
+.cmp-win { font-weight: 700; color: var(--above); }
+.cmp-pct { display: inline-block; padding: 0 5px; border-radius: 4px; font-size: 10px; color: #fff; }
+@media (max-width: 479px) { .cmp-heads { grid-template-columns: 1fr; } }
+.dt-ignored { margin: 8px 0 0; font-size: 12px; }
+
+/* ── Ficha de identidad del jugador (F-16) ── */
+.ph-card { padding: 16px; }
+.ph-main { display: flex; align-items: center; gap: 14px; }
+.ph-photo { width: 56px; height: 56px; border-radius: 50%; object-fit: cover; flex: 0 0 auto; }
+.ph-initials { display: flex; align-items: center; justify-content: center; background: var(--border);
+  color: var(--text); font-weight: 700; font-size: 18px; }
+.ph-text { min-width: 0; flex: 1; }
+.ph-name { font-size: 19px; font-weight: 700; }
+.ph-context { font-size: 13px; margin-top: 2px; }
+.ph-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px 16px; margin-top: 12px; }
+.ph-fields > div { font-size: 14px; }
+.ph-label { display: block; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.ph-notes { margin: 10px 0 0; font-size: 13px; }
+.ph-audit { margin: 8px 0 0; font-size: 11px; }
+.ph-edit-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; margin-top: 12px; }
+.ph-edit-form label { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: var(--muted);
+  text-transform: uppercase; letter-spacing: .04em; }
+.ph-edit-form input, .ph-edit-form textarea { padding: 6px 8px; border-radius: 6px; border: 1px solid var(--border);
+  background: var(--bg); color: var(--text); font-size: 13px; font-family: inherit; }
+.ph-notes-field { grid-column: 1 / -1; }
+.ph-form-actions { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; }
+.ph-form-msg { font-size: 12px; }
+@media (max-width: 479px) { .ph-main { flex-wrap: wrap; } }

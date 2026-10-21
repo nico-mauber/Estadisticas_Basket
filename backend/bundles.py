@@ -6,6 +6,7 @@ entidad en `metrics_catalog` (team, player, lineup, onoff, clutch) al importarse
 importa este módulo al arrancar para que el registro ocurra.
 """
 import clutch
+import dataclasses
 import context
 import identity
 import lineups
@@ -93,6 +94,9 @@ def team_game_bundles(team_code: str, comp_id: int | None, ctx: "context.Context
 
 
 def _team_bundle_from_games(team_code, comp_id, ctx):
+    if context.has_event_filters(ctx):
+        import splits   # nivel evento (T-03): cuarto, marcador, con/sin jugador
+        return splits.team_event_bundle(team_code, comp_id, ctx)
     per_game = team_game_bundles(team_code, comp_id, ctx)
     if not per_game:
         return None
@@ -101,7 +105,7 @@ def _team_bundle_from_games(team_code, comp_id, ctx):
     games_total = len(context.filter_games(own_all, context.without_last(ctx), team_code))
     bundle = sum_bundles([b for _, b in per_game])
     bundle.meta["games_total"] = games_total
-    bundle.meta["games_excluded"] = {}
+    bundle.meta["games_excluded"] = context.rest_excluded(own_all, ctx, team_code)
     try:
         import possessions as _poss
         tp = _poss.team_possessions(team_code, comp_id)
@@ -125,6 +129,8 @@ def all_team_bundles(comp_id, ctx):
     rows = repository.team_game_rows(comp_id)
     codes = sorted({r["team_code"] for r in rows.values()})
     out = []
+    # con/sin jugador solo existe para la entidad consultada: la población usa el resto del contexto
+    ctx = dataclasses.replace(ctx, on=(), off=())
     for code in codes:
         b = _team_bundle_from_games(code, comp_id, ctx)
         if b is not None:
@@ -244,7 +250,8 @@ def _player_bundle_from_games(player_id, comp_id, ctx):
     bundle = sum_bundles([b for _, b in per_game])
     bundle.meta["games_total"] = games_total
     n_dnp = len(scoped) - games_total
-    bundle.meta["games_excluded"] = {"dnp": n_dnp} if n_dnp else {}
+    bundle.meta["games_excluded"] = {**context.rest_excluded(all_rows, ctx, card["team_code"]),
+                                     **({"dnp": n_dnp} if n_dnp else {})}
     return bundle
 
 
@@ -275,16 +282,12 @@ def all_player_bundles(comp_id, ctx):
 
 # ── Quinteto / ON-OFF / Cierre: wrappers sobre lineups.py y clutch.py ────────
 
-def _filter_pbp_games(games: list[dict], ctx: "context.Context") -> list[dict]:
-    """Últimos N partidos (`ctx.last`) de `repository.team_pbp_games` (plan §4.6/§4.7).
+def _filter_pbp_games(games: list[dict], ctx: "context.Context", team_code: str) -> list[dict]:
+    """Partidos con pbp que entran en el contexto (sede, rival, descanso y últimos N; plan §4.6/§4.7).
 
-    No usa `context.filter_games`: esos dicts no traen `competition_id` (ya lo filtró
-    `team_pbp_games(team_code, comp_id)`) ni `date` a nivel raíz (va en `info.date`). Orden
-    cronológico ascendente, igual criterio que `filter_games`."""
-    out = sorted(games, key=lambda g: (g.get("info", {}).get("date") or "", g.get("game_id") or ""))
-    if ctx.last:
-        out = out[-ctx.last:]
-    return out
+    `team_pbp_games` ya filtró la competencia y trae la fecha en `info.date`; `context.filter_games`
+    entiende esa forma."""
+    return context.filter_games(games, ctx, team_code)
 
 
 def _parse_lineup_id(entity_id: str) -> tuple[str, list[int]]:
@@ -311,7 +314,7 @@ def lineup_loader(req: "metrics_catalog.EntityRequest") -> list:
     if names is None:
         return []
     games = repository.team_pbp_games(team_code, req.comp_id)
-    games = _filter_pbp_games(games, req.ctx)
+    games = _filter_pbp_games(games, req.ctx, team_code)
     games = identity.canonicalize_pbp_games(games, team_code)
     bundle = lineups.lineup_bundle(games, team_code, names, entity_id=req.entity_id,
                                    name=" · ".join(sorted(names)))
@@ -326,7 +329,7 @@ def onoff_loader(req: "metrics_catalog.EntityRequest") -> list:
     if names is None:
         return []
     games = repository.team_pbp_games(team_code, req.comp_id)
-    games = _filter_pbp_games(games, req.ctx)
+    games = _filter_pbp_games(games, req.ctx, team_code)
     games = identity.canonicalize_pbp_games(games, team_code)
     result = lineups.onoff_bundles(games, team_code, names[0], entity_id=req.entity_id, name=names[0])
     if result is None:
@@ -337,7 +340,7 @@ def onoff_loader(req: "metrics_catalog.EntityRequest") -> list:
 def clutch_loader(req: "metrics_catalog.EntityRequest") -> list:
     team_code = str(req.entity_id).upper()
     games = repository.team_pbp_games(team_code, req.comp_id)
-    games = _filter_pbp_games(games, req.ctx)
+    games = _filter_pbp_games(games, req.ctx, team_code)
     games = identity.canonicalize_pbp_games(games, team_code)
     if not games:
         return []
@@ -363,7 +366,7 @@ def _teams_with_pbp(comp_id):
 def _pbp_games_for(team_code, comp_id, ctx):
     """Partidos del equipo con pbp, filtrados por contexto (`last`) y canonicalizados (C-08)."""
     games = repository.team_pbp_games(team_code, comp_id)
-    games = _filter_pbp_games(games, ctx)
+    games = _filter_pbp_games(games, ctx, team_code)
     return identity.canonicalize_pbp_games(games, team_code)
 
 
@@ -412,6 +415,36 @@ metrics_catalog.register_entity("player", player_loader, game_loader=player_game
 metrics_catalog.register_entity("lineup", lineup_loader)
 metrics_catalog.register_entity("onoff", onoff_loader)
 metrics_catalog.register_entity("clutch", clutch_loader, game_loader=clutch.clutch_game_bundles)
+
+
+# ── Tramos del partido (F-04): id `<equipo>:<tramo>` ─────────────────────────
+def _parse_period_id(entity_id):
+    import splits
+    team_code, _, window = str(entity_id).partition(":")
+    if window not in splits.WINDOWS:
+        raise metrics_catalog.MetricsError("Tramo inválido. Usá q1, q2, q3, q4, h1, h2, pr o last5", 400, "parametro_invalido")
+    return team_code.upper(), window
+
+
+def period_loader(req):
+    import splits
+    team_code, window = _parse_period_id(req.entity_id)
+    b = splits.team_event_bundle(team_code, req.comp_id, req.ctx, window)
+    return [b] if b is not None else []
+
+
+def all_period_bundles(comp_id, ctx, variant=None):
+    """Población del tipo `period`: todos los equipos EN EL MISMO TRAMO. `variant` es el tramo
+    (`metrics_catalog._population_variant` lo toma del bundle consultado); sin tramo no hay
+    población comparable, porque cada ventana tiene su propio universo."""
+    import splits
+    if variant not in splits.WINDOWS:
+        return []
+    ctx = dataclasses.replace(ctx, on=(), off=(), quarters=())   # el tramo manda; con/sin jugador no tiene población
+    return splits.all_team_event_bundles(comp_id, ctx, variant)
+
+
+metrics_catalog.register_entity("period", period_loader, enumerator=all_period_bundles)
 
 # Enumeradores de los tipos sin enumerador propio en T-05 (T-01 plan §4.2).
 metrics_catalog.set_enumerator("lineup", all_lineup_bundles)

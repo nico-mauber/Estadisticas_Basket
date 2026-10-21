@@ -18,7 +18,7 @@ from types import SimpleNamespace
 import identity
 import repository
 import stats_engine
-from context import Context, filter_games, context_echo, context_key, without_last
+from context import Context, filter_games, context_echo, context_key, without_last, rest_excluded
 from database import db, Player
 from stats_engine import (aggregate_games, calc_team_stats, calc_player_stats, league_averages,
                           null_reasons, played, resolve_identity, strip_private,
@@ -203,6 +203,7 @@ _CRITERIA = {
     "lineup": "quintetos con ≥ {min} posesiones",
     "onoff": "jugadores con ON/OFF suficiente",
     "clutch": "equipos con cierres suficientes",
+    "period": "equipos con muestra suficiente en el tramo",
 }
 
 
@@ -229,7 +230,7 @@ def population(entity_type: str, comp_id: int | None, ctx: Context, *,
     entidad con sus últimos N, RF-13), pero el universo es la competencia completa.
 
     Cacheada entre peticiones por versión de datos y de configuración (`cache.memo`)."""
-    if entity_type not in ("team", "player", "lineup", "onoff", "clutch"):
+    if entity_type not in ("team", "player", "lineup", "onoff", "clutch", "period"):
         raise ValueError(f"entity_type inválido: {entity_type}")
 
     key = (comp_id, context_key(ctx), apply_thresholds, variant)
@@ -266,7 +267,7 @@ def _build_population(entity_type, comp_id, ctx, apply_thresholds, variant) -> P
         return _pop([], None)
 
     prior = None
-    if entity_type in sample_mod.REGRESSED_TYPES:
+    if entity_type in sample_mod.REGRESSED_TYPES or any(b.entity_type in sample_mod.REGRESSED_TYPES for b in bundles):
         prior = sample_mod.league_prior(comp_id, ctx)
 
     members = []
@@ -276,7 +277,7 @@ def _build_population(entity_type, comp_id, ctx, apply_thresholds, variant) -> P
             values = stats_engine.apply_base(values, b, "partido")
         except ValueError:
             pass
-        if entity_type in sample_mod.REGRESSED_TYPES:
+        if entity_type in sample_mod.REGRESSED_TYPES or b.entity_type in sample_mod.REGRESSED_TYPES:
             values = sample_mod.adjust_values(values, b, prior)
 
         # Valor de ranking por clave: `adj.value` donde hay ajuste (RF-16), si no el valor por partido.
@@ -303,7 +304,8 @@ def _build_population(entity_type, comp_id, ctx, apply_thresholds, variant) -> P
                 sample_bundles = [b, off_b] if off_b is not None else [b, b]
             else:
                 sample_bundles = [b]
-            badge = sample_mod.sample_for(entity_type, sample_bundles, team_poss=team_poss)
+            stype = "split" if b.entity_type == "split" else entity_type   # equipo con filtros de evento
+            badge = sample_mod.sample_for(stype, sample_bundles, team_poss=team_poss)
 
         in_pop = True
         if apply_thresholds:
@@ -569,7 +571,8 @@ def team_profile(team_code: str, ctx: Context) -> dict | None:
         "team_name": own_all[-1]["team_name"],           # el del partido más reciente (F-11)
         "games": len(per_game),
         "context": context_echo(ctx, games_used=len(per_game), games_total=games_total,
-                                games_excluded={}, ignored=[], competition_label=comp_label),
+                                games_excluded=rest_excluded(own, ctx, team_code), ignored=[],
+                                competition_label=comp_label),
         "competitions": _comp_options(own, labels),
         "record": record,
         "averages": agg["averages"],
@@ -638,7 +641,8 @@ def player_profile(player_id: int, ctx: Context) -> dict | None:
         "games": len(jugados),                         # partidos JUGADOS (excluye DNP) — Feature 12 RF-7
         "context": context_echo(ctx, games_used=len(jugados),
                                 games_total=sum(1 for r in scoped if played(r["minutes"])),
-                                games_excluded={"dnp": n_dnp} if n_dnp else {}, ignored=[],
+                                games_excluded={**rest_excluded(own, ctx, team_code),
+                                                **({"dnp": n_dnp} if n_dnp else {})}, ignored=[],
                                 competition_label=comp_label),
         "competitions": _comp_options(own, labels, lambda r: played(r["minutes"])),
         "averages": agg["averages"],

@@ -120,6 +120,13 @@ Ficha persistente de cada jugador **en un equipo** (C-08). Es la identidad: toda
 | `photo_url` | TEXT | Foto de FIBA (`photoT`/`photoS`); `NULL` si no la publica |
 | `merged_into` | INTEGER FK → players | Ficha que absorbió a esta (fusión manual). `NULL` = ficha vigente |
 | `created_at` | TEXT | ISO-8601 |
+| `height_cm` | INTEGER | Altura en cm, cargada a mano (F-16). `NULL` = no registrado; rango 140–240 |
+| `birth_year` | INTEGER | Año de nacimiento, cargado a mano. `NULL` = no registrado; rango 1940–2020 |
+| `nationality` | TEXT | Nacionalidad, cargada a mano. `NULL` = no registrado |
+| `profile_notes` | TEXT | Notas de plantel, cargadas a mano. `NULL` = no registrado |
+| `profile_updated_at` / `profile_updated_by` | TEXT | Cuándo y quién cargó por última vez los datos manuales (F-16) |
+
+> **Datos de ficha (F-16).** `height_cm`, `birth_year`, `nationality` y `profile_notes` no los publica FIBA: los carga un administrador con `PUT /api/player-profile/<id>`. Pertenecen a la **ficha**, no a un partido, así que sobreviven a reimportaciones y reprocesos, y no se exportan en las tablas de T-06.
 
 **Restricción única:** `(team_code, norm_key)`. La competencia **no** forma parte de la clave: es un filtro.
 

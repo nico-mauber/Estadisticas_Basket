@@ -21,7 +21,9 @@ function _nameWithExt(meta, ext) {
   return `${base}.${ext}`;
 }
 
-export function exportMenu(el, { getData, getNode, formats } = {}) {
+export function exportMenu(el, { getData, getNode, formats, render, pngWidth } = {}) {
+  // `render.png` / `render.pdf`: nodo ya completo (con su propia cabecera) para informes; reemplaza
+  // el clon de la tabla visible + cabecera de metadatos.
   const fmts = formats || DEFAULT_FORMATS;
   loadCsvSeparator();   // precalienta el separador para el CSV offline
 
@@ -48,22 +50,22 @@ export function exportMenu(el, { getData, getNode, formats } = {}) {
     item.addEventListener("click", async () => {
       const fmt = item.dataset.fmt;
       closeMenu();
-      await _run(fmt, btn, getData, getNode);
+      await _run(fmt, btn, getData, getNode, render, pngWidth);
     });
   });
 
   return { destroy() { el.innerHTML = ""; el.classList.remove("xm-wrap", "xm-open"); } };
 }
 
-async function _run(fmt, btn, getData, getNode) {
+async function _run(fmt, btn, getData, getNode, render, pngWidth) {
   const prevLabel = btn.textContent;
   btn.disabled = true;
   btn.textContent = "Generando archivo…";
   try {
     if (fmt === "csv")  await _csv(getData);
     if (fmt === "xlsx") await _xlsx(getData);
-    if (fmt === "png")  await _png(getData, getNode);
-    if (fmt === "pdf")  await _pdf(getData, getNode);
+    if (fmt === "png")  await (render?.png ? _pngNode(getData, render.png, pngWidth) : _png(getData, getNode));
+    if (fmt === "pdf")  await (render?.pdf ? printNode(render.pdf(), { pageSize: "A4" }) : _pdf(getData, getNode));
   } catch (e) {
     _toast(`No se pudo exportar: ${e.message || e}`, "err");
   } finally {
@@ -104,6 +106,25 @@ async function _xlsx(getData) {
     } else {
       _toast(`No se pudo exportar: ${e.message || e}`, "err");
     }
+  }
+}
+
+async function _pngNode(getData, build, width = 1200) {
+  const data = getData();
+  const stage = document.createElement("div");
+  stage.style.cssText = "position:fixed;left:-99999px;top:0";
+  const node = build();
+  stage.appendChild(node);
+  document.body.appendChild(stage);
+  try {
+    const blob = await toPNG(node, { width });
+    const name = _nameWithExt(data.meta, "png");
+    downloadBlob(blob, name);
+    _toast(`Archivo generado: ${name}`);
+  } catch {
+    _toast("No se pudo generar la imagen en este navegador. Probá con PDF.", "err");
+  } finally {
+    stage.remove();
   }
 }
 
