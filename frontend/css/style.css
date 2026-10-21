@@ -1553,3 +1553,4 @@ tbody tr.fuera-poblacion { opacity: .6; }
 .cmp-win { font-weight: 700; color: var(--above); }
 .cmp-pct { display: inline-block; padding: 0 5px; border-radius: 4px; font-size: 10px; color: #fff; }
 @media (max-width: 479px) { .cmp-heads { grid-template-columns: 1fr; } }
+.dt-ignored { margin: 8px 0 0; font-size: 12px; }

@@ -18,7 +18,7 @@ los tramos de `lineups.build_segments`.
 """
 import config
 import repository
-from clutch import _agg, _SUM_KEYS
+from clutch import _agg, _SUM_KEYS, OVERTIME_TYPES
 from lineups import PERIOD_LEN, game_starters
 from stats_engine import StatBundle
 
@@ -40,7 +40,7 @@ def window_label(window: str) -> str:
 
 
 def _bucket(ev) -> str:
-    return "pr" if ev.get("period_type") == "OVERTIME" else str(ev.get("period"))
+    return "pr" if ev.get("period_type") in OVERTIME_TYPES else str(ev.get("period"))
 
 
 def event_slices(events, team_code, starters, close_margin, late_secs=None) -> list[dict]:
@@ -48,7 +48,8 @@ def event_slices(events, team_code, starters, close_margin, late_secs=None) -> l
 
     `starters`: 5 titulares del equipo (o None: sin quinteto, `on_court` queda en None).
     `late_secs`: si se da, separa los últimos `late_secs` del último período regular (y toda prórroga)."""
-    regular = [e.get("period") for e in events if e.get("period_type") != "OVERTIME" and e.get("period")]
+    regular = [e.get("period") for e in events
+               if e.get("period_type") not in OVERTIME_TYPES and e.get("period")]
     last_reg = max(regular) if regular else 4
     on_court = set(starters) if starters else None
     state = {"margin": 0, "floor": None, "period": None, "ptype": None}
@@ -58,13 +59,18 @@ def event_slices(events, team_code, starters, close_margin, late_secs=None) -> l
     def late_now():
         if late_secs is None:
             return False
-        if state["ptype"] == "OVERTIME":
+        if state["ptype"] in OVERTIME_TYPES:
             return True
         return state["period"] == last_reg and state["floor"] is not None and state["floor"] <= late_secs
 
+    # Quinteto CONFIRMADO: `on_court` puede estar a medio cambiar (varios `substitution` seguidos en la
+    # misma detención), así que las rebanadas se arman con el último quinteto completo, igual que el
+    # `cur_on` de `lineups.build_segments`.
+    confirmed = [frozenset(on_court) if on_court is not None else None]
+
     def key(bucket):
         score = "ajustado" if state["margin"] <= close_margin else "paliza"
-        return (bucket, score, late_now(), frozenset(on_court) if on_court is not None else None)
+        return (bucket, score, late_now(), confirmed[0])
 
     def get(k):
         if k not in slices:
@@ -80,7 +86,7 @@ def event_slices(events, team_code, starters, close_margin, late_secs=None) -> l
         floor = state["floor"]
         if to >= floor:
             return
-        if (late_secs is not None and state["ptype"] != "OVERTIME" and state["period"] == last_reg
+        if (late_secs is not None and state["ptype"] not in OVERTIME_TYPES and state["period"] == last_reg
                 and floor > late_secs >= to):
             get(cur)["seconds"] += floor - late_secs
             state["floor"] = late_secs
@@ -107,13 +113,20 @@ def event_slices(events, team_code, starters, close_margin, late_secs=None) -> l
                     on_court.discard(player)
                 elif sub == "in":
                     on_court.add(player)
-                cur = key(_bucket(ev))
+            # El cambio queda PENDIENTE hasta el próximo evento de juego: varios cambios en la misma
+            # detención se fusionan en uno y no se arman quintetos parciales de 4 o 6 (igual que
+            # `lineups.build_segments`, que es la reconstrucción canónica del resto de las features).
             continue
 
         get(cur)["events"].append(ev)                   # el evento cuenta con el estado ANTERIOR
         s1, s2 = ev.get("s1"), ev.get("s2")
         if s1 is not None and s2 is not None:
             state["margin"] = abs(s1 - s2)
+        # Recién acá se confirma el quinteto y el marcador nuevo: el siguiente evento de juego ya corre
+        # con ese estado. Un quinteto incompleto (cambios a medio aplicar dentro de la misma detención)
+        # NO se confirma: se espera a que vuelva a haber cinco, igual que `lineups.build_segments`.
+        if on_court is not None and (len(on_court) == 5 or confirmed[0] is None):
+            confirmed[0] = frozenset(on_court)
         cur = key(_bucket(ev))
 
     if state["floor"] is not None and cur is not None:
@@ -234,7 +247,16 @@ def _per_game_row(g, own_box, opp_box, secs, team_code):
 def team_event_bundle(team_code, comp_id, ctx, window=None):
     """`StatBundle` del equipo agregando SOLO los eventos que cumplen cuarto / marcador / con-sin jugador (o el
     tramo `window` de F-04) sobre los partidos con pbp que pasan los filtros de partido. `None` si ningún partido
-    con pbp aporta eventos a la selección."""
+    con pbp aporta eventos a la selección.
+
+    Memoizado por petición: la población de un tramo pide un bundle por equipo (14 × 8 ventanas en una
+    sola respuesta de `/api/periods`) y cada uno recorre el play-by-play completo del equipo."""
+    import context as context_mod
+    key = ("split_bundle", team_code, comp_id, context_mod.context_key(ctx), window)
+    return repository.memo(key, lambda: _team_event_bundle(team_code, comp_id, ctx, window))
+
+
+def _team_event_bundle(team_code, comp_id, ctx, window=None):
     games, all_rows, sin_pbp = _selection(team_code, comp_id, ctx)
     close_margin = config.get("context.close_margin")
     on_names = _selected_names(team_code, ctx.on)

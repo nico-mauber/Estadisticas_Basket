@@ -16,7 +16,7 @@ import { renderLiveView, destroyLiveView } from "./components/live-view.js";
 import { renderPrepare } from "./components/prepare-report.js";
 import { initBase, getBase, setBase } from "./core/base.js";
 import { initContext, contextParams, clearContext, clearPlayerFilters, dropInvalid, activeCount } from "./core/context.js";
-import { mountContextBar, contextNote } from "./components/context-bar.js";
+import { mountContextBar, contextNote, invalidateContextOptions } from "./components/context-bar.js";
 import { renderPeriodBlock, destroyPeriodBlock } from "./components/period-block.js";
 import { renderLineupsBlock } from "./components/lineups-block.js";
 import { renderComparePlayers, comparePlayersFromUrl } from "./components/compare-players.js";
@@ -504,6 +504,7 @@ async function _runReprocess(target, onProgress) {
     let offset = 0;
     while (offset != null) {
       const r = await api.reprocess({ ...body, offset });
+      invalidateContextOptions();
       processed += r.processed.length; failed = failed.concat(r.failed); total = r.total;
       offset = r.next_offset;
       onProgress?.(processed + failed.length, total);
@@ -625,6 +626,7 @@ async function _renderImportTab(el) {
     btn.innerHTML = '<span class="spinner"></span>Importando...';
     try {
       const res = await api.importGame(url);
+      invalidateContextOptions();   // el import puede traer equipos o jugadores nuevos
       const teamNames = (res.teams || []).map(t => t.name).join(" vs ");
       toast(`Partido importado: ${teamNames}${res.competition_label ? ` · ${res.competition_label}` : ""}`);
       importPage = 0;
@@ -650,6 +652,7 @@ async function _renderImportTab(el) {
     seedBtn.innerHTML = '<span class="spinner"></span>Importando partidos...';
     try {
       const res = await api.seed();
+      invalidateContextOptions();
       toast(`Seed: ${res.imported} importados, ${res.failed} fallidos`, res.failed ? "err" : "ok");
       importPage = 0;
       refresh();
@@ -1276,6 +1279,22 @@ async function _loadClutchStandard(teamCode, margin, windowSecs) {
   }
 }
 
+// Carga que tolera filtros inválidos en la dirección (T-03 RF-17): cada 400 `contexto_invalido`
+// limpia EL parámetro que el backend nombró y reintenta. Una URL compartida puede traer varios
+// filtros vencidos (rival que ya no está en la competencia + jugador de otro equipo), así que se
+// reintenta mientras quede algo por limpiar, no una sola vez.
+async function _loadDroppingInvalid(load) {
+  for (let i = 0; i < 5; i++) {
+    try {
+      return await load();
+    } catch (e) {
+      if (!dropInvalid(e)) throw e;
+      toast(e.message, "err");
+    }
+  }
+  return load();
+}
+
 // ── Team section — competencia y últimos N resueltos en el servidor (C-02) ─────
 let _teamData  = null;
 let _teamLastN = 0;      // 0 = todos los partidos de la competencia
@@ -1608,14 +1627,7 @@ async function renderTeam(teamCode) {
   const req = ++_teamReq;
 
   try {
-    let data;
-    try {
-      data = await api.team(teamCode, contextParams());
-    } catch (e) {
-      if (!dropInvalid(e)) throw e;
-      toast(e.message, "err");   // filtro inválido en la dirección: se limpia y se reintenta (T-03 RF-17)
-      data = await api.team(teamCode, contextParams());
-    }
+    const data = await _loadDroppingInvalid(() => api.team(teamCode, contextParams()));
     if (req !== _teamReq) return;
     _applyTeamData(main, data);
 
@@ -2018,14 +2030,7 @@ async function renderPlayer(teamCode, playerName, playerId = null) {
 
   try {
     const load = () => playerId != null ? api.playerById(playerId, contextParams()) : api.player(teamCode, playerName, contextParams());
-    let data;
-    try {
-      data = await load();
-    } catch (e) {
-      if (!dropInvalid(e)) throw e;
-      toast(e.message, "err");
-      data = await load();
-    }
+    const data = await _loadDroppingInvalid(load);
     if (req !== _playerReq) return;
     _applyPlayerData(main, data);
   } catch (e) {
