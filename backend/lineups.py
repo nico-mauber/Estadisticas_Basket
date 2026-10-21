@@ -9,11 +9,14 @@ sdd/specs/04-on-off/spec.md RF-1. Semántica null de tasas: Feature 08.
 """
 import itertools
 
+from clutch import OVERTIME_TYPES
 from stats_engine import _safe_div, StatBundle
 
 # Segundos por período: 10' por cuarto, 5' por prórroga. FIBA manda la prórroga como
 # periodType "OVERTIME" (con `period` reiniciado en 1), no "OT" (F-11 RF-15).
-PERIOD_LEN = {"REGULAR": 600, "OVERTIME": 300}
+# `OT` es el valor legado de FIBA para la prórroga (ver clutch.OVERTIME_TYPES): sin él, un partido
+# importado con la grafía vieja recibiría 600 s en un período de 300 s.
+PERIOD_LEN = {"REGULAR": 600, "OVERTIME": 300, "OT": 300}
 
 # `sub_type` de faltas que NO son personales de un jugador en cancha (faltas de banco o de
 # cuerpo técnico): no suman a `pf` (T-05 plan §4.6).
@@ -730,7 +733,7 @@ def clutch_lineup_bundles(games, team_code, *, margin=None, window_secs=None, mi
     """
     import clutch
     import config
-    import identity
+    import repository
 
     margin = config.get("clutch.margin") if margin is None else margin
     window_secs = config.get("clutch.window_secs") if window_secs is None else window_secs
@@ -738,6 +741,7 @@ def clutch_lineup_bundles(games, team_code, *, margin=None, window_secs=None, mi
 
     sel = clutch._qualified_games(games, team_code, margin, window_secs)
     by_game = {q["game_id"]: q for q in sel["qualified"]}
+    score_rows = repository.team_game_rows(None)   # marcadores finales, memoizado: una sola lectura
 
     acc: dict[tuple, dict] = {}
     for g in games:
@@ -747,8 +751,7 @@ def clutch_lineup_bundles(games, team_code, *, margin=None, window_secs=None, mi
         starters = game_starters(g["player_rows"], team_code)
         if starters is None:
             continue
-        # Resultado del partido: el marcador final está en el último evento del pbp.
-        won = _game_won(g["game_id"], team_code)
+        won = _game_won(g["game_id"], team_code, score_rows)
         clutch_nums = {e.get("action_number") for e in q["clutch_evs"]}
 
         for seg in build_segments(g["events"], team_code, starters):
@@ -768,10 +771,7 @@ def clutch_lineup_bundles(games, team_code, *, margin=None, window_secs=None, mi
             })
             entry["tb"].append(tb)
             entry["ob"].append(ob)
-            # Segundos del tramo: solo la parte del segmento dentro del cierre no es medible por
-            # evento, así que se reparte proporcionalmente a los eventos del segmento que son de cierre.
-            total_evs = len(seg["events"]) or 1
-            entry["seconds"] += seg["seconds"] * len(evs) / total_evs
+            entry["seconds"] += _clutch_seconds(seg, window_secs)
             gstat = entry["games"].setdefault(g["game_id"], {"poss": 0.0, "won": won})
             gstat["poss"] += _pos(tb)
             for pid, name in pairs:
@@ -808,16 +808,57 @@ def clutch_lineup_bundles(games, team_code, *, margin=None, window_secs=None, mi
     return out
 
 
-def _game_won(game_id, team_code):
-    """`True`/`False` si el equipo ganó ese partido, leído del marcador final de `games`
-    (`home_score`/`away_score`); `None` si falta el marcador o terminó empatado."""
-    from database import Game
-    g = Game.query.filter_by(game_id=game_id).first()
-    if g is None or g.home_score is None or g.away_score is None:
+def _clutch_seconds(seg, window_secs) -> float:
+    """Segundos del tramo que caen DENTRO de la ventana de cierre, medidos por reloj.
+
+    Un tramo de quinteto puede empezar antes del cierre (p. ej. 7:30 → 4:00 del último cuarto): solo
+    cuentan los segundos desde que el reloj baja de `window_secs`. Las prórrogas son cierre completo.
+    Se mide con el reloj de los eventos del tramo, no repartiendo por cantidad de eventos: una
+    detención larga tiene muchos eventos y poco reloj, y un contraataque al revés.
+    """
+    total = 0.0
+    for period, evs in _by_period(seg["events"]):
+        clocks = [e.get("clock_secs") for e in evs if e.get("clock_secs") is not None]
+        if not clocks:
+            continue
+        hi, lo = max(clocks), min(clocks)
+        if period in OVERTIME_TYPES:
+            total += hi - lo                      # toda la prórroga es cierre
+        else:
+            total += max(0.0, min(hi, window_secs) - lo)
+    return total
+
+
+def _by_period(events):
+    """Agrupa los eventos de un tramo por (período, tipo), en orden de aparición."""
+    out, cur, key = [], [], None
+    for ev in events:
+        k = (ev.get("period"), ev.get("period_type"))
+        if k != key:
+            if cur:
+                out.append((key[1], cur))
+            cur, key = [], k
+        cur.append(ev)
+    if cur and key:
+        out.append((key[1], cur))
+    return out
+
+
+def _game_won(game_id, team_code, rows=None):
+    """`True`/`False` si el equipo ganó ese partido; `None` si falta el marcador o hubo empate.
+
+    Lee `repository.team_game_rows` (memoizado por petición) en vez de consultar `games` por partido:
+    el llamador pasa `rows` una sola vez para todo el bucle."""
+    import repository
+    if rows is None:
+        rows = repository.team_game_rows(None)
+    row = rows.get((game_id, team_code))
+    if row is None:
         return None
-    own, rival = ((g.home_score, g.away_score) if g.home_code == team_code
-                  else (g.away_score, g.home_score))
-    return None if own == rival else own > rival
+    own, rival = row.get("pts"), row.get("opp_pts")
+    if own is None or rival is None or own == rival:
+        return None
+    return own > rival
 
 
 def _ids_for(team_code, names):

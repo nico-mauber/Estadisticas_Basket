@@ -7,6 +7,8 @@ import { VENUE_OPTIONS, REST_OPTIONS, QUARTER_OPTIONS, SCORE_OPTIONS, EVENT_KEYS
 
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
+// Equipos y jugadores cambian al importar, reprocesar o fusionar fichas: las vistas que hacen eso
+// llaman a `invalidateContextOptions()` para que la barra vuelva a pedirlos.
 const _teamsByComp = new Map();   // competencia → [{code, name}]
 
 async function _teams(competition) {
@@ -32,6 +34,11 @@ async function _players(teamCode) {
     return null;
   }
   return _playersByTeam.get(teamCode);
+}
+
+export function invalidateContextOptions() {
+  _teamsByComp.clear();
+  _playersByTeam.clear();
 }
 
 const _csv = v => (v ? v.split(",") : []);

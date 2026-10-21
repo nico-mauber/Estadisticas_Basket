@@ -31,7 +31,8 @@ const TABLE_BLOCKS = [
   { label: "Avanzado", keys: ["oer", "uso_pct", "ast_to", "or_pct", "dr_pct", "to_pct", "plus_minus"] },
 ];
 
-let _token = 0;
+let _token = 0;      // montaje del panel (descarta renders viejos)
+let _runToken = 0;   // comparación en curso (descarta respuestas viejas); contador aparte del montaje
 let _players = null;   // catálogo de jugadores para los selectores
 
 async function _allPlayers() {
@@ -132,7 +133,7 @@ export async function renderComparePlayers(el, opts = {}) {
     if (a === b) return toastLike(result, "Elegí dos jugadores distintos.");
     _syncUrl(a, b);
     result.innerHTML = '<div class="card"><p class="empty"><span class="spinner"></span>Comparando…</p></div>';
-    const req = ++_token;
+    const req = ++_runToken;
     let A, B;
     try {
       [A, B] = await Promise.all([
@@ -140,11 +141,11 @@ export async function renderComparePlayers(el, opts = {}) {
         api.metrics("player", { id: b, base }),
       ]);
     } catch (e) {
-      if (req !== _token) return;
+      if (req !== _runToken) return;
       result.innerHTML = `<div class="card"><p class="empty below-avg">${esc(e.message || "No se pudo comparar")}</p></div>`;
       return;
     }
-    if (req !== _token) return;
+    if (req !== _runToken) return;
 
     const nameA = players.find(p => String(p.id) === String(a))?.name;
     const nameB = players.find(p => String(p.id) === String(b))?.name;

@@ -113,6 +113,7 @@ export function clearPlayerFilters() {
   delete next.off;
   _state = next;
   _persist();
+  _listeners.forEach(fn => fn(getContext()));   // igual que setContext/clearContext: las barras montadas se enteran
 }
 
 export function onContextChange(fn) {

@@ -434,7 +434,12 @@ def period_loader(req):
 
 
 def all_period_bundles(comp_id, ctx, variant=None):
+    """Población del tipo `period`: todos los equipos EN EL MISMO TRAMO. `variant` es el tramo
+    (`metrics_catalog._population_variant` lo toma del bundle consultado); sin tramo no hay
+    población comparable, porque cada ventana tiene su propio universo."""
     import splits
+    if variant not in splits.WINDOWS:
+        return []
     ctx = dataclasses.replace(ctx, on=(), off=(), quarters=())   # el tramo manda; con/sin jugador no tiene población
     return splits.all_team_event_bundles(comp_id, ctx, variant)
 

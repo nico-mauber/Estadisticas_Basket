@@ -2,6 +2,7 @@
 // Se monta dentro de Datos → Calidad. La lógica de identidad vive en el backend (identity.py):
 // acá solo se muestran los candidatos y se llama a POST /api/identity/merge.
 import { api } from "../api.js";
+import { invalidateContextOptions } from "./context-bar.js";
 
 const esc = s => String(s ?? "").replace(/[&<>"']/g,
   c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -79,6 +80,7 @@ export function openMergeDialog(pair, { onMerged = () => {}, toast = () => {} } 
     btn.textContent = "Unificando fichas…";
     try {
       const res = await api.mergePlayers(target, source);
+      invalidateContextOptions();   // la fusión cambia los player_id de los filtros con/sin jugador
       backdrop.remove();
       toast(`Fichas unificadas: ${res.player.display_name} ahora suma ${res.player.games} partidos`);
       onMerged(res);

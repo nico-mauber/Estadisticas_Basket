@@ -557,5 +557,28 @@ export async function mountTable(el, loader, opts = {}) {
     dtEmpty(el, { trimmed });
     return null;
   }
-  return createDataTable(el, { ...opts, payload });
+  const dt = createDataTable(el, { ...opts, payload });
+  _noteIgnored(el, payload);
+  return dt;
+}
+
+// Etiquetas de los filtros que el backend informó como no aplicados en ESTA tabla (T-03 `context.ignored`).
+const _IGNORED_LABELS = {
+  quarter: "cuarto", score: "marcador", on: "con jugador", off: "sin jugador",
+  venue: "sede", opponent: "rival", rest: "descanso", last: "período",
+};
+
+// Aviso al pie de la tabla: qué filtros activos NO se aplicaron acá. Sin él, la tabla muestra
+// números de partido completo debajo de una barra que dice "4.º cuarto" (T-03 RF-16).
+function _noteIgnored(el, payload) {
+  const ignored = (payload?.context?.ignored || [])
+    .filter(i => i.reason === "no_aplica" || i.reason === "no_implementado");
+  if (!ignored.length) return;
+  const names = [...new Set(ignored.map(i => _IGNORED_LABELS[i.param] || i.param))];
+  const note = document.createElement("p");
+  note.className = "td-muted dt-ignored";
+  note.textContent = names.length === 1
+    ? `Esta tabla no aplica el filtro de ${names[0]}.`
+    : `Esta tabla no aplica los filtros de ${names.slice(0, -1).join(", ")} y ${names[names.length - 1]}.`;
+  el.appendChild(note);
 }

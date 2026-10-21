@@ -8,6 +8,7 @@ entidad (`register_entity`, Grupo C: bundles.py/lineups.py/clutch.py).
 
 Plan §4.1/§4.2/§4.5/§4.8.
 """
+import dataclasses
 from dataclasses import dataclass, field
 from typing import Callable
 
@@ -444,7 +445,6 @@ def build_payload(entity_type: str, args) -> dict:
 
     if entity_type == "period" and ctx.quarters:
         # el tramo elegido manda: el filtro `quarter` de la barra no se combina con él (F-04 RF-9)
-        import dataclasses
         ctx = dataclasses.replace(ctx, quarters=(), ignored=ctx.ignored + (("quarter", "no_aplica"),))
 
     params = {}
@@ -461,10 +461,28 @@ def build_payload(entity_type: str, args) -> dict:
 
     bundles = reg.loader(req)
     if not bundles:
-        if (ctx.last or ctx.venue or ctx.opponent or ctx.rest or context_mod.has_event_filters(ctx)
-                or entity_type == "period"):
-            # La entidad existe pero ningún partido cumple los filtros (T-03 RF-18): estado vacío, no "no existe".
-            raise MetricsError("No hay partidos que cumplan estos filtros.", 404, "sin_partidos")
+        # Sin resultados puede ser por los filtros o porque la entidad no existe. Se distingue
+        # rehaciendo la consulta SIN filtros: si tampoco así aparece, no existe (un código de equipo
+        # mal escrito no debe reportarse como "no hay partidos que cumplan estos filtros").
+        filtered = (ctx.last or ctx.venue or ctx.opponent or ctx.rest
+                    or context_mod.has_event_filters(ctx) or entity_type == "period")
+        if filtered:
+            bare_ctx = dataclasses.replace(
+                ctx, last=None, venue=None, opponent=None, rest=None,
+                quarters=(), score=None, on=(), off=())
+            bare_type = "team" if entity_type == "period" else entity_type
+            bare_id = str(entity_id).split(":", 1)[0] if entity_type == "period" else entity_id
+            bare_reg = _REGISTRY.get(bare_type)
+            exists = False
+            if bare_reg is not None:
+                try:
+                    exists = bool(bare_reg.loader(EntityRequest(
+                        entity_type=bare_type, entity_id=bare_id, comp_id=bare_ctx.competition_id,
+                        ctx=bare_ctx, base=base, params=params)))
+                except Exception:
+                    exists = True      # ante la duda, se informa como selección vacía (no se afirma que no existe)
+            if exists:
+                raise MetricsError("No hay partidos que cumplan estos filtros.", 404, "sin_partidos")
         raise MetricsError("Entidad no encontrada", 404, "no_encontrado")
 
     import sample as sample_mod
@@ -494,6 +512,17 @@ def build_payload(entity_type: str, args) -> dict:
 
     if entity_type == "period":
         echo["level"] = "evento"   # el tramo es un filtro de evento aunque no haya filtros en la barra
+        # Resumen del tramo (récord, puntos, desglose por partido) para que el llamador no tenga que
+        # volver a recorrer el pbp: el bundle ya está calculado acá.
+        import splits
+        meta0 = b0.meta or {}
+        per_game = meta0.get("per_game", [])
+        pts, opp_pts = b0.own.get("pts"), (b0.opp or {}).get("pts")
+        payload_summary = {
+            "record": splits.record(per_game), "games_with_window": len(per_game),
+            "pts": pts, "pts_against": opp_pts,
+            "point_diff": None if pts is None or opp_pts is None else pts - opp_pts,
+        }
 
     team_poss = None
     if entity_type in ("lineup", "pair", "onoff", "split", "clutch"):
@@ -509,6 +538,9 @@ def build_payload(entity_type: str, args) -> dict:
         badge = None
 
     payload = standard_payload(b0, values0, context_echo=echo, base=base, sample=badge, fichas=None)
+    if entity_type == "period":
+        payload["summary"] = payload_summary
+        payload["games"] = (b0.meta or {}).get("per_game", [])
 
     if entity_type == "onoff":
         if len(bundles) < 2:
@@ -596,7 +628,10 @@ def _attach_fichas(payload, entity_type, b0, ctx, base, *, prior_fn) -> None:
 
 
 def _population_variant(entity_type, bundle):
-    """`variant` de la población: para `lineup`, el nº de jugadores de la combinación; si no, None."""
+    """`variant` de la población: para `lineup`, el nº de jugadores de la combinación; para `period`,
+    el tramo (cada ventana tiene su propia población); si no, None."""
+    if entity_type == "period":
+        return (bundle.meta or {}).get("window")
     if entity_type == "lineup":
         pids = (bundle.meta or {}).get("player_ids")
         if pids:
