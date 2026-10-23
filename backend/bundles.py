@@ -252,6 +252,14 @@ def _player_bundle_from_games(player_id, comp_id, ctx):
     n_dnp = len(scoped) - games_total
     bundle.meta["games_excluded"] = {**context.rest_excluded(all_rows, ctx, card["team_code"]),
                                      **({"dnp": n_dnp} if n_dnp else {})}
+
+    # A-12: creación de juego. El denominador de la cuota son las asistencias del EQUIPO en los
+    # partidos que el jugador DISPUTÓ (los DNP quedan fuera, RF-1).
+    import assists
+    played_ids = [info["game_id"] for info, _ in per_game if info.get("game_id")]
+    name = card["display_name"]
+    bundle.ast_links = assists.player_assist_links(name, card["team_code"], played_ids)
+    bundle.team_ast = assists.team_assists(card["team_code"], played_ids)
     return bundle
 
 

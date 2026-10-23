@@ -53,6 +53,8 @@ export const NULL_REASON_LABELS = {
   sin_pbp:       "Sin play-by-play en los partidos de la selección",
   no_aplica:     "La métrica no aplica a esta entidad",
   no_disponible: "Todavía no disponible: se habilita con una versión posterior",
+  requiere_posesiones: "Se calcula con el motor de posesiones (en desarrollo)",
+  sin_asistencias: "Sin asistencias en la selección",
 };
 
 // "—" neutro con la razón en el title (se ve al pasar el cursor o con tap largo).

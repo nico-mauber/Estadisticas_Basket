@@ -731,13 +731,15 @@ def league_averages(member_values: list, keys: list) -> dict:
 
 
 # ── T-05: conjunto estándar de métricas (Grupo B) ────────────────────────────
-# `compute_standard` es el único lugar con las 86 fórmulas del catálogo (metrics_catalog.py,
+# `compute_standard` es el único lugar con las 89 fórmulas del catálogo (metrics_catalog.py,
 # Grupo C, solo metadatos). `StatBundle` es el contrato de entrada: conteos crudos ya sumados
 # de una selección de partidos de una entidad (equipo, jugador, quinteto, ON/OFF, cierre).
 
 NULL_REASON_CODES = (
     "sin_intentos", "sin_perdidas", "sin_pbp", "no_registrado",
     "no_aplica", "sin_datos", "no_disponible", "dnp",
+    # A-01 / A-12: el dato existe pero lo aporta un motor que todavía no está, o no hubo asistencias
+    "requiere_posesiones", "sin_asistencias",
 )
 
 RAW_KEYS = (
@@ -774,6 +776,10 @@ class StatBundle:
     possessions_counted: float | None
     null_reasons: dict
     poss_seconds: float | None = None
+    # A-12: vínculo de asistencias del jugador ({fg2, fg3, ft, unlinked, ast_points, status})
+    ast_links: dict | None = None
+    # A-12: asistencias del EQUIPO en los partidos que el jugador disputó (denominador de la cuota)
+    team_ast: int | None = None
     finished_poss: dict | None = None
     derived: dict | None = None
     meta: dict = field(default_factory=dict)
@@ -1061,9 +1067,47 @@ def _teamlike_ball(bundle: "StatBundle") -> dict:
     out["ast_to"] = _rate_metric(own.get("ast"), own.get("tov"), reason="sin_perdidas")
     own_pos = pos(own)
     out["as_pos"] = _rate_metric(own.get("ast"), own_pos)
+    # Creación de juego es solo de jugador: en equipo/quinteto/cierre no aplica.
+    for key in ("ast_team_share", "ast_points", "pts_per_ast"):
+        out[key] = _na()
     f_, g_ = fga(own), fgm(own)
     out["as_pct"] = _rate_metric(own.get("ast"), g_)
     out["to_pct"] = _rate_metric(own.get("tov"), own_pos)   # DA-04: sobre posesiones (no plays)
+    return out
+
+
+def _player_creation(bundle: "StatBundle") -> dict:
+    """Creación de juego (A-12): cuota de asistencias del equipo y puntos generados por asistencias.
+
+    `ast_team_share` = asistencias del jugador / asistencias del equipo en los partidos que disputó.
+    `ast_points` = 2 × asistencias a 2 puntos + 3 × a 3 puntos (los tiros libres no suman: no se sabe
+    cuántos de la serie entraron). `pts_per_ast` = puntos generados / asistencias a tiros de campo.
+    """
+    out = {}
+    own = bundle.own
+    ast_v = own.get("ast")
+
+    # Cuota de asistencias del equipo: NO depende del vínculo, solo de los totales.
+    team_ast = bundle.team_ast
+    if ast_v is None or team_ast is None:
+        out["ast_team_share"] = _m(None, "no_registrado")
+    elif team_ast == 0:
+        out["ast_team_share"] = _m(None, "sin_asistencias")
+    else:
+        out["ast_team_share"] = _m(round(ast_v / team_ast, 4), None)
+
+    links = bundle.ast_links
+    if not links or links.get("status") != "ok":
+        # Sin vínculo no se puede afirmar que generó 0 puntos (C-11).
+        reason = (links or {}).get("status") or "requiere_posesiones"
+        reason = reason if reason in ("sin_pbp", "no_registrado") else "no_registrado"
+        out["ast_points"] = _m(None, reason)
+        out["pts_per_ast"] = _m(None, reason)
+    else:
+        fg_ast = links["fg2"] + links["fg3"]
+        out["ast_points"] = _m(links["ast_points"], None)
+        out["pts_per_ast"] = (_m(round(links["ast_points"] / fg_ast, 4), None) if fg_ast
+                              else _m(None, "sin_asistencias"))
     return out
 
 
@@ -1076,6 +1120,7 @@ def _player_ball(bundle: "StatBundle") -> dict:
     out["ast_to"] = _rate_metric(own.get("ast"), own.get("tov"), reason="sin_perdidas")
     own_pos = pos(own)
     out["as_pos"] = _rate_metric(own.get("ast"), own_pos)
+    out.update(_player_creation(bundle))
     ast_v, fgm_team_w, own_fgm = own.get("ast"), derived.get("fgm_team_w"), fgm(own)
     if ast_v is None or fgm_team_w is None or own_fgm is None:
         out["as_pct"] = _m(None, "no_registrado")
@@ -1337,7 +1382,7 @@ def _player_extra(bundle: "StatBundle") -> dict:
 
 
 def compute_standard(bundle: "StatBundle") -> dict:
-    """Las 86 métricas del catálogo estándar (plan §4.2/§4.3) a partir de un `StatBundle`.
+    """Las 89 métricas del catálogo estándar (plan §4.2/§4.3) a partir de un `StatBundle`.
 
     Entidades *teamlike* (`team`, `lineup`, `onoff`, `clutch`) usan `own`/`opp`. *player* usa
     `own` para tiro/balón/rebote/defensa/faltas/USO y `on_court` (equipo con el jugador en
@@ -1428,7 +1473,8 @@ def metrics_catalog_keys() -> frozenset:
         "tiro_pct": ("fg_pct", "fg2_pct", "fg3_pct", "ft_pct", "efg_pct", "ts_pct"),
         "tiro_valor": ("ppt", "ppt_2", "ppt_3", "ppt_ft"),
         "tiro_perfil": ("fg3_uso", "fg2_uso", "ft_rate", "paint_fga_share", "mid_fga_share"),
-        "balon": ("ast", "tov", "ast_to", "as_pos", "as_pct", "to_pct"),
+        "balon": ("ast", "tov", "ast_to", "as_pos", "as_pct", "to_pct",
+                  "ast_team_share", "ast_points", "pts_per_ast"),
         "rebote": ("orb", "drb", "trb", "or_pct", "dr_pct", "trb_pct", "orb_pos", "drb_min", "orb_min"),
         "defensa": ("stl", "blk", "blk_received", "stops"),
         "faltas": ("pf", "fouls_drawn"),
