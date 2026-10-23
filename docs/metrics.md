@@ -204,6 +204,18 @@ PTS/pos y sigue el mismo criterio. Se reproducen sumando el box score de la sele
 
 ---
 
+## Creación de juego *(jugador, A-12)*
+
+FIBA publica en cada asistencia el evento del tiro que la convirtió (`previousAction`). Con ese vínculo:
+
+| Clave | Fórmula | Base |
+|---|---|---|
+| `ast_team_share` | AST del jugador ÷ AST del equipo en los partidos que el jugador disputó (cociente de totales; no depende del vínculo) | fija |
+| `ast_points` | 2 × asistencias a tiros de 2 + 3 × asistencias a tiros de 3 | conteo (escala con la base) |
+| `pts_per_ast` | `ast_points` ÷ asistencias a tiros de campo | fija |
+
+Las asistencias a tiro libre no suman puntos generados: no se sabe cuántos de la serie entraron. Sin el vínculo el valor es nulo con razón `no_registrado` (hay que reprocesar el partido), nunca 0; sin jugada a jugada, `sin_pbp`; sin asistencias en la selección, `sin_asistencias`. AS/pos y la cuota del equipo son indicadores distintos: el primero normaliza por las posesiones del jugador, el segundo por las asistencias del equipo.
+
 ## Pace
 
 ```

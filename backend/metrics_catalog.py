@@ -1,7 +1,7 @@
 """
 Catálogo estándar de métricas (T-05, Grupo C): metadatos puros, sin fórmulas.
 
-`stats_engine.compute_standard` es el único lugar con las 86 fórmulas; este módulo solo
+`stats_engine.compute_standard` es el único lugar con las 89 fórmulas; este módulo solo
 describe cada clave (etiqueta, formato, dirección, agrupación, cómo escala con la base) y
 orquesta la petición HTTP (`build_payload`) delegando en los cargadores de cada tipo de
 entidad (`register_entity`, Grupo C: bundles.py/lineups.py/clutch.py).
@@ -53,7 +53,8 @@ GROUPS = [
     {"key": "tiro_perfil", "label": "Tiro — perfil",
      "metrics": ["fg3_uso", "fg2_uso", "ft_rate", "paint_fga_share", "mid_fga_share"]},
     {"key": "balon", "label": "Balón",
-     "metrics": ["ast", "tov", "ast_to", "as_pos", "as_pct", "to_pct"]},
+     "metrics": ["ast", "tov", "ast_to", "as_pos", "ast_team_share", "ast_points", "pts_per_ast",
+                 "as_pct", "to_pct"]},
     {"key": "rebote", "label": "Rebote",
      "metrics": ["orb", "drb", "trb", "or_pct", "dr_pct", "trb_pct", "orb_pos", "drb_min", "orb_min"]},
     {"key": "defensa", "label": "Defensa",
@@ -151,6 +152,13 @@ _DEFS = [
     _md("tov", "PER", "balon", "int", "lower", "count", "count"),
     _md("ast_to", "AS/PER", "balon", "dec2", "higher", "rate", "fixed"),
     _md("as_pos", "AS/pos", "balon", "dec2", "higher", "rate", "fixed"),
+    # A-12 — creación de juego (solo jugador)
+    _md("ast_team_share", "% asistencias del equipo", "balon", "pct", "higher", "rate", "fixed",
+        entities=_PLAYER_ONLY),
+    _md("ast_points", "Puntos generados", "balon", "int", "higher", "count", "count",
+        entities=_PLAYER_ONLY),
+    _md("pts_per_ast", "Puntos por asistencia", "balon", "dec2", "higher", "rate", "fixed",
+        entities=_PLAYER_ONLY),
     _md("as_pct", "AS%", "balon", "pct", "higher", "rate", "fixed", rel_dist=False),
     _md("to_pct", "TO%", "balon", "pct", "lower", "rate", "fixed", rel_dist=False),
 
@@ -221,10 +229,10 @@ _DEFS = [
 
 METRICS: dict[str, MetricDef] = {d.key: d for d in _DEFS}
 
-# El conjunto de claves debe coincidir EXACTAMENTE con las 86 de stats_engine.compute_standard.
+# El conjunto de claves debe coincidir EXACTAMENTE con las 89 de stats_engine.compute_standard.
 assert set(METRICS) == stats_engine.metrics_catalog_keys(), (
     "metrics_catalog.METRICS debe tener las mismas claves que stats_engine.metrics_catalog_keys()")
-assert len(METRICS) == 86, f"Se esperaban 86 claves, hay {len(METRICS)}"
+assert len(METRICS) == 89, f"Se esperaban 89 claves, hay {len(METRICS)}"
 assert len(GROUPS) == 12, f"Se esperaban 12 grupos, hay {len(GROUPS)}"
 
 _group_keys_seen: set = set()
@@ -358,7 +366,7 @@ def catalog_json(lang: str = "es") -> dict:
 def standard_payload(bundle: "StatBundle", values: dict, *, context_echo: dict, base: str,
                      sample: dict | None = None, fichas: dict | None = None) -> dict:
     """Arma el payload de `GET /api/metrics/<entity_type>` (plan §4.8 paso 9): entidad, contexto,
-    base, grupos y las 86 claves (las que falten en `values` → `no_aplica`). `fichas` (T-01) se
+    base, grupos y las 89 claves (las que falten en `values` → `no_aplica`). `fichas` (T-01) se
     fusiona en cada objeto de métrica."""
     values_completos = {}
     for key in METRICS:

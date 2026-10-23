@@ -471,6 +471,8 @@ def _parse_fiba_json(raw: dict, game_id: str) -> dict:
             "sub_type":      ev.get("subType") or "",
             "success":       _i(ev, ["success"]),
             "action_number": _i(ev, ["actionNumber"]),
+            # None (no 0) cuando FIBA no publica el vínculo: 0 es un actionNumber válido
+            "previous_action": _i(ev, ["previousAction"], default=None),
         })
 
     # Duración real: 40' + 5' por prórroga (FIBA: periodType "OVERTIME", period reinicia en 1)

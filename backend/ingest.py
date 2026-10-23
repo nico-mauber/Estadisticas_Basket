@@ -25,9 +25,10 @@ from database import db, Game, GameSource, TeamGameStats, PlayerGameStats, Shot,
 #   2        — F-11: minutos reales, coordenadas, archivo crudo
 #   3        — C-08: nombre completo y foto del jugador (identidad de ficha)
 #   4        — T-05: tapones y faltas recibidas (equipo y jugador)
+#   5        — A-12: vínculo de la asistencia con el tiro que la convirtió (previous_action)
 # Subirla cuando un cambio del parser deba llegar a los partidos ya importados: el panel de
 # calidad los marca "pendientes de reproceso".
-INGEST_VERSION = 4
+INGEST_VERSION = 5
 
 # Partidos por petición de reproceso. Peor caso sin archivo: 5 descargas × 20 s de timeout de
 # urllib = 100 s, por debajo de los 180 s de gunicorn (render.yaml).
@@ -130,7 +131,7 @@ def persist_game(game: dict) -> None:
     shot_cols = ("team_code", "player_name", "x", "y", "court_x", "court_y", "made",
                  "action_type", "sub_type", "period", "action_number")
     pbp_cols = ("team_code", "player_name", "period", "period_type", "clock_secs", "s1", "s2",
-                "action_type", "sub_type", "success", "action_number")
+                "action_type", "sub_type", "success", "action_number", "previous_action")
 
     # Filas repetidas por clave única dentro de un mismo partido (dos jugadores con el mismo
     # nombre abreviado, eventos sin actionNumber): se conserva una, como hacía la ingesta

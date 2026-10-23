@@ -184,6 +184,7 @@ Registro de cada tiro por partido, uno por evento `2pt`/`3pt` del play-by-play. 
 | `sub_type` | TEXT | Ej. `"layup"`, `"dunk"`, `"jumpshot"` |
 | `period` | INTEGER | Período del partido |
 | `action_number` | INTEGER | Número de acción en el play-by-play |
+| `previous_action` | INTEGER | `previousAction` de FIBA (A-12): el evento que originó este; en una asistencia, el tiro que convirtió. `NULL` = no importado todavía (partido con ingesta anterior a la 5) |
 | `court_x` / `court_y` | REAL | Coordenadas reales de FIBA (`tm[n].shot[]`): 0–100 a lo largo / a lo ancho de la cancha **completa**. NULL si el partido no las trae o no se reprocesó |
 
 **Restricción única:** `(game_id, action_number)`

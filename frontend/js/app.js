@@ -63,6 +63,19 @@ function _fichaGridHTML(metrics, entityType, std, entityId) {
   }).join("");
 }
 
+// Nota al pie de "Creación de juego": cuántas asistencias tienen vínculo y qué pasa con los libres.
+function _creationNote(std) {
+  const pts = std?.metrics?.ast_points;
+  if (!pts) return "";
+  if (pts.value == null && pts.reason === "no_registrado") {
+    return '<p class="td-muted assist-note">Los partidos de esta selección se importaron sin el vínculo de las asistencias. Reprocesalos para ver los puntos generados.</p>';
+  }
+  if (pts.value == null && pts.reason === "sin_pbp") {
+    return '<p class="td-muted assist-note">Sin play-by-play: no se puede saber qué tiro convirtió cada asistencia.</p>';
+  }
+  return '<p class="td-muted assist-note">Los puntos generados cuentan solo las asistencias a tiros de campo: en un tiro libre no se sabe cuántos de la serie entraron.</p>';
+}
+
 // Etiqueta con su definición al pasar el cursor / tocar (C-01): `statBox` inserta el label como HTML.
 const _hint = (label, text) => `<span title="${esc(text)}">${label}</span>`;
 const _PCT_REB_HINT = "estimado por minutos mientras estuvo en cancha. No es comparable con el %s de equipo.";
@@ -2148,6 +2161,17 @@ function _renderPlayerContent(main, data) {
         ["% Reb Equipo", "reb_share", av.reb_share, PCT(av.reb_share)],
         ["% RebOf Equipo", "oreb_share", av.oreb_share, PCT(av.oreb_share)],
         ["% RebDef Equipo", "dreb_share", av.dreb_share, PCT(av.dreb_share)] ] },
+      { title: "Creación de juego", trailing: _creationNote(data.standard), metrics: [
+        [_hint("AS/pos", "Asistencias por posesión propia (posesión = T2i + T3i + 0,44 × TLi + PER − RO)"),
+         "as_pos", av.as_pos, DEC2(av.as_pos)],
+        [_hint("% asistencias del equipo", "Asistencias del jugador sobre las del equipo en los partidos que disputó"),
+         "ast_team_share", null, "—"],
+        [_hint("Puntos generados", "2 × asistencias a tiros de 2 + 3 × asistencias a tiros de 3. Los tiros libres no suman: no se sabe cuántos de la serie entraron"),
+         "ast_points", null, "—"],
+        [_hint("Puntos por asistencia", "Puntos generados dividido por las asistencias a tiros de campo"),
+         "pts_per_ast", null, "—"],
+        [_hint("Segundos de posesión", "Duración media de las posesiones que terminó el jugador"),
+         "player_poss_duration", null, "—"] ] },
       { title: "Defensa avanzada", metrics: [
         ["Robos", "stl", av.stl, DEC2(av.stl)], ["Tapones", "blk", av.blk, DEC2(av.blk)],
         ["Stops", "stocks", av.stocks, DEC2(av.stocks)],
