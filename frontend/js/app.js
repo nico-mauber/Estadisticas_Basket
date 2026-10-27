@@ -18,6 +18,10 @@ import { initBase, getBase, setBase } from "./core/base.js";
 import { initContext, contextParams, clearContext, clearPlayerFilters, dropInvalid, activeCount } from "./core/context.js";
 import { mountContextBar, contextNote, invalidateContextOptions } from "./components/context-bar.js";
 import { renderPeriodBlock, destroyPeriodBlock } from "./components/period-block.js";
+import { renderOriginPanel } from "./components/origin-panel.js";
+import { renderTransitionPanel } from "./components/transition-panel.js";
+import { renderSecondChancePanel } from "./components/second-chance-panel.js";
+import { renderClockPanel } from "./components/clock-panel.js";
 import { renderLineupsBlock } from "./components/lineups-block.js";
 import { renderComparePlayers, comparePlayersFromUrl } from "./components/compare-players.js";
 import { renderPlayerHeader } from "./components/player-header.js";
@@ -1595,6 +1599,10 @@ function _applyTeamData(main, data) {
   _renderTeamContent(main, data);
   _mountCtxBar(main, _teamComp, () => _reloadTeam(), data.team_code);
   _renderTeamPeriods(data.team_code, data.team_name);
+  renderOriginPanel(document.getElementById("team-origins"), data.team_code, { mode: "team", params: _teamParams() });
+  renderTransitionPanel(document.getElementById("team-transition"), data.team_code, { mode: "team", params: _teamParams() });
+  renderSecondChancePanel(document.getElementById("team-second-chance"), data.team_code, { mode: "team", params: _teamParams() });
+  renderClockPanel(document.getElementById("team-clock"), data.team_code, { mode: "team", params: _teamParams() });
   _renderTeamRoster(data.team_code);
   _renderTeamLineups(data.team_code, data.team_name);
 }
@@ -2066,6 +2074,14 @@ function _applyPlayerData(main, data) {
   }
   _mountCtxBar(main, _playerComp, _reloadPlayer);
   _loadPlayerStandard(data.player_id);
+  if (data.player_id != null) {
+    renderOriginPanel(document.getElementById("player-origins"), data.player_id,
+      { mode: "player", params: { competition: _playerComp, ...contextParams() } });
+    renderTransitionPanel(document.getElementById("player-transition"), data.player_id,
+      { mode: "player", params: { competition: _playerComp, ...contextParams() } });
+    renderSecondChancePanel(document.getElementById("player-second-chance"), data.player_id,
+      { mode: "player", params: { competition: _playerComp, ...contextParams() } });
+  }
 }
 
 // ── Conjunto estándar de métricas — card "Jugador" (T-05, T-E2) ─────────────
@@ -2209,6 +2225,9 @@ function _renderPlayerContent(main, data) {
         <div class="card-title">Conjunto estándar</div>
         <div id="player-standard-panel"></div>
       </div>
+      <div id="player-origins"></div>
+      <div id="player-transition"></div>
+      <div id="player-second-chance"></div>
       <div class="card">
         <div class="card-title">Game log — ${playerName}</div>
         <div id="player-gamelog-dt"></div>
@@ -2515,6 +2534,10 @@ function renderApp() {
         <div id="team-roster"></div>
         <div id="team-lineups-block"></div>
         <div id="team-periods"></div>
+        <div id="team-origins"></div>
+        <div id="team-transition"></div>
+        <div id="team-second-chance"></div>
+        <div id="team-clock"></div>
         <div id="team-clutch"></div>
       </div>
 

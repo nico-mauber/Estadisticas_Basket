@@ -28,6 +28,10 @@ import tables  # noqa: F401 — se importa para que registre las tablas de T-06 
 import export_xlsx
 import shot_zones
 import possessions
+import origin  # noqa: F401 — registra el enriquecedor de origen de posesión (A-02)
+import second_chance  # noqa: F401 — registra el enriquecedor de segundas oportunidades (A-04)
+import possession_clock  # noqa: F401 — registra el enriquecedor del tramo de reloj (A-05)
+import transition  # noqa: F401 — registra el enriquecedor de tipo de posesión (A-03); va DESPUÉS de origin
 import game_analysis
 import live
 import prepare
@@ -310,6 +314,139 @@ def team_periods(team_code: str):
 def _no_quarter(ctx):
     import dataclasses
     return dataclasses.replace(ctx, quarters=())
+
+
+@app.route("/api/origins")
+@login_required
+def origins_route():
+    """Origen de la posesión (A-02): volumen, eficiencia, duración y distribución de finalizaciones por
+    origen. `?team=<code>` o `?player=<player_id>`, `side=ataque|defensa` (solo equipo) y contexto de T-03."""
+    import context as context_mod
+    team, player = (request.args.get("team") or "").strip().upper(), (request.args.get("player") or "").strip()
+    if bool(team) == bool(player):
+        return jsonify({"error": "Indicá un equipo o un jugador.", "code": "parametro_invalido"}), 400
+    side = request.args.get("side", "ataque")
+    if side not in origin.SIDES or (player and side != "ataque"):
+        return jsonify({"error": "El lado debe ser ataque o defensa.", "code": "parametro_invalido"}), 400
+    if player and not player.isdigit():
+        return jsonify({"error": "Indicá un equipo o un jugador.", "code": "parametro_invalido"}), 400
+    try:
+        if team:
+            if not any(r["team_code"] == team for r in repository.team_game_rows(None).values()):
+                return jsonify({"error": "No encontramos ese equipo o jugador.", "code": "no_encontrado"}), 404
+            ctx = context_mod.parse_context(request.args, team_code=team)
+            out = origin.origin_report(team, ctx.competition_id, ctx, side=side)
+            out["entity"] = {"type": "team", "id": team}
+        else:
+            card = identity.player_card(int(player))
+            if card is None:
+                return jsonify({"error": "No encontramos ese equipo o jugador.", "code": "no_encontrado"}), 404
+            ctx = context_mod.parse_context(request.args, player_id=int(player))
+            out = origin.player_origin(int(player), ctx.competition_id, ctx)
+            out["entity"] = {"type": "player", "id": int(player), "name": card.get("display_name")}
+    except ContextError as e:
+        return jsonify(e.payload()), e.status
+    if not out["summary"]["possessions"] and out["context"]["games_used"] == 0:
+        return jsonify({"error": "Este equipo no tiene play-by-play importado. Reimportá sus partidos.",
+                        "code": "sin_pbp"}), 404
+    return jsonify(out)
+
+
+@app.route("/api/transition")
+@login_required
+def transition_route():
+    """Transición y contraataque (A-03): tipo de posesión (transición / ataque temprano / media cancha), origen del
+    contraataque, finalización, corredores y bloque defensivo. `?team=<code>` o `?player=<player_id>`,
+    `side=ataque|defensa` (solo equipo) y contexto de T-03."""
+    import context as context_mod
+    team, player = (request.args.get("team") or "").strip().upper(), (request.args.get("player") or "").strip()
+    if bool(team) == bool(player) or (player and not player.isdigit()):
+        return jsonify({"error": "Indicá un equipo o un jugador.", "code": "parametro_invalido"}), 400
+    side = request.args.get("side", "ataque")
+    if side not in transition.SIDES or (player and side != "ataque"):
+        return jsonify({"error": "El lado debe ser ataque o defensa.", "code": "parametro_invalido"}), 400
+    try:
+        if team:
+            if not any(r["team_code"] == team for r in repository.team_game_rows(None).values()):
+                return jsonify({"error": "No encontramos ese equipo o jugador.", "code": "no_encontrado"}), 404
+            ctx = context_mod.parse_context(request.args, team_code=team)
+            out = transition.transition_report(team, ctx.competition_id, ctx, side=side)
+            out["entity"] = {"type": "team", "id": team}
+        else:
+            card = identity.player_card(int(player))
+            if card is None:
+                return jsonify({"error": "No encontramos ese equipo o jugador.", "code": "no_encontrado"}), 404
+            ctx = context_mod.parse_context(request.args, player_id=int(player))
+            out = transition.player_transition(int(player), ctx.competition_id, ctx)
+            out["entity"] = {"type": "player", "id": int(player), "name": card.get("display_name")}
+    except ContextError as e:
+        return jsonify(e.payload()), e.status
+    if not out["summary"]["possessions"] and out["context"]["games_used"] == 0:
+        return jsonify({"error": "Este equipo no tiene play-by-play importado. Reimportá sus partidos.",
+                        "code": "sin_pbp"}), 404
+    return jsonify(out)
+
+
+@app.route("/api/second-chance")
+@login_required
+def second_chance_route():
+    """Segunda oportunidad (A-04): desenlaces, origen del rebote, cadenas, jugadores, coste, defensa y conciliación con el
+    box oficial. `?team=<code>` o `?player=<player_id>`, `side=ataque|defensa` (solo equipo) y contexto de T-03."""
+    import context as context_mod
+    team, player = (request.args.get("team") or "").strip().upper(), (request.args.get("player") or "").strip()
+    if bool(team) == bool(player) or (player and not player.isdigit()):
+        return jsonify({"error": "Indicá un equipo o un jugador.", "code": "parametro_invalido"}), 400
+    side = request.args.get("side", "ataque")
+    if side not in second_chance.SIDES or (player and side != "ataque"):
+        return jsonify({"error": "El lado debe ser ataque o defensa.", "code": "parametro_invalido"}), 400
+    try:
+        if team:
+            if not any(r["team_code"] == team for r in repository.team_game_rows(None).values()):
+                return jsonify({"error": "No encontramos ese equipo o jugador.", "code": "no_encontrado"}), 404
+            ctx = context_mod.parse_context(request.args, team_code=team)
+            out = second_chance.second_chance_report(team, ctx.competition_id, ctx, side=side)
+            out["entity"] = {"type": "team", "id": team}
+        else:
+            card = identity.player_card(int(player))
+            if card is None:
+                return jsonify({"error": "No encontramos ese equipo o jugador.", "code": "no_encontrado"}), 404
+            ctx = context_mod.parse_context(request.args, player_id=int(player))
+            out = second_chance.player_second_chance(int(player), ctx.competition_id, ctx)
+            out["entity"] = {"type": "player", "id": int(player), "name": card.get("display_name")}
+    except ContextError as e:
+        return jsonify(e.payload()), e.status
+    if out["context"]["games_used"] == 0:
+        return jsonify({"error": "Este equipo no tiene play-by-play importado. Reimportá sus partidos.",
+                        "code": "sin_pbp"}), 404
+    return jsonify(out)
+
+
+@app.route("/api/possession-clock")
+@login_required
+def possession_clock_route():
+    """Tramo de reloj de posesión (A-05) y composición de puntos: tiros y oportunidades por tramo (temprano 0-8 s,
+    medio 9-16 s, tardío 17-24 s; reloj de 14 s aparte), peso de triples/dobles/libres, pérdidas y asistencias.
+    `?team=<code>`, `side=ataque|defensa`, `game=<game_id>` (un solo partido) y contexto de T-03."""
+    import context as context_mod
+    team = (request.args.get("team") or "").strip().upper()
+    game = (request.args.get("game") or "").strip() or None
+    if not team:
+        return jsonify({"error": "Indicá un equipo.", "code": "parametro_invalido"}), 400
+    side = request.args.get("side", "ataque")
+    if side not in possession_clock.SIDES:
+        return jsonify({"error": "El lado debe ser ataque o defensa.", "code": "parametro_invalido"}), 400
+    if not any(r["team_code"] == team for r in repository.team_game_rows(None).values()):
+        return jsonify({"error": "No encontramos ese equipo.", "code": "no_encontrado"}), 404
+    try:
+        ctx = context_mod.parse_context(request.args, team_code=team)
+        out = possession_clock.clock_report(team, ctx.competition_id, ctx, side=side, game_id=game)
+    except ContextError as e:
+        return jsonify(e.payload()), e.status
+    out["entity"] = {"type": "team", "id": team}
+    if out["context"]["games_used"] == 0:
+        return jsonify({"error": "Este equipo no tiene play-by-play importado. Reimportá sus partidos.",
+                        "code": "sin_pbp"}), 404
+    return jsonify(out)
 
 
 @app.route("/api/player-profile/<int:player_id>")

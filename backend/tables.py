@@ -306,7 +306,7 @@ def _compute(tdef: TableDef, treq: TableRequest) -> dict:
     }
 
 
-_SAMPLE_ENTITIES = frozenset({"player", "lineup", "onoff", "clutch"})
+_SAMPLE_ENTITIES = frozenset({"player", "lineup", "onoff", "clutch", "origin", "ptype"})
 
 
 def _build_columns(tdef: TableDef, has_sample: bool) -> list:

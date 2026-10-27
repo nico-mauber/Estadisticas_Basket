@@ -225,6 +225,9 @@ Al agregar una tabla ordenable nueva, usar este helper — no escribir un compar
 Un `null` tampoco recibe color de rendimiento: `statClass` y `winCls` (Comparar) devuelven clase
 neutra si falta cualquiera de los dos lados. Ver `sdd/specs/12-nulos-orden-color-dnp/`.
 
+### Tramo de reloj y composición de puntos (A-05)
+`components/clock-panel.js` → `renderClockPanel(el, team, {mode: "team"|"game", params, gameId, teams, team})`. Se monta en Equipo (`#team-clock`, después de Segunda oportunidad) y en Partido (pestaña "Reloj y puntos", con selector de los dos equipos). Chips Ataque / Defensa (`?cside=`). Muestra: barra y tabla de composición de los puntos (triples, dobles, tiros libres), pérdidas y asistencias con su peso; tabla del reloj de 24 s por tramo (tiros, % de los tiros, triples, % de sus tiros que son triples, peso en los triples del equipo, eFG%, PPT, PPP, TO%, violaciones de 24 s), tabla aparte del reloj de 14 s, fila "Sin reloj derivable", pérdidas por tipo y tramo, nota de fuente derivada y leyenda de conciliación con el box oficial. `sw.js` v48.
+
 ## Shot chart (`components/shot-chart.js`, C-03)
 
 SVG de cancha clara estilo "El Metro", extraído de `app.js` a `components/shot-chart.js`. Consume `GET /api/shot-zones` vía `api.shotZones(params)`.
@@ -320,6 +323,18 @@ Ver `sdd/specs/16-tiro-completo-ppt/`.
 > en backend por retro-compat pero no se muestra en UI. `SEARCH_METRICS` usa `ppt`.
 > Tasas de tiro pooled (`season_shooting`) calculan `ppt`, `ppt_2`, `ppt_3`, `ppt_ft`, `fg2_pct`,
 > `fg3_pct`, `ft_pct`, `fg2_uso`, `fg3_uso` desde totales de temporada.
+
+### Origen de la posesión (A-02)
+
+`components/origin-panel.js` → `renderOriginPanel(el, id, {mode: "team"|"player", params})`. Se monta en la vista Equipo (`#team-origins`, después de "Por tramo del partido") y en Jugador (`#player-origins`, después del conjunto estándar). Chips Ataque / Defensa (solo equipo; el lado va en `?side=` de la URL); en defensa el título pasa a "Origen de la posesión rival" y las columnas a "concedido/forzado". Tabla de 7 orígenes + fila informativa "Tras rebote ofensivo" (fuera de la suma), barra apilada de finalización (T2/T3/TL/Pérdida), leyenda de conciliación ("Posesiones clasificadas: N de N (100 %)"). Filas con muestra baja en gris con la marca "baja". Estados: spinner, "No hay posesiones en esta selección.", error con "Reintentar" y "Sin conexión: el análisis de posesiones necesita conexión." Mobile: columna Origen fija y tabla con scroll horizontal dentro de la card. `sw.js` v45.
+
+### Transición y contraataque (A-03)
+
+`components/transition-panel.js` → `renderTransitionPanel(el, id, {mode: "team"|"player", params})`. Se monta en Equipo (`#team-transition`, después de "Origen de la posesión") y Jugador (`#player-transition`). Chips Ataque / Defensa (`?tside=` en la URL, independiente del `?side=` del origen). Ataque: fichas de frecuencia de transición y diferencial de PPP, tabla de tipos, origen del contraataque, finalización, histograma de segundos al primer tiro, rebotes defensivos que corren, corredores (con cobertura "iniciador identificado en N de M"), nota de primer pase `no_registrado` y desplegable con el contraataque oficial de FIBA. Defensa: fichas (transiciones cada 100 posesiones, pérdidas que el rival corre, balance defensivo) y origen concedido. Leyenda "Posesiones clasificadas: N de M (… sin reloj)". `sw.js` v46.
+
+### Segunda oportunidad (A-04)
+
+`components/second-chance-panel.js` → `renderSecondChancePanel(el, id, {mode: "team"|"player", params})`. Se monta en Equipo (`#team-second-chance`, después de Transición) y Jugador (`#player-second-chance`). Chips Ataque / Defensa (`?sside=`). Ataque: fichas (PPP 1.ª vs 2.ª, puntos por rebote ofensivo, conversión), desenlaces, modo del tiro, origen del rebote (con la fila "Zona del rebote" `no_registrado`), cadenas, captura vs finalización por jugador (con fila "Rebote de equipo"), coste del rebote ofensivo (rotulado como aproximación), histograma de segundos al tiro y leyenda de conciliación con el box oficial. Defensa: OR% concedido, PPP concedido, rebote largo vs en la zona (`—`) y segundos del rival. `sw.js` v47.
 
 ### Conjunto estándar de métricas (T-05)
 

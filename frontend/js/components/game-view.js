@@ -7,6 +7,7 @@ import { shotChart, bindZoneTooltips } from "./shot-chart.js";
 import { sampleBadge } from "./sample-badge.js";
 import { createDataTable, dtLoading, dtError, dtEmpty } from "./data-table.js";
 import { momentumHTML } from "./momentum-panel.js";
+import { renderClockPanel } from "./clock-panel.js";
 import { mountGameExport } from "./game-report.js";
 
 function esc(s) { return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
@@ -95,6 +96,7 @@ function _renderShell() {
     { id: "quintetos", label: "Quintetos" },
     { id: "cruces", label: "Cruces" },
     { id: "momentum", label: "Momentum" },
+    { id: "reloj", label: "Reloj y puntos" },
   ];
 
   _el.innerHTML = `
@@ -147,7 +149,21 @@ function _renderTab() {
     case "quintetos": return _renderQuintetos(body);
     case "cruces":    return _renderCruces(body);
     case "momentum":  return _renderMomentum(body);
+    case "reloj":     return _renderReloj(body);
   }
+}
+
+// Cómo anota cada equipo en este partido y en qué tramo del reloj de posesión tira (A-05).
+function _renderReloj(el) {
+  const g = _detail.game;
+  if (!g.has_pbp) {
+    el.innerHTML = '<p class="empty">Sin jugada a jugada: el reloj de posesión no está disponible.</p>';
+    return;
+  }
+  renderClockPanel(el, g.home_code, {
+    mode: "game", gameId: g.game_id,
+    teams: [{ code: g.home_code, name: g.home_team }, { code: g.away_code, name: g.away_team }],
+  });
 }
 
 // ── Resumen ──────────────────────────────────────────────────────────────────

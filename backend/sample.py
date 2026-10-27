@@ -16,7 +16,7 @@ from stats_engine import pos, StatBundle
 # ── Mapeo entidad → prefijo de configuración (plan §4.1, PROPUESTA) ──────────
 ENTITY_SAMPLE = {
     "lineup": "lineup", "pair": "pair", "onoff": "onoff", "matchup": "matchup",
-    "split": "split", "clutch": "split", "period": "split", "origin": "split",
+    "split": "split", "clutch": "split", "period": "split", "origin": "split", "ptype": "split",
     "ptype": "split", "chance": "split", "chain": "split",
     "clock": "clock_zone", "zone": "clock_zone", "clutch_lineup": "clutch_lineup",
     "player": "player", "team": "team",
@@ -259,7 +259,10 @@ def sample_for(entity_type: str, bundles: list, *, team_poss: float | None = Non
                              games=games, minutes=minutes, possessions=possessions)
 
     bundle = bundles[0]
-    own_pos = pos(bundle.own) or 0
+    if (bundle.meta or {}).get("poss_exact") and bundle.possessions_counted is not None:
+        own_pos = bundle.possessions_counted      # A-02: el bundle ya cuenta posesiones reales
+    else:
+        own_pos = pos(bundle.own) or 0
     games = bundle.games
     minutes = bundle.minutes if bundle.minutes is not None else (
         (bundle.seconds / 60) if bundle.seconds else None)
