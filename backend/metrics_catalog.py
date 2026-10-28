@@ -625,8 +625,12 @@ def _attach_fichas(payload, entity_type, b0, ctx, base, *, prior_fn) -> None:
         pop = population.population(entity_type, ctx.competition_id, ctx, variant=variant)
         fallback = None
         import config
-        if not pop.reason and pop.size < config.get("population.min_size"):
-            # Competencia joven (pocos partidos por equipo): ninguna entidad llega al mínimo de muestra y la
+        too_few = pop.size < config.get("population.min_size")
+        # Equipos: con menos de la mitad de la liga sobre el mínimo (competencia joven) el ranking decía "4.º de 4"
+        # con 16 equipos en la liga. Se compara contra todos los que tienen partidos.
+        mostly_out = entity_type == "team" and pop.size * 2 < len(pop.members)
+        if not pop.reason and (too_few or mostly_out):
+            # Competencia joven (pocos partidos por equipo): casi ninguna entidad llega al mínimo de muestra y la
             # ficha quedaba sin promedio, puesto ni percentil. Se compara contra todas las que tienen datos y
             # se avisa; la muestra baja de cada una sigue marcada por su badge.
             wide = population.population(entity_type, ctx.competition_id, ctx, variant=variant,
