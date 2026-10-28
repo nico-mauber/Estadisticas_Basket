@@ -101,8 +101,11 @@ era esta misma fórmula de PPT con otra etiqueta. Ver `sdd/specs/16-tiro-complet
 
 | Métrica | Fórmula | Descripción |
 |---------|---------|-------------|
-| **Uso 2P** | `2PA / FGA` | Proporción de ataques con tiro de 2 |
-| **Uso 3P** | `3PA / FGA` | Proporción de ataques con tiro de 3 |
+| **Uso 2P** | `2PA / (FGA + 0.44 × FTA)` | Parte de las jugadas de tiro que terminan en tiro de 2 |
+| **Uso 3P** | `3PA / (FGA + 0.44 × FTA)` | Parte de las jugadas de tiro que terminan en tiro de 3 |
+| **Uso TL** | `0.44 × FTA / (FGA + 0.44 × FTA)` | Parte de las jugadas de tiro que terminan en tiros libres |
+
+Los tres comparten denominador (las jugadas de tiro) y suman 100 %. Hasta 2026-10-28 Uso 2P y 3P se calculaban sobre los tiros de campo (sumaban 100 % entre ellos) y Uso TL sobre las jugadas de tiro, así que los tres juntos daban más de 100 %. El 3PAr clásico (3PA / FGA) se obtiene como Uso 3P / (Uso 2P + Uso 3P).
 
 ### USO% (Usage Rate) — solo jugador
 
@@ -262,7 +265,7 @@ Con el box oficial de los partidos de la selección (en defensa, el del rival): 
 
 ## Uso de tiro: 2P, 3P y TL, y zonas *(correcciones de Equipo, 2026-10)*
 
-**Uso de 2P / 3P** = tiros de 2 (de 3) intentados / tiros de campo intentados. **Uso de TL** (`ft_uso`) = 0,44 × TLi / (TCi + 0,44 × TLi): el peso de los tiros libres en las jugadas de tiro. Están en el perfil de tiro de equipo y jugador y en la tabla del ranking de Liga.
+**Uso de 2P / 3P / TL** = reparto de las jugadas de tiro (TCi + 0,44 × TLi): TC2i, TC3i y 0,44 × TLi sobre ese total; los tres suman 100 % (ver "Uso del tiro"). Están en el perfil de tiro de equipo y jugador y en la tabla del ranking de Liga.
 
 **Zonas de tiro.** Las coordenadas de FIBA (`court_x` a lo largo, `court_y` a lo ancho, 0–100) son de la cancha completa y cada equipo tira a los dos aros. `shot_zones.to_half_court` gira los tiros del aro de la derecha 180° y devuelve (posición a lo ancho en %, distancia a la línea de fondo en metros, cancha de 28 × 15 m). Zonas: **pintura** (`restricted_area`) = dentro del área (ancho 33,7–66,3 %, hasta la línea de tiros libres a 5,80 m) o bandeja, volcada y similares; **esquina** = triple a menos de 2,99 m de la línea de fondo; **media distancia** = tiro de 2 fuera de la pintura (cerca del fondo: `mid_*_close`; pasada la línea de tiros libres: `mid_*_far` y `mid_top`). Antes se clasificaba con las coordenadas legadas `x/y` (siempre 0) y todos los tiros caían en pocas zonas. **% tiros en pintura** (`paint_fga_share`) = tiros en `restricted_area` / tiros de campo; **% tiros de media** (`mid_fga_share`) = tiros en las cinco zonas de media / tiros de campo. Sin coordenadas en algún partido de la selección, ambos quedan `no_disponible`.
 
