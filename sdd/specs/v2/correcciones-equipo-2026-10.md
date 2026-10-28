@@ -16,15 +16,15 @@ Origen: lista del cliente (mensajes de WhatsApp) tras probar la versión en QA.
 | Liga: tablas desplegables y uso de 3P/2P | — | `_makeCollapsible`, mapas "Uso de 3P / eFG%" y "Uso de 2P / Uso de TL", columnas en el ranking | `eq_browser.py` |
 | "Por tramo del partido" es tramo de la posesión | — | ya entregado en A-05 (tramos del reloj de posesión 0-8, 9-16, 17-24) | `a05_sim.py` |
 
-## Tiempos en frío (273 partidos, 169 en la competencia, un proceso)
+## Tiempos en frío (273 partidos, 169 en la competencia, un proceso, caché vacío)
 | Endpoint | Antes | Después |
 |---|---|---|
-| `/api/team` | 16,2 s | 4,4 s |
-| plantel (`team_roster`) | más de 10 min | 8,4 s |
-| quintetos (`team_lineups`) | no terminaba | ≈ 46 s → 3 s (65 partidos) tras cachear `ppp_stats` |
-| ON/OFF | — | 14 s |
-| `/api/periods` | — | 13,9 s |
-| `/api/prepare` | — | 14,1 s |
+| `/api/team` | 16,2 s | 4,8 s |
+| plantel (`team_roster`) | más de 10 min | 8,3 s |
+| quintetos (`team_lineups`) | 46 s | 3,0 s |
+| ON/OFF (`team_onoff`) | 14,0 s | 2,4 s |
+| `/api/periods` | 13,9 s | 6,6 s |
+| `/api/prepare` | 14,1 s | 3,0 s |
 
 Los tiempos son de la primera petición tras un cambio de datos; con `SB_WARMUP=1` el calentamiento corre en segundo plano al arrancar.
 
