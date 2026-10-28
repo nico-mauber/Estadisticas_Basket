@@ -134,9 +134,11 @@ def calc_team_stats(t: dict, opp: dict) -> dict:
     ft_rate        = _safe_div(fta, fga)                   # FT Rate = 1PI/FGA
     ft_rate_report = _safe_div(ftm, fga)                   # FT% reporte = 1PC/FGA
     pps  = _safe_div(pts, fga)                             # Points Per Shot
-    fg2_uso = _safe_div(t["fga2"], fga)                    # %2P uso
-    fg3_uso = _safe_div(t["fga3"], fga)                    # %3P uso
-    ft_uso  = _safe_div(0.44 * fta, fga + 0.44 * fta)      # uso de TL: peso de los libres en las jugadas de tiro
+    # Uso de 2P / 3P / TL: reparto de las jugadas de tiro (TCi + 0,44 × TLi); los tres suman 100 %
+    shot_plays = fga + 0.44 * fta
+    fg2_uso = _safe_div(t["fga2"], shot_plays)
+    fg3_uso = _safe_div(t["fga3"], shot_plays)
+    ft_uso  = _safe_div(0.44 * fta, shot_plays)
     fg2_pct = _safe_div(t["fgm2"], t["fga2"])
     fg3_pct = _safe_div(t["fgm3"], t["fga3"])
     ft_pct  = _safe_div(ftm, fta)
@@ -439,9 +441,10 @@ def calc_player_stats(p: dict, team_pos: float, team: dict = None, game_minutes:
     fg2  = _safe_div(p["fgm2"], p["fga2"])
     fg3  = _safe_div(p["fgm3"], p["fga3"])
     ft   = _safe_div(ftm, fta)
-    fg2_uso = _safe_div(p["fga2"], fga)
-    fg3_uso = _safe_div(p["fga3"], fga)
-    ft_uso  = _safe_div(0.44 * fta, fga + 0.44 * fta)      # uso de TL (ver calc_team_stats)
+    shot_plays = fga + 0.44 * fta                          # reparto de las jugadas de tiro (ver calc_team_stats)
+    fg2_uso = _safe_div(p["fga2"], shot_plays)
+    fg3_uso = _safe_div(p["fga3"], shot_plays)
+    ft_uso  = _safe_div(0.44 * fta, shot_plays)
     # C-07: PPT (glosario: puntos de campo / tiros de campo intentados)
     ppt    = _safe_div(2 * p["fgm2"] + 3 * p["fgm3"], p["fga2"] + p["fga3"])
     ppt_2  = _safe_div(2 * p["fgm2"], p["fga2"])
@@ -637,6 +640,7 @@ def season_shooting(sums: dict) -> tuple:
     fga3, fgm3 = s("fga3", 0), s("fgm3", 0)
     fta, ftm = s("fta", 0), s("ftm", 0)
     fga = fga2 + fga3
+    shot_plays = fga + 0.44 * fta
     vals = {
         "ppt":     _safe_div(2 * fgm2 + 3 * fgm3, fga),
         "ppt_2":   _safe_div(2 * fgm2, fga2),
@@ -645,8 +649,9 @@ def season_shooting(sums: dict) -> tuple:
         "fg2_pct": _safe_div(fgm2, fga2),
         "fg3_pct": _safe_div(fgm3, fga3),
         "ft_pct":  _safe_div(ftm, fta),
-        "fg2_uso": _safe_div(fga2, fga),
-        "fg3_uso": _safe_div(fga3, fga),
+        "fg2_uso": _safe_div(fga2, shot_plays),
+        "fg3_uso": _safe_div(fga3, shot_plays),
+        "ft_uso":  _safe_div(0.44 * fta, shot_plays),
     }
     return vals, {k: "sin_intentos" for k, v in vals.items() if v is None}
 
@@ -1087,12 +1092,17 @@ def _shooting_value(c: dict) -> dict:
 def _shooting_profile(c: dict, shots: dict | None) -> dict:
     out = {}
     f = fga(c)
-    out["fg3_uso"] = _rate_metric(c.get("fga3"), f)
-    out["fg2_uso"] = _rate_metric(c.get("fga2"), f)
     out["ft_rate"] = _rate_metric(c.get("fta"), f)
+    # Uso de 3P / 2P / TL: reparto de las jugadas de tiro (TCi + 0,44 × TLi); los tres suman 100 %
     fta_ = c.get("fta")
-    out["ft_uso"] = (_m(None, "no_registrado") if fta_ is None or f is None
-                     else _rate_metric(0.44 * fta_, f + 0.44 * fta_))
+    if fta_ is None or f is None:
+        for k in ("fg3_uso", "fg2_uso", "ft_uso"):
+            out[k] = _m(None, "no_registrado")
+    else:
+        plays_ = f + 0.44 * fta_
+        out["fg3_uso"] = _rate_metric(c.get("fga3"), plays_)
+        out["fg2_uso"] = _rate_metric(c.get("fga2"), plays_)
+        out["ft_uso"] = _rate_metric(0.44 * fta_, plays_)
     if shots:
         out["paint_fga_share"] = _rate_metric(shots.get("paint_fga"), f)
         out["mid_fga_share"] = _rate_metric(shots.get("mid_fga"), f)
