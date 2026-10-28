@@ -230,6 +230,9 @@ class PbpEvent(db.Model):
     sub_type      = db.Column(db.String)
     success       = db.Column(db.Integer, default=0)
     action_number = db.Column(db.Integer)
+    # A-12 — `previousAction` de FIBA: el evento que originó este (una asistencia apunta al tiro
+    # que la convirtió). NULL = no importado todavía; 0/ausencia de vínculo son distintos.
+    previous_action = db.Column(db.Integer)
 
 
 class AppConfig(db.Model):
@@ -317,6 +320,8 @@ def upgrade_db(app):
         ("players", "profile_notes",      "TEXT"),
         ("players", "profile_updated_at", "TEXT"),
         ("players", "profile_updated_by", "TEXT"),
+        # A-12 — vínculo de la asistencia con el tiro que la convirtió (sin DEFAULT: NULL = "no importado")
+        ("pbp_events", "previous_action", "INTEGER"),
     ]
     with app.app_context():
         conn = db.engine.raw_connection()

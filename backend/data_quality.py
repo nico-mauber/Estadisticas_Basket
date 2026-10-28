@@ -31,7 +31,12 @@ NULL_FIELDS = [
     ("team_game_stats",   "fouls_drawn",       "Faltas recibidas (equipo)"),
     ("player_game_stats", "blk_received",      "Tapones recibidos (jugador)"),
     ("player_game_stats", "fouls_drawn",       "Faltas recibidas (jugador)"),
+    # A-12: se cuenta solo sobre las ASISTENCIAS (el resto de los eventos no tiene vínculo que importar)
+    ("pbp_events",        "previous_action",   "Vínculo de las asistencias con su tiro"),
 ]
+
+# Filtro de fila de los campos que solo aplican a un subconjunto de la tabla.
+_ROW_FILTERS = {("pbp_events", "previous_action"): ("action_type", "assist")}
 
 
 def _check(items, incomplete, status_if_items="alerta"):
@@ -136,12 +141,15 @@ def _possession_gaps(competition_id: int) -> dict:
 
 def _null_fields(gids: list[str]) -> dict:
     models = {"games": Game, "team_game_stats": TeamGameStats,
-              "player_game_stats": PlayerGameStats, "shots": Shot}
+              "player_game_stats": PlayerGameStats, "shots": Shot, "pbp_events": PbpEvent}
     items = []
     for table, col, lbl in NULL_FIELDS:
         model = models[table]
         column = getattr(model, col)
         base = model.query.filter(model.game_id.in_(gids))
+        only = _ROW_FILTERS.get((table, col))
+        if only:
+            base = base.filter(getattr(model, only[0]) == only[1])
         total = base.count()
         # texto vacío también es "sin dato" (fecha y posición llegan como "" desde FIBA)
         nulls = base.filter(column.is_(None) | (column == "")).count() if col in ("date", "position") \

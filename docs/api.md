@@ -730,6 +730,55 @@ Jugada a jugada filtrable. Devuelve eventos del partido con marcador acumulado.
 
 ---
 
+## GET `/api/origins` — NUEVO (A-02)
+
+Origen de la posesión: cómo empieza cada posesión y cómo rinde según su origen. Auth: `login_required`. Solo posesiones **completas** (A-01); las incompletas no se imputan a ningún origen.
+
+| Param | Obligatorio | Descripción |
+|---|---|---|
+| `team` | uno de `team`/`player` | Código del equipo |
+| `player` | uno de `team`/`player` | `player_id` de la ficha: orígenes de las posesiones que el jugador finaliza (`finisher_id`), solo ataque |
+| `side` | no | `ataque` (default) o `defensa` (posesiones del rival contra el equipo: PPP concedido, TO% forzado) |
+| contexto T-03 | no | `competition`, `last`, `venue`, `opponent`, `rest`. Los filtros de evento/posesión (`quarter`, `score`, `on`, `off`, `origin`…) se informan en `context.ignored` |
+
+Response 200: `entity`, `side`, `context` (eco §7.5), `summary {possessions, classified, reconciled}`, `origins[]` (7 filas, orden fijo del cliente: `canasta_rival`, `rebote_defensivo`, `robo`, `perdida_rival`, `saque_banda`, `tiempo_muerto`, `tiro_libre_rival`), cada una con `possessions`, `share`, `metrics {ppp, efg_pct, to_pct, ft_rate, duration_avg}` (`{value, reason}`; `null` con razón `sin_intentos`), `finish {t2, t3, tl, perdida, fin_periodo}` y `sample` (badge T-02, entidad `origin` = umbrales `sample.split.*`). Con `team`: `oreb_info` (posesiones extra de oportunidades 2+, informativa, fuera de la suma) y `reconcile {sum_origins, total_possessions, ok}`.
+
+Errores: 400 `parametro_invalido` (falta `team`/`player`, ambos, o `side` inválido), 400 `contexto_invalido`, 404 `no_encontrado`, 404 `sin_pbp` (ningún partido de la selección tiene play-by-play).
+
+**Conjunto estándar y tabla.** Tipo de entidad `origin`: `GET /api/metrics/origin?id=<equipo>:<origen>&side=ataque|defensa` (las 89 claves; la población de la ficha son los equipos en el mismo origen y lado). Tabla T-06 `team_origins`: `GET /api/table/team_origins?team=<code>&side=ataque|defensa`, una fila por origen con su conjunto estándar, `% del total` y badge de muestra.
+
+## GET `/api/transition` — NUEVO (A-03)
+
+Transición y contraataque. Auth: `login_required`. Mismos parámetros que `GET /api/origins` (`team` o `player`, `side=ataque|defensa` solo con `team`, contexto T-03; los filtros de evento y de posesión se informan en `context.ignored`).
+
+Response 200 (equipo): `types[]` (`transicion`, `early`, `media_cancha`: `possessions`, `share`, `metrics {ppp, efg_pct, to_pct, ft_rate, duration_avg, first_shot_secs}`, `sample`), `ppp_diff {transicion_vs_media_cancha, early_vs_media_cancha}`, `summary {possessions, classified, unclassified {incompleta|sin_accion|reloj_no_derivable}, reconciled}`, `context`. Con `side=ataque` además: `first_shot {mean, distribution[], possessions, without_shot}`, `origin_of_transition[]` (origen del contraataque con `% del origen que corre`), `finish_in_transition[]` (6 categorías), `dreb_to_transition`, `players {rows[], coverage}` (corredores), `pass_out` (`null` / `no_registrado`) y `reconcile_fastbreak` (puntos de transición reconstruidos vs `fast_break_pts` oficial, solo partidos con ingesta actual; informativo). Con `side=defensa`: `conceded_per100`, `conceded_by_origin[]`, `own_turnovers_to_transition` y `balance`. Con `player`: `types[]` (posesiones que el jugador finaliza por tipo: PPP y eFG%), `runner {initiated, initiated_pts, assists_in_transition, pass_out}`.
+
+Conjunto estándar y tabla: `GET /api/metrics/ptype?id=<equipo>:<tipo>&side=` y `GET /api/table/team_ptypes?team=<code>&side=` (mismo patrón que `origin`). Errores como en `/api/origins`.
+
+## GET `/api/team-insights/<team_code>` — NUEVO
+
+Fortalezas y debilidades del equipo contra su competencia. Auth: `login_required`. Query: `competition`, `last`. Response 200: `strengths[]` y `weaknesses[]` (`metric`, `label`, `fmt`, `value`, `percentile`, `text`; fortaleza = percentil ≥ 70, debilidad ≤ 30, hasta 5 por lado), `teams`, `games`, `low_sample`, `evaluated`, `entity`, `context`. 400 si no hay competencia.
+
+**Cambios (2026-10):** `GET /api/players/<team>`, `GET /api/lineup/<team>` y `GET /api/onoff/<team>/<jugador>` aceptan `?competition=` y solo usan los partidos de esa competencia. `GET /api/team/<code>` agrega `extras_source` (`oficial` / `calculado` por campo del desglose ofensivo). El conjunto estándar suma `ft_uso` (90 claves).
+
+## GET `/api/second-chance` — NUEVO (A-04)
+
+Segunda oportunidad. Auth: `login_required`. Parámetros como `GET /api/origins` (`team` o `player`, `side=ataque|defensa` solo con `team`, contexto T-03).
+
+Response 200 (equipo): `summary {possessions, second_chances, oreb_in_box, incomplete, reconciled}`, `ppp_first`, `ppp_second`, `ppp_diff`, `pts_per_oreb`, `conversion`, `outcomes[]` (`putback`, `reinicio`, `kickout_triple`, `falta_recibida`, `perdida`, `sin_puntos`: `count`, `share`, `pts`, `ppp`, `sample`), `modes[]` (intentos y convertidos por modo del tiro), `sources[]` (origen del rebote según el tiro fallado: triple, media distancia, cercano, tiro libre), `rebound_zone` (`null` / `no_registrado`), `chains`, `secs_to_shot {mean, distribution[], possessions, without_shot}`. Con `side=ataque`: `players {rows[], team_row, totals}` (captura y finalización por separado; "Rebote de equipo" aparte), `cost` (coste del rebote ofensivo, aproximación) y `reconcile {calc, official, diff, games[], games_mismatch[], excluded[]}` contra `team_game_stats.second_chance_pts` (solo partidos con ingesta actual). Con `side=defensa`: `or_pct_conceded` (OR% concedido), `ppp_second` concedido, `long_rebound` (`no_registrado`) y los mismos desenlaces y segundos del rival. Con `player`: `capture {captured, pts, conversion, own_putbacks}`, `finish {finished, pts, ppp_personal}` y `outcomes[]` de lo que finaliza. Ventanas configurables `oreb.putback_secs` (3) y `oreb.kickout_secs` (6).
+
+## GET `/api/possession-clock` — NUEVO (A-05)
+
+Tramo de reloj de posesión y composición de puntos. Auth: `login_required`. Query: `team=<code>` (obligatorio), `side=ataque|defensa` (default `ataque`), `game=<game_id>` (un solo partido; ignora el resto del contexto) y contexto T-03.
+
+Response 200: `side`, `entity {type: "team", id}`, `clock_source {kind: "derivado", resolution_secs: 1, note}`, `thresholds {early_max, mid_max, reset_secs}`, `bands[]` (`temprano`, `medio`, `tardio`: `range`, `all {shots, share}`, `r24` y `r14`), `no_clock {shots, chances, reason}`, `reconcile {fga_team, fga_engine, in_bands_24, in_bands_14, no_clock, in_incomplete, ok, chances_24, chances_14}`, `points_mix`, `summary {possessions, incomplete, shots}` y `context`.
+
+Cada bloque `r24` / `r14` (`r14.tardio` = `{value: null, reason: "no_aplica"}`): `chances`, `shots`, `pts`, `share` (tiros del bloque / tiros de campo del equipo), `pts_share`, `metrics {efg_pct, ts_pct, ppt, ppp, to_pct, viol24_rate}`, `mix {t2, t3, tl, perdida}` (reparto de las oportunidades, suma 100 %), `threes {attempts, made, pct, share_of_band, share_of_team_3pa, pts, pts_share}`, `shape {paint_share, perimeter_share}`, `turnover_types {pase, manejo, pasos, viol24, otras}` y `sample` (T-02, unidad posesiones).
+
+`points_mix` (box oficial de los partidos usados; en defensa, el del rival): `pts`, `parts[]` (`t3`, `t2`, `tl`: `pts`, `share`, `made`, `attempts`, `pct`, `attempts_share`), `reconciled`, `possessions`, `ppp`, `turnovers {count, per_game, poss_share, est_points_lost}`, `assists {count, per_game, fgm_assisted_share, ast_points, ast_points_share, linked}` (`ast_points` `null` con `no_registrado` / `sin_pbp` si falta el vínculo de A-12) y `official_origin {second_chance, fast_break, from_turnovers, paint}`.
+
+Errores: 400 `parametro_invalido` ("Indicá un equipo.", "El lado debe ser ataque o defensa."), 400 `contexto_invalido`, 404 `no_encontrado`, 404 `sin_pbp`. Cortes configurables: `clock.early_max` (8) y `clock.mid_max` (16); `clock.reset_secs` (14).
+
 ## GET `/api/game/<game_id>/matchups` — NUEVO (F-07)
 
 Coincidencia en cancha de un partido: cruces entre quintetos y/o jugadores.

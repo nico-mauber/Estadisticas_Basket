@@ -1,7 +1,7 @@
 """
 Catálogo estándar de métricas (T-05, Grupo C): metadatos puros, sin fórmulas.
 
-`stats_engine.compute_standard` es el único lugar con las 86 fórmulas; este módulo solo
+`stats_engine.compute_standard` es el único lugar con las 89 fórmulas; este módulo solo
 describe cada clave (etiqueta, formato, dirección, agrupación, cómo escala con la base) y
 orquesta la petición HTTP (`build_payload`) delegando en los cargadores de cada tipo de
 entidad (`register_entity`, Grupo C: bundles.py/lineups.py/clutch.py).
@@ -51,9 +51,10 @@ GROUPS = [
     {"key": "tiro_valor", "label": "Tiro — valor",
      "metrics": ["ppt", "ppt_2", "ppt_3", "ppt_ft"]},
     {"key": "tiro_perfil", "label": "Tiro — perfil",
-     "metrics": ["fg3_uso", "fg2_uso", "ft_rate", "paint_fga_share", "mid_fga_share"]},
+     "metrics": ["fg3_uso", "fg2_uso", "ft_uso", "ft_rate", "paint_fga_share", "mid_fga_share"]},
     {"key": "balon", "label": "Balón",
-     "metrics": ["ast", "tov", "ast_to", "as_pos", "as_pct", "to_pct"]},
+     "metrics": ["ast", "tov", "ast_to", "as_pos", "ast_team_share", "ast_points", "pts_per_ast",
+                 "as_pct", "to_pct"]},
     {"key": "rebote", "label": "Rebote",
      "metrics": ["orb", "drb", "trb", "or_pct", "dr_pct", "trb_pct", "orb_pos", "drb_min", "orb_min"]},
     {"key": "defensa", "label": "Defensa",
@@ -72,7 +73,7 @@ GROUPS = [
      ]},
 ]
 
-_ALL_ENTITIES = ("team", "player", "lineup", "onoff", "clutch")
+_ALL_ENTITIES = ("team", "player", "lineup", "onoff", "clutch", "origin", "ptype")
 _PLAYER_ONLY = ("player",)
 _TEAM_ONLY = ("team",)
 
@@ -140,6 +141,7 @@ _DEFS = [
     # ── tiro_perfil ──
     _md("fg3_uso", "Uso de triple", "tiro_perfil", "pct", "neutral", "rate", "fixed", rel_dist=False),
     _md("fg2_uso", "Uso de 2", "tiro_perfil", "pct", "neutral", "rate", "fixed", rel_dist=False),
+    _md("ft_uso", "Uso de TL", "tiro_perfil", "pct", "neutral", "rate", "fixed", rel_dist=False),
     _md("ft_rate", "FT Rate", "tiro_perfil", "dec2", "higher", "rate", "fixed"),
     _md("paint_fga_share", "% tiros en pintura", "tiro_perfil", "pct", "neutral", "rate", "fixed",
         rel_dist=False),
@@ -151,6 +153,13 @@ _DEFS = [
     _md("tov", "PER", "balon", "int", "lower", "count", "count"),
     _md("ast_to", "AS/PER", "balon", "dec2", "higher", "rate", "fixed"),
     _md("as_pos", "AS/pos", "balon", "dec2", "higher", "rate", "fixed"),
+    # A-12 — creación de juego (solo jugador)
+    _md("ast_team_share", "% asistencias del equipo", "balon", "pct", "higher", "rate", "fixed",
+        entities=_PLAYER_ONLY),
+    _md("ast_points", "Puntos generados", "balon", "int", "higher", "count", "count",
+        entities=_PLAYER_ONLY),
+    _md("pts_per_ast", "Puntos por asistencia", "balon", "dec2", "higher", "rate", "fixed",
+        entities=_PLAYER_ONLY),
     _md("as_pct", "AS%", "balon", "pct", "higher", "rate", "fixed", rel_dist=False),
     _md("to_pct", "TO%", "balon", "pct", "lower", "rate", "fixed", rel_dist=False),
 
@@ -221,10 +230,10 @@ _DEFS = [
 
 METRICS: dict[str, MetricDef] = {d.key: d for d in _DEFS}
 
-# El conjunto de claves debe coincidir EXACTAMENTE con las 86 de stats_engine.compute_standard.
+# El conjunto de claves debe coincidir EXACTAMENTE con las 89 de stats_engine.compute_standard.
 assert set(METRICS) == stats_engine.metrics_catalog_keys(), (
     "metrics_catalog.METRICS debe tener las mismas claves que stats_engine.metrics_catalog_keys()")
-assert len(METRICS) == 86, f"Se esperaban 86 claves, hay {len(METRICS)}"
+assert len(METRICS) == 90, f"Se esperaban 90 claves, hay {len(METRICS)}"
 assert len(GROUPS) == 12, f"Se esperaban 12 grupos, hay {len(GROUPS)}"
 
 _group_keys_seen: set = set()
@@ -358,7 +367,7 @@ def catalog_json(lang: str = "es") -> dict:
 def standard_payload(bundle: "StatBundle", values: dict, *, context_echo: dict, base: str,
                      sample: dict | None = None, fichas: dict | None = None) -> dict:
     """Arma el payload de `GET /api/metrics/<entity_type>` (plan §4.8 paso 9): entidad, contexto,
-    base, grupos y las 86 claves (las que falten en `values` → `no_aplica`). `fichas` (T-01) se
+    base, grupos y las 89 claves (las que falten en `values` → `no_aplica`). `fichas` (T-01) se
     fusiona en cada objeto de métrica."""
     values_completos = {}
     for key in METRICS:
@@ -407,7 +416,7 @@ def _entity_id_kwargs(entity_type: str, raw_id: str) -> dict:
         return {"team_code": team_code.upper()}
     if entity_type == "clutch":
         return {"team_code": raw_id.upper()}
-    if entity_type == "period":
+    if entity_type in ("period", "origin", "ptype"):
         return {"team_code": raw_id.split(":", 1)[0].upper()}
     return {}
 
@@ -455,6 +464,9 @@ def build_payload(entity_type: str, args) -> dict:
             params["margin"] = int(margin)
         if window_secs not in (None, ""):
             params["window_secs"] = int(window_secs)
+
+    if entity_type in ("origin", "ptype"):
+        params["side"] = args.get("side") or "ataque"
 
     req = EntityRequest(entity_type=entity_type, entity_id=entity_id, comp_id=ctx.competition_id,
                         ctx=ctx, base=base, params=params)
@@ -525,7 +537,7 @@ def build_payload(entity_type: str, args) -> dict:
         }
 
     team_poss = None
-    if entity_type in ("lineup", "pair", "onoff", "split", "clutch"):
+    if entity_type in ("lineup", "pair", "onoff", "split", "clutch", "origin", "ptype"):
         team_code = meta0.get("team_code")
         if team_code:
             team_poss = sample_mod.team_offensive_possessions(team_code, ctx.competition_id, ctx)
@@ -611,14 +623,26 @@ def _attach_fichas(payload, entity_type, b0, ctx, base, *, prior_fn) -> None:
             payload["population"] = {"size": 0, "criterion": "", "context_label": "", "reason": "contexto_no_comparable"}
             return
         pop = population.population(entity_type, ctx.competition_id, ctx, variant=variant)
+        fallback = None
+        import config
+        if not pop.reason and pop.size < config.get("population.min_size"):
+            # Competencia joven (pocos partidos por equipo): ninguna entidad llega al mínimo de muestra y la
+            # ficha quedaba sin promedio, puesto ni percentil. Se compara contra todas las que tienen datos y
+            # se avisa; la muestra baja de cada una sigue marcada por su badge.
+            wide = population.population(entity_type, ctx.competition_id, ctx, variant=variant,
+                                         apply_thresholds=False)
+            if wide.size > pop.size:
+                pop, fallback = wide, "sin_umbral"
         rank_values = _ranking_values(b0, ctx, sample_mod=prior_fn)
         population.attach_fichas(payload["metrics"], entity_type, b0.entity_id, pop,
                                  rank_values=rank_values, base=base)
         payload["population"] = {
             "size": pop.size,
-            "criterion": pop.criterion,
+            "criterion": ("todos los equipos con partidos en la competencia (todavía pocos llegan al mínimo de muestra)"
+                          if fallback and entity_type == "team" else pop.criterion),
             "context_label": pop.context_label,
             "reason": pop.reason,
+            "fallback": fallback,
         }
     except Exception:
         import logging
@@ -632,6 +656,8 @@ def _population_variant(entity_type, bundle):
     el tramo (cada ventana tiene su propia población); si no, None."""
     if entity_type == "period":
         return (bundle.meta or {}).get("window")
+    if entity_type in ("origin", "ptype"):
+        return (bundle.meta or {}).get("variant")
     if entity_type == "lineup":
         pids = (bundle.meta or {}).get("player_ids")
         if pids:

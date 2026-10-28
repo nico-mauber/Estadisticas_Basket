@@ -1,94 +1,63 @@
 # Progress — A-05: Tramo de reloj de posesión
 
-> **Estado:** ⬜ No iniciado
+> **Estado:** 🔶 Implementado en Equipo (ataque y defensa) y en Partido: tramos del reloj de posesión, reloj de 14 s aparte, conciliación contra el box oficial y composición de puntos. Faltan jugador, quinteto, panel de decisión de siete preguntas, matriz zona × tramo, filtros de contexto `clock` / `clock_start`, entidad `clock` (T-05) y tablas T-06.
+> **Fecha:** 2026-10-27
+> **Origen del pedido:** el cliente marcó como urgente (a) cómo anota cada equipo, en equipo y en partido, con el peso de triples, dobles, tiros libres, pérdidas y asistencias, y (b) la segmentación por tramo del reloj (antes de 8 s, entre 8 y 16 s, más de 16 s) con el % de triples, su cantidad y su peso. Se implementó primero esa parte (partición (a) del plan §10 D-8).
 
 ## Estado de tareas
-
-### Grupo A — Backend: configuración, datos de oportunidad y enriquecedor
-- [ ] T-A1 · Activar claves `clock.early_max` / `clock.mid_max`
-- [ ] T-A2 · Campos nuevos de `Chance` y de `shots[]`
-- [ ] T-A3 · `band_of`
-- [ ] T-A4 · `enrich_clock` (oportunidades)
-- [ ] T-A5 · Tramo, `clock_start` y quinteto por tiro
-- [ ] T-A6 · Registro del enriquecedor
-- [ ] T-A7 · Recorte por oportunidad (`clock`/`clock_start`) y predicado
-
-### Grupo B — Backend: fórmulas y agregación
-- [ ] T-B1 · `stats_engine.clock_rates`
-- [ ] T-B2 · `clock_report` ataque (r24/r14, fichas, badges)
-- [ ] T-B3 · Conciliación de tiros
-- [ ] T-B4 · Defensa
-- [ ] T-B5 · `player_clock` y tabla de jugadores
-- [ ] T-B6 · `lineup_clock`
-- [ ] T-B7 · `decision_panel`
-- [ ] T-B8 · `shot_zones` (nivel posesión, `zone_table_from_shots`)
-- [ ] T-B9 · `clock_matrix`
-- [ ] T-B10 · Manejo de nulos
-
-### Grupo C — Backend: registros T-05/T-03/T-06 y ruta
-- [ ] T-C1 · `clock_bundles` + `register_entity`
-- [ ] T-C2 · `register_dimension("clock"/"clock_start")`
-- [ ] T-C3 · `table_rows`/`matrix_rows` + `register_table`
-- [ ] T-C4 · `GET /api/possession-clock`
-- [ ] T-C5 · Errores 400/404
-
-### Grupo D — Frontend
-- [ ] T-D1 · `api.possessionClock`
-- [ ] T-D2 · `clock-panel.js` (tramos, decisión, jugadores)
-- [ ] T-D3 · Matriz zona × tramo y exportación
-- [ ] T-D4 · Montaje en Equipo (Posesión, Quintetos) y Jugador
-- [ ] T-D5 · Estados loading/vacío/error/offline
-- [ ] T-D6 · Estilos mobile
-- [ ] T-D7 · Bump `sw.js`
-
-### Grupo E — Documentación
-- [ ] T-E1 · `docs/api.md`
-- [ ] T-E2 · `docs/metrics.md`
-- [ ] T-E3 · `docs/frontend.md`
-- [ ] T-E4 · `docs/architecture.md`
-
-### Grupo F — Verificación
-- [ ] T-F1…T-F26
+- [x] RF-1 · Reloj de posesión derivado del reloj de partido, documentado en `docs/metrics.md` y visible en pantalla
+- [x] RF-2 · Tramo por tiro (`shots[].band`): temprano ≤ 8 s, medio ≤ 16 s, tardío; sin reloj derivable → sin tramo, nunca temprano
+- [x] RF-3 · Reloj de 14 s aparte (`r14`), sin tramo tardío; sus tiros no entran en los promedios del reloj de 24 s
+- [x] RF-4 · Unidad oportunidad: tramo del evento de decisión (último tiro de campo, pérdida o primer tiro libre)
+- [x] RF-5 · Por tramo: tiros, % de los tiros, eFG%, TS%, PPT, PPP, TO%, violaciones de 24 s, reparto T2/T3/TL/pérdida, **peso de los triples** (% de sus tiros, % de los triples del equipo, puntos)
+- [x] RF-6 · Conciliación: tiros de los tramos + sin reloj + posesiones incompletas = tiros del box oficial
+- [x] RF-7 · Versión defensiva (`side=defensa`)
+- [ ] RF-8 · Por jugador
+- [ ] RF-9 · Por quinteto
+- [ ] RF-10 · Panel de decisión de siete preguntas (las preguntas 1, 4 y 6 quedan cubiertas de hecho por las tablas: pérdidas por tramo y tipo, reparto T2/T3/TL, PPP por tramo)
+- [ ] RF-11 / RF-12 · Matriz zona × tramo y filtro del mapa de tiro
+- [ ] RF-13 · Dimensiones de contexto `clock` / `clock_start`, entidad `clock` y tablas `team_clock` / `zone_clock_matrix`
+- [x] RF-15 · `clock.early_max` y `clock.mid_max` activadas en `CONFIG_SPEC`; cambiarlas por `PUT /api/settings` reasigna sin reiniciar
+- [x] RF-16 · Denominador 0 → `null` / `sin_intentos`; equipo sin pbp → 404 `sin_pbp`
+- [x] Extra pedido por el cliente · **Composición de los puntos**: peso de triples, dobles y tiros libres; pérdidas (cantidad, % de posesiones, puntos perdidos estimados); asistencias (cantidad, % de canastas asistidas, puntos generados de A-12)
+- [x] Extra · Modo partido: `GET /api/possession-clock?team=&game=`, pestaña "Reloj y puntos" en Partido con selector de equipo
 
 ## Estado de CA (gate de aceptación)
+Seed local (13 partidos): `a05_sim.py` 70/70 y `a05_browser.py` 47/47 (1280 y 360 px, sin errores de consola).
+
 | CA | Estado | Evidencia |
 |---|---|---|
-| CA-1 (CA del cliente) | ⬜ | |
-| CA-2 | ⬜ | |
-| CA-3 | ⬜ | |
-| CA-4 | ⬜ | |
-| CA-5 | ⬜ | |
-| CA-6 | ⬜ | |
-| CA-7 | ⬜ | |
-| CA-8 | ⬜ | |
-| CA-9 | ⬜ | |
-| CA-10 | ⬜ | |
-| CA-11 | ⬜ | |
-| CA-12 | ⬜ | |
-| CA-13 | ⬜ | |
-| CA-14 | ⬜ | |
-| CA-15 | ⬜ | |
-| CA-16 | ⬜ | |
-| CA-17 | ⬜ | |
-| CA-18 | ⬜ | |
-| CA-19 | ⬜ | |
-| CA-20 | ⬜ | |
-| CA-21 | ⬜ | |
+| CA-1 | ✅ | ALB, COL, LAG y MON, ataque y defensa: Σ tiros por tramo (24 s y 14 s) + sin reloj + incompletas = tiros del box. ALB ataque: 117 + 17 + 2 + 0 = 136 |
+| CA-2 | ✅ | `band_of`: 8 s temprano, 9 y 16 s medio, 17 s tardío |
+| CA-3 | ✅ | `PUT /api/settings clock.early_max=6`: tiros tempranos de ALB 34 → 25, el total sigue conciliado |
+| CA-4 | ✅ | reloj de 14 s: 10 s medio, 15 s sin tramo, `r14.tardio` = `null` / `no_aplica` |
+| CA-5 | ✅ | tiros sin reloj derivable en `no_clock` y dentro de la conciliación |
+| CA-7 | ✅ | el reparto T2/T3/TL/pérdida suma 100 % en cada tramo |
+| CA-8 | 🔶 | los tipos de pérdida suman las pérdidas del tramo por construcción; sin test propio |
+| CA-9 | 🔶 | defensa y ataque concilian por separado con el box; el cruce A-defensa = B-ataque no se verificó |
+| CA-10..CA-14 | ❌ | jugador, quinteto, panel de decisión, matriz y filtro de mapa: fuera de esta partición |
+| CA-15 / CA-16 | ❌ | filtro de contexto y entidad `clock` pendientes |
+| CA-17 | ✅ | tramo sin tiros → `null` / `sin_intentos`, sin NaN; equipo sin pbp → 404 |
+| CA-19 | ✅ | prórrogas con el mismo criterio (reloj dentro del período) |
+| CA-20 | ✅ | la fuente derivada se ve en pantalla y está en `docs/metrics.md` |
+| CA-21 | ✅ | 360 px sin scroll horizontal de página |
 
-## Gates técnicos
-- Backend arranca sin traceback: ⬜
-- `upgrade_db()` idempotente (no aplica: sin cambios de esquema): —
-- Endpoints probados manualmente: ⬜
-- Consola del navegador sin errores JS: ⬜
+## Desviaciones respecto al plan
+- **Partición del alcance (D-8):** se entregó la parte (a). Lo que falta (jugador, quinteto, siete preguntas, matriz zona × tramo, filtros de contexto, entidad `clock`, tablas T-06) queda como segunda entrega.
+- **Composición de puntos** no estaba en la especificación v2: la pidió el cliente como urgente. Vive en el mismo endpoint y panel (`points_mix`).
+- **Clasificación de la oportunidad por su evento de decisión**, no por `end_type`: un tiro al final del período termina como `fin_periodo` y dejaba la suma en menos de 100 %.
+- **Sin pestaña `posesion` ni módulo de vista** (X-01 no se hizo): el panel se monta como card en Equipo y como pestaña nueva de Partido.
+- **Tiros marcados con `three`** en `Possession.shots[]` (campo nuevo) para separar dobles y triples aun sin coordenadas.
 
-## Desviaciones respecto a docs/ o plan
-(completar durante la implementación)
+## Limitaciones conocidas
+- El reloj de posesión es derivado con resolución de 1 s; tras canasta rival el saque cuenta como posesión (sobreestima 1–3 s).
+- Un tiro con `elapsed` fuera de rango queda sin tramo (aparece en "Sin reloj derivable").
+- `fga_team` del box oficial: si un partido no tiene fila de box, no se concilia.
 
-## Docs a actualizar
-- `docs/api.md` — `GET /api/possession-clock`, filtros `clock`/`clock_start` (también en `/api/shot-zones`), tablas `team_clock` y `zone_clock_matrix`, tipo de entidad `clock`.
-- `docs/metrics.md` — fuente derivada del reloj de posesión (resolución de 1 s), regla de tramos y reloj de 14, unidad oportunidad, fórmulas por tramo (TS% mixto), tipos de pérdida, limitaciones.
-- `docs/frontend.md` — bloque "Tramo de reloj de posesión" (S3/S4/Quintetos), panel de decisión, matriz zona × tramo, copy nuevo.
-- `docs/architecture.md` — módulo `backend/possession_clock.py`.
+## Docs actualizados
+- ✅ `docs/api.md` · ✅ `docs/metrics.md` · ✅ `docs/frontend.md` · ✅ `docs/architecture.md`
 
 ## Deuda / TODO
-(completar durante la implementación)
+- Segunda entrega: jugador, quinteto, panel de decisión, matriz zona × tramo, `clock` / `clock_start` en el contexto, entidad `clock`, tablas `team_clock` / `zone_clock_matrix`.
+- Vista de composición de puntos en Liga (comparar equipos) y en Preparar.
+- `t()` para el copy (F-21).

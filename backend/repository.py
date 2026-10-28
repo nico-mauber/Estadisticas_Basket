@@ -108,6 +108,15 @@ def resolve_competition(param: str | None = None, *, team_code: str | None = Non
 
 # ── Filas por competencia ───────────────────────────────────────────────────
 
+_row_fillers: list = []
+
+
+def register_row_filler(fn) -> None:
+    """`fn(rows)` completa en las filas de equipo campos que la base trae `NULL` (ver `breakdown.py`)."""
+    if fn not in _row_fillers:
+        _row_fillers.append(fn)
+
+
 def _all_team_rows() -> dict:
     """{(game_id, team_code): fila} de todos los partidos visibles, en orden cronológico."""
     def build():
@@ -123,6 +132,8 @@ def _all_team_rows() -> dict:
             for r in pair:
                 other = [o for o in pair if o is not r]
                 r["opp_code"] = other[0]["team_code"] if len(other) == 1 else None
+        for fill in _row_fillers:
+            fill(rows)
         return rows
     return memo(("team_rows",), build)
 
@@ -185,6 +196,25 @@ def _team_game_ids(team_code: str, comp_id: int | None = None) -> set[str]:
     return {tr.game_id for tr in q.all()}
 
 
+def _load_events(game_ids, keep: bool = True) -> dict:
+    """`{game_id: [evento, ...]}` ordenados por `action_number`, con UNA consulta de núcleo por tanda: sin
+    construir objetos del ORM (era el costo dominante de reconstruir las posesiones de una liga). Memo por
+    petición: el mismo partido lo piden la vista de cada equipo y el motor de posesiones. `keep=False` no guarda
+    los eventos (cálculos que recorren todos los partidos y solo conservan un resumen)."""
+    store = memo(("pbp_events_by_game",), dict) if keep else {}
+    missing = [gid for gid in game_ids if gid not in store]
+    if missing:
+        t = PbpEvent.__table__
+        for i in range(0, len(missing), 400):
+            chunk = missing[i:i + 400]
+            for gid in chunk:
+                store[gid] = []
+            q = db.select(t).where(t.c.game_id.in_(chunk)).order_by(t.c.game_id, t.c.action_number)
+            for row in db.session.execute(q).mappings():
+                store[row["game_id"]].append(dict(row))
+    return {gid: store[gid] for gid in game_ids}
+
+
 def game_pbp_data(game_id: str) -> dict | None:
     """Eventos + info de un partido para possessions.py.
 
@@ -193,10 +223,7 @@ def game_pbp_data(game_id: str) -> dict | None:
         g = Game.query.filter_by(game_id=game_id).first()
         if not g:
             return None
-        events = [
-            {c.name: getattr(e, c.name) for c in e.__table__.columns} for e in
-            PbpEvent.query.filter_by(game_id=game_id).order_by(PbpEvent.action_number).all()
-        ]
+        events = _load_events([game_id])[game_id]
         if not events:
             return None
         player_rows = PlayerGameStats.query.filter_by(game_id=game_id).all()
@@ -219,15 +246,19 @@ def team_pbp_games(team_code: str, comp_id: int | None = None) -> list[dict]:
     """
     def build():
         games = []
-        for gid in _team_game_ids(team_code, comp_id):
-            events = [
-                {c.name: getattr(e, c.name) for c in e.__table__.columns} for e in
-                PbpEvent.query.filter_by(game_id=gid).order_by(PbpEvent.action_number).all()
-            ]
-            if not events:
-                continue
-            g = Game.query.filter_by(game_id=gid).first()
-            if not g:
+        ids = sorted(_team_game_ids(team_code, comp_id))
+        if not ids:
+            return games
+        events_by_game = _load_events(ids)
+        game_rows = {g.game_id: g for g in Game.query.filter(Game.game_id.in_(ids)).all()}
+        players_by_game: dict = {}
+        for i in range(0, len(ids), 400):
+            for pr in PlayerGameStats.query.filter(PlayerGameStats.game_id.in_(ids[i:i + 400])).all():
+                players_by_game.setdefault(pr.game_id, []).append(pr)
+        for gid in ids:
+            events = events_by_game[gid]
+            g = game_rows.get(gid)
+            if not events or not g:
                 continue
             opp_code = g.away_code if g.home_code == team_code else g.home_code
             if not opp_code:
@@ -235,7 +266,7 @@ def team_pbp_games(team_code: str, comp_id: int | None = None) -> list[dict]:
             games.append({
                 "game_id":     gid,
                 "events":      events,
-                "player_rows": PlayerGameStats.query.filter_by(game_id=gid).all(),
+                "player_rows": players_by_game.get(gid, []),
                 "opp_code":    opp_code,
                 "info":        {"date": g.date, "home_away": "L" if g.home_code == team_code else "V"},
             })

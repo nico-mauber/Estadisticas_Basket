@@ -86,11 +86,16 @@ export const api = {
   mergePlayers:  (targetId, sourceId) => send("/api/identity/merge", "POST", { target_id: targetId, source_id: sourceId }),
   // Cierres: "all" (todas las competencias) se envía como "sin parámetro": este endpoint no entiende "all"
   clutchTeam:    (team, comp) => apiFetch(`/api/clutch/${encodeURIComponent(team)}${qs({ competition: comp === "all" ? "" : comp })}`),
-  lineup:        (code, players) => apiFetch(`/api/lineup/${encodeURIComponent(code)}?players=${players.map(encodeURIComponent).join("|")}`),
-  onoff:         (code, name) => apiFetch(`/api/onoff/${encodeURIComponent(code)}/${encodeURIComponent(name)}`),
+  lineup:        (code, players, params = {}) => apiFetch(`/api/lineup/${encodeURIComponent(code)}${qs({ players: players.join("|"), ...params })}`),
+  onoff:         (code, name, params = {}) => apiFetch(`/api/onoff/${encodeURIComponent(code)}/${encodeURIComponent(name)}${qs(params)}`),
   league:        (comp, { summary } = {}) => apiFetch(`/api/league${qs({ competition: comp, include: summary ? "summary" : "" })}`),
   // Ficha de métrica: ranking completo de la población (T-01)
   ranking:       (type, metric, params = {}) => apiFetch(`/api/rankings/${encodeURIComponent(type)}/${encodeURIComponent(metric)}${qs(params)}`),
+  secondChance:  (params = {}) => apiFetch(`/api/second-chance${qs(params)}`),
+  teamInsights:  (code, params = {}) => apiFetch(`/api/team-insights/${encodeURIComponent(code)}${qs(params)}`),
+  possessionClock: (params = {}) => apiFetch(`/api/possession-clock${qs(params)}`),
+  transition:    (params = {}) => apiFetch(`/api/transition${qs(params)}`),
+  origins:       (params = {}) => apiFetch(`/api/origins${qs(params)}`),
   periods:       (code, params = {}) => apiFetch(`/api/periods/${encodeURIComponent(code)}${qs(params)}`),
   playerProfile: (id, params = {}) => apiFetch(`/api/player-profile/${encodeURIComponent(id)}${qs(params)}`),
   updatePlayerProfile: (id, body) => send(`/api/player-profile/${encodeURIComponent(id)}`, "PUT", body),

@@ -50,6 +50,15 @@ class Chance:
     end_type: str | None = None      # t2c, t2f, t3c, t3f, falta, perdida, fin_periodo
     pts: int = 0
     outcome: str | None = None       # lo llena A-04
+    mode: str | None = None          # A-04: modo del tiro (putback, kickout, reinicio); None si no hubo tiro
+    shot_secs: int | None = None     # A-04: segundos del rebote al primer tiro de la oportunidad
+    source: str | None = None        # A-04: tipo de tiro fallado que dio el rebote (triple, media_distancia, cercano, tiro_libre)
+    rebounder_id: int | None = None  # A-04: quien capturó el rebote ofensivo (None = rebote de equipo)
+    finisher_id: int | None = None   # A-04: quien tiró, perdió el balón o recibió la falta
+    band: str | None = None          # A-05: tramo del reloj de posesión del evento de decisión
+    end_elapsed: int | None = None   # A-05: segundos de reloj de posesión del evento de decisión
+    box: dict | None = None          # A-05: conteos propios de la oportunidad (tiros, libres, pérdidas)
+    turnover_kind: str | None = None  # A-05: pase, manejo, pasos, viol24, otras
 
 
 @dataclass
@@ -82,6 +91,11 @@ class Possession:
     score_start: tuple | None = None       # (s1, s2) al inicio
     origin: str | None = None              # lo llena A-02
     ptype: str | None = None               # lo llena A-03
+    ptype_reason: str | None = None        # A-03: por qué no hay tipo (sin_accion, reloj_no_derivable)
+    first_elapsed: int | None = None       # A-03: segundos de posesión hasta el primer evento de decisión
+    finish_kind: str | None = None         # A-03: bandeja_volcada, otro_2, triple_esquina, triple_frontal, tiro_libre, perdida, fin_periodo
+    starter_id: int | None = None          # A-03: quien recuperó el balón (rebote defensivo o robo)
+    end_player_id: int | None = None       # A-03: quien tiró, perdió el balón o recibió la falta que cerró la posesión
     event_numbers: tuple | None = None     # action_numbers de [start_event, end_event]
 
 
@@ -332,7 +346,7 @@ class _Walker:
         xy = self.p["xy"].get(an)
         zone = (self.p["zone"](ev["action_type"], ev.get("sub_type") or "", xy[0], xy[1])
                 if xy and xy[0] is not None and xy[1] is not None else None)
-        po.shots.append({"action_number": an, "elapsed": el, "band": None, "zone": zone,
+        po.shots.append({"action_number": an, "elapsed": el, "band": None, "zone": zone, "three": n == 3,
                          "made": ok, "pts": n if ok else 0, "player_id": pid})
         if not ok:
             self.miss = {"team": T, "end": f"t{n}f", "an": an, "i": i}
@@ -585,6 +599,20 @@ def team_possessions(team_code, comp_id, ctx=None, *, side="ataque"):
     return out
 
 
+def team_possessions_in(team_code, game_ids, *, side="ataque"):
+    """Posesiones completas del equipo en los partidos `game_ids` (los de la selección activa).
+
+    No carga eventos: cada partido sale del caché de `game_possessions`. Los partidos sin pbp aportan 0."""
+    out = []
+    for gid in game_ids:
+        for p in game_possessions(gid):
+            if p.incomplete:
+                continue
+            if (p.team if side == "ataque" else p.opp) == team_code:
+                out.append(p)
+    return out
+
+
 def possessions_bundle(possessions, *, entity_type, entity_id, name, games):
     """Posesiones completadas → StatBundle (plan §4.6, PROPUESTA)."""
     from stats_engine import StatBundle
@@ -613,7 +641,12 @@ def possessions_bundle(possessions, *, entity_type, entity_id, name, games):
 
 
 def ppp_stats(comp_id):
-    """PPP stats de la competencia: {mean, sd, n} (plan §4.10, PROPUESTA)."""
+    """PPP stats de la competencia: {mean, sd, n} (plan §4.10, PROPUESTA). Cacheado por versión de datos: el
+    ajuste por muestra lo pide por cada fila de cada tabla y recorría las posesiones de toda la liga cada vez."""
+    return cache.memo("poss:ppp_stats", comp_id, lambda: _ppp_stats(comp_id))
+
+
+def _ppp_stats(comp_id):
     import math
     games = Game.query.filter_by(competition_id=comp_id).all()
     ppp_vals = []

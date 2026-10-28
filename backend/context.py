@@ -35,8 +35,9 @@ _QUARTER_VALUES = ("1", "2", "3", "4", "pr")
 _POSSESSION_VALUES = {
     "clock": ("temprano", "medio", "tardio"),
     "clock_start": ("temprano", "medio", "tardio"),
-    "origin": ("robo", "rebote_def", "rebote_of", "saque", "tiro_libre", "pelota_muerta"),
-    "ptype": ("transicion", "media_cancha", "segunda_oportunidad"),
+    "origin": ("canasta_rival", "rebote_defensivo", "robo", "perdida_rival", "saque_banda", "tiempo_muerto",
+               "tiro_libre_rival"),
+    "ptype": ("transicion", "early", "media_cancha"),
     "chance": ("1", "2", "3mas"),
 }
 _SCORE_VALUES = ("ajustado", "paliza")

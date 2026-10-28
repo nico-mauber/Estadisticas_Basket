@@ -204,6 +204,72 @@ PTS/pos y sigue el mismo criterio. Se reproducen sumando el box score de la sele
 
 ---
 
+## Creación de juego *(jugador, A-12)*
+
+FIBA publica en cada asistencia el evento del tiro que la convirtió (`previousAction`). Con ese vínculo:
+
+| Clave | Fórmula | Base |
+|---|---|---|
+| `ast_team_share` | AST del jugador ÷ AST del equipo en los partidos que el jugador disputó (cociente de totales; no depende del vínculo) | fija |
+| `ast_points` | 2 × asistencias a tiros de 2 + 3 × asistencias a tiros de 3 | conteo (escala con la base) |
+| `pts_per_ast` | `ast_points` ÷ asistencias a tiros de campo | fija |
+
+Las asistencias a tiro libre no suman puntos generados: no se sabe cuántos de la serie entraron. Sin el vínculo el valor es nulo con razón `no_registrado` (hay que reprocesar el partido), nunca 0; sin jugada a jugada, `sin_pbp`; sin asistencias en la selección, `sin_asistencias`. AS/pos y la cuota del equipo son indicadores distintos: el primero normaliza por las posesiones del jugador, el segundo por las asistencias del equipo.
+
+## Origen de la posesión (A-02)
+
+Cada posesión completa tiene **uno y solo uno** de siete orígenes (`origin.py`, sobre el evento que cerró la posesión anterior; el "tras rebote ofensivo" del cliente es origen de una *oportunidad*, no de una posesión, y se informa aparte, DA-29). Precedencia cuando el evento admite varias lecturas: `tiempo_muerto` > `robo` > `rebote_defensivo` > `tiro_libre_rival` > `canasta_rival` > `perdida_rival` > `saque_banda`.
+
+| Origen | Regla |
+|---|---|
+| `tiempo_muerto` | hay un `timeout` (de cualquiera de los dos equipos) entre el evento de cierre anterior y el inicio de la posesión |
+| `robo` | el cierre anterior es una pérdida rival y el equipo registra un `steal` en la vecindad (hasta 3 eventos antes de la pérdida o entre la pérdida y el inicio). FIBA no publica `previous_action` en las pérdidas, así que el vínculo es por vecindad |
+| `rebote_defensivo` | la posesión abre con un rebote del equipo tras un tiro de campo errado |
+| `tiro_libre_rival` | el cierre anterior es un tiro libre rival convertido, **o** un tiro libre rival errado que el equipo rebotea (definición literal del cliente: "convertido o rebotado") |
+| `canasta_rival` | el cierre anterior es un tiro de campo rival convertido |
+| `perdida_rival` | el cierre anterior es una pérdida rival sin robo registrado |
+| `saque_banda` | inicio de período (salto inicial o posesión alterna, también en prórroga), balón retenido, y **default** de todo caso no identificable (nunca un octavo origen: garantiza que la suma de orígenes iguale el total de posesiones) |
+
+Por origen: **volumen** y **%** = posesiones del origen / posesiones completas de la selección; **PPP** = pts / posesiones; **eFG%** = (FGM + 0,5·3PM) / FGA; **TO%** = pérdidas / posesiones; **FT Rate** = TLI / TCI; **duración media** = segundos / posesiones. Reparto de finalización sobre `end_type`: T2 (`t2c`+`t2f`), T3 (`t3c`+`t3f`), TL (`falta`), Pérdida; `fin_periodo` (posesión sin tiro por fin de cuarto) cuenta en volumen y PPP pero se informa aparte, fuera del reparto %. Un origen sin intentos → `null` con razón `sin_intentos`. Fórmulas en `stats_engine.origin_rates`.
+
+## Tipo de posesión: transición, ataque temprano y media cancha (A-03)
+
+Cada posesión completa con un evento de decisión tiene un tipo (`transition.py`), independiente de su origen. Se mide con los segundos de reloj de posesión hasta el **primer evento de decisión**: primer tiro de campo; si no hay tiro, la falta recibida con tiros libres o la pérdida. `transicion` si ≤ `transition.max_secs` (7), `early` si ≤ `early_offense.max_secs` (12), `media_cancha` en el resto. Los cortes se leen de la configuración (F-13) en cada reconstrucción: cambiarlos reclasifica sin reiniciar. Sin tipo, y contadas aparte: `incompleta`, `sin_accion` (fin de período sin tiro, falta ni pérdida) y `reloj_no_derivable`. El reparto de los tres tipos suma 100 % de las posesiones clasificadas (pooled).
+
+El reloj de posesión es derivado (FIBA no publica shot clock) con resolución de 1 s: un tiro a los 7,4 s se lee como 7 y es transición. Por tipo: volumen, %, PPP, eFG%, TO%, FT Rate (fórmulas de origen), duración media y segundos hasta el primer tiro; diferencial de PPP transición − media cancha. Finalización en transición (6 categorías exclusivas, `fin_periodo` aparte): bandeja o volcada (`layup`, `drivinglayup`, `reverselayup`, `tipinlayup`, `dunk`), otro 2, triple de esquina (`left_corner_3`/`right_corner_3`), triple frontal, tiro libre (la posesión termina en falta) y pérdida. Corredores: iniciador = quien capturó el rebote defensivo o robó (el robo se busca en los 10 eventos previos); finalizador = quien tiró, perdió el balón o recibió la falta (`foulon`). Defensa: transiciones concedidas por 100 posesiones, pérdidas propias seguidas de transición rival, y balance defensivo = tiros de campo propios fallados que el rival convierte en transición con puntos (origen `rebote_defensivo`). El **primer pase de salida** no existe en el pbp de FIBA: `no_registrado`.
+
+## Segunda oportunidad (A-04)
+
+Cada rebote ofensivo propio (incluido el de equipo) abre una oportunidad nueva (`Chance` n ≥ 2 de A-01) dentro de la misma posesión (`second_chance.py`). Desenlace, uno y solo uno, según la acción terminal de la oportunidad: pérdida sin tiro → `perdida`; termina en tiros libres sin canasta de campo → `falta_recibida`; canasta de campo → `putback` / `kickout_triple` / `reinicio` según el modo del tiro (el and-one suma sus puntos); tiro fallado o fin de período → `sin_puntos`. Modo del tiro: `putback` = tiro a ≤ `oreb.putback_secs` del rebote **sin asistencia vinculada** (FIBA no registra pases no asistidos); `kickout` = triple a ≤ `oreb.kickout_secs` que no es putback; `reinicio` = el resto. Los segundos se miden con el reloj derivado (1 s de resolución).
+
+**PPP de 2.ª oportunidad** = puntos de las oportunidades n ≥ 2 / cantidad de oportunidades n ≥ 2; **PPP de 1.ª** = puntos de las primeras oportunidades / posesiones completas; **puntos por rebote ofensivo** = puntos de la cadena / rebotes ofensivos capturados; **conversión** = oportunidades n ≥ 2 con puntos / oportunidades n ≥ 2. Origen del rebote por el tiro fallado que cierra la oportunidad anterior (`cercano` = zona restringida). Cadena = posesión con 2 o más rebotes ofensivos (3 o más oportunidades). **OR% concedido** = ROF rival / (ROF rival + RDEF propios) = 1 − DR%. **Coste del rebote ofensivo** (aproximación): transiciones (A-03) del rival en posesiones que abre su rebote defensivo tras un tiro propio fallado. La zona del rebote y el rebote largo vs en la zona son `no_registrado`. Conciliación con `second_chance_pts` del box: exacta en 11 de 14 equipos del seed; los otros 3 difieren en 2 puntos en un partido (uno por un rebote ofensivo en una posesión incompleta).
+
+## Tramo de reloj de posesión (A-05)
+
+**Fuente derivada.** FIBA LiveStats no publica el shot clock. El reloj de posesión se deriva: segundos de reloj de partido transcurridos desde el inicio de la oportunidad hasta el evento (dentro del período; resolución de 1 s, un tiro a 8,4 s cuenta como 8). Tras canasta rival el saque no se registra, así que el tiempo del saque cuenta como posesión y el valor puede estar sobreestimado en 1 a 3 s. No hay forma de validarlo contra el reloj oficial.
+
+**Tramos** (`clock.early_max` = 8, `clock.mid_max` = 16): temprano 0–8 s, medio 9–16 s, tardío 17–24 s. Un tiro sin reloj derivable queda **sin tramo** (`no_clock`), nunca como temprano. Tras rebote ofensivo el reloj se reinicia a 14 s (`clock.reset_secs`): esas oportunidades se analizan **aparte** (`r14`), con tramos temprano y medio (9–14 s) y sin tramo tardío; sus tiros no se mezclan con los del reloj de 24 s en ningún promedio.
+
+**Unidad.** El tramo de una *oportunidad* es el de su evento de decisión (último tiro de campo; si no hay, la pérdida; si no, el primer tiro libre de la falta). El tramo de un *tiro* es el de su propio instante. Cada tiro de campo del equipo cae en uno solo de: tramo del reloj de 24 s, tramo del reloj de 14 s, sin reloj o posesión incompleta (se concilia contra el box oficial).
+
+**Fórmulas por tramo.** eFG% = (T2c + 1,5 × T3c) / tiros de campo del tramo; PPT = puntos de campo / tiros de campo; TS% = (puntos de campo + TLc) / (2 × (tiros de campo + 0,44 × TLi)); PPP = puntos de las oportunidades del tramo / oportunidades del tramo; TO% = pérdidas / oportunidades; violaciones de 24 s = pérdidas con subtipo `24sec` / oportunidades; reparto T2 / T3 / TL / pérdida = cómo termina cada oportunidad (suma 100 %). **Peso de los triples**: `share_of_band` = triples intentados / tiros del tramo; `share_of_team_3pa` = triples del tramo / triples del equipo; `pts_share` = puntos de triples del tramo / puntos de campo del equipo.
+
+**Tipos de pérdida.** pase = `badpass`; manejo = `ballhandling`; pasos = `travel`; 24 segundos = `24sec`; otras = el resto de los subtipos y las pérdidas sin subtipo.
+
+## Composición de los puntos (A-05)
+
+Con el box oficial de los partidos de la selección (en defensa, el del rival): puntos de triples = 3 × T3c, de dobles = 2 × T2c, de tiros libres = TLc; el peso de cada uno es su parte de los puntos (suman 100 %). **Peso de las pérdidas**: pérdidas / posesiones (`TC + 0,44 × TL + TO − RO`) y puntos perdidos estimados = pérdidas × PPP del equipo (estimación). **Peso de las asistencias**: asistencias / canastas de campo, y puntos generados = 2 × asistencias a doble + 3 × asistencias a triple (A-12; los tiros libres asistidos no suman).
+
+## Uso de tiro: 2P, 3P y TL, y zonas *(correcciones de Equipo, 2026-10)*
+
+**Uso de 2P / 3P** = tiros de 2 (de 3) intentados / tiros de campo intentados. **Uso de TL** (`ft_uso`) = 0,44 × TLi / (TCi + 0,44 × TLi): el peso de los tiros libres en las jugadas de tiro. Están en el perfil de tiro de equipo y jugador y en la tabla del ranking de Liga.
+
+**Zonas de tiro.** Las coordenadas de FIBA (`court_x` a lo largo, `court_y` a lo ancho, 0–100) son de la cancha completa y cada equipo tira a los dos aros. `shot_zones.to_half_court` gira los tiros del aro de la derecha 180° y devuelve (posición a lo ancho en %, distancia a la línea de fondo en metros, cancha de 28 × 15 m). Zonas: **pintura** (`restricted_area`) = dentro del área (ancho 33,7–66,3 %, hasta la línea de tiros libres a 5,80 m) o bandeja, volcada y similares; **esquina** = triple a menos de 2,99 m de la línea de fondo; **media distancia** = tiro de 2 fuera de la pintura (cerca del fondo: `mid_*_close`; pasada la línea de tiros libres: `mid_*_far` y `mid_top`). Antes se clasificaba con las coordenadas legadas `x/y` (siempre 0) y todos los tiros caían en pocas zonas. **% tiros en pintura** (`paint_fga_share`) = tiros en `restricted_area` / tiros de campo; **% tiros de media** (`mid_fga_share`) = tiros en las cinco zonas de media / tiros de campo. Sin coordenadas en algún partido de la selección, ambos quedan `no_disponible`.
+
+**Desglose ofensivo calculado.** Si FIBA no publica el campo, banca = puntos de los no titulares (exacto); pintura = 2 × tiros de campo convertidos en la pintura; segunda oportunidad = puntos de las oportunidades que siguen a un rebote ofensivo (A-04); tras pérdida rival = puntos de las posesiones que empiezan con robo o pérdida rival (A-02); contraataque = puntos de las posesiones de transición (A-03, aproximación). Lo que FIBA informa, incluso 0, no se toca.
+
+**Promedio de liga con competencia joven.** Si ningún equipo llega al mínimo de muestra (`sample.team.min`) la ficha quedaba sin promedio, puesto ni percentil; ahora se compara contra todos los equipos con partidos y `population.fallback` = `sin_umbral` lo avisa.
+
 ## Pace
 
 ```

@@ -13,7 +13,7 @@ services:
     runtime: python
     rootDir: backend
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn app:app --timeout 180
+    startCommand: gunicorn app:app --timeout 180 --workers 1 --threads 4
     disk:
       name: courtiq-db
       mountPath: /data
@@ -21,15 +21,20 @@ services:
     envVars:
       - key: DB_PATH
         value: /data/basketball.db
+      - key: SB_WARMUP
+        value: "1"
 ```
 
 **Partido en vivo (F-01, DA-28 pendiente):** gunicorn corre con 1 worker síncrono. Cada polling de `/api/live/<id>` que encuentra la caché vencida descarga de FIBA dentro de la petición y bloquea al worker hasta `live.fetch_timeout_secs` (default 8 s) si FIBA tarda; con la caché de `live.cache_ttl_secs` (15 s) esto pasa como mucho una vez por intervalo y por partido. Si se usa en partidos reales con varios usuarios, evaluar `--workers 1 --threads 4` (gthread): requiere revisar antes la seguridad entre hilos de los cachés en memoria (`cache.py`, `live._cache`) y la escritura concurrente en SQLite. `render.yaml` no cambia en F-01.
+
+**Rendimiento (2026-10):** el servidor corre con `--workers 1 --threads 4` y la variable `SB_WARMUP=1`. Con 1 worker síncrono, una petición lenta (armar la población de una liga en frío) bloqueaba a todas las demás y el navegador mostraba "No se pudo cargar" en plantel, quintetos, tramos y Preparar, que se piden en paralelo. Con hilos las peticiones no se bloquean entre sí; los cachés en memoria (`cache.py`) ya usan candado. `SB_WARMUP=1` calcula en segundo plano las posesiones de todos los partidos al arrancar y cada vez que sube `data_version` (`warmup.py`), de modo que la primera petición no paga la reconstrucción. Memoria: ≈ 0,7 MB por partido de posesiones en caché (≈ 200 MB para 300 partidos); el límite por partido está en `cache.NAMESPACE_LIMITS`.
 
 ### Variables de entorno
 
 | Variable | Valor en producción | Descripción |
 |----------|--------------------|----|
 | `DB_PATH` | `/data/basketball.db` | Ruta a SQLite. Sin esta var usa `backend/basketball.db` |
+| `SB_WARMUP` | `1` | Calienta en segundo plano el caché de posesiones (arranque y cada cambio de datos). Sin la variable no corre (scripts y pruebas) |
 | `PORT` | (asignado por Render) | Gunicorn lo lee automáticamente |
 | `SECRET_KEY` | `<random fuerte>` | Firma la cookie de sesión. Estable entre deploys (si cambia, se invalidan las sesiones). Generar: `python -c "import secrets;print(secrets.token_hex(32))"` |
 | `SESSION_SECURE` | `true` | Marca la cookie de sesión como `Secure` (solo HTTPS). `true` en Render; sin setear en local (para probar login sobre http) |

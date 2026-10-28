@@ -53,16 +53,49 @@ def position_group(pos) -> str | None:
 
 # ── Fichas ─────────────────────────────────────────────────────────────────
 
+def _team_keys(team_code: str) -> dict:
+    """`{norm_key: id}` de las fichas del equipo. Memo por petición (se invalida al dar de alta fichas)."""
+    from flask import g, has_app_context
+    build = lambda: {k: pid for pid, k in db.session.execute(
+        db.select(Player.id, Player.norm_key).where(Player.team_code == team_code)).all()}
+    if not has_app_context():
+        return build()
+    store = g.setdefault("_team_keys", {})
+    if team_code not in store:
+        store[team_code] = build()
+    return store[team_code]
+
+
+def _merge_map() -> dict:
+    """`{id: merged_into}` de todas las fichas. Memo por petición: `canonical_id` se llama cientos de miles de
+    veces al armar la población de jugadores y cada llamada era una consulta a la base (minutos por petición)."""
+    from flask import g, has_app_context
+    build = lambda: {pid: merged for pid, merged in db.session.execute(db.select(Player.id, Player.merged_into)).all()}
+    if not has_app_context():
+        return build()
+    if "_canon_map" not in g:
+        g._canon_map = build()
+    return g._canon_map
+
+
+def _drop_merge_map() -> None:
+    """Las altas y fusiones de fichas invalidan el mapa de la petición."""
+    from flask import g, has_app_context
+    if has_app_context():
+        g.pop("_canon_map", None)
+        g.pop("_team_keys", None)
+
+
 def canonical_id(player_id: int | None) -> int | None:
     """Sigue `merged_into` hasta la ficha vigente. None si el id no existe; ante un ciclo en
     los datos corta en el último id visitado en vez de colgarse."""
+    ids = _merge_map()
     seen, cur, last = set(), player_id, None
     while cur is not None and cur not in seen:
         seen.add(cur)
-        row = db.session.get(Player, cur)
-        if row is None:
+        if cur not in ids:
             return last
-        last, cur = cur, row.merged_into
+        last, cur = cur, ids[cur]
     if cur is not None:
         log.warning("Ciclo de merged_into en players (id %s)", cur)
     return last
@@ -74,6 +107,11 @@ def resolve_player_id(team_code: str, player_name: str, *, first_name=None, fami
     key = norm_name(player_name)
     if not key:
         raise ValueError("nombre vacío")
+    if not create:
+        # solo lectura: una consulta por equipo y petición en vez de una por llamada (se llama miles de veces
+        # al armar quintetos y posesiones)
+        pid = _team_keys(team_code).get(key)
+        return canonical_id(pid) if pid is not None else None
     row = Player.query.filter_by(team_code=team_code, norm_key=key).first()
     if row is None:
         if not create:
@@ -86,6 +124,7 @@ def resolve_player_id(team_code: str, player_name: str, *, first_name=None, fami
                 db.session.add(row)
         except IntegrityError:
             row = Player.query.filter_by(team_code=team_code, norm_key=key).first()
+        _drop_merge_map()
     else:
         # completa datos que la ficha no tenía; nunca sobrescribe
         for col, val in (("first_name", first_name), ("family_name", family_name), ("photo_url", photo_url)):
@@ -510,6 +549,7 @@ def merge_players(target_id: int, source_id: int) -> dict:
         raise IdentityError("Solo se pueden unificar fichas del mismo equipo", 409)
     db.session.execute(update(Player).where((Player.id == s) | (Player.merged_into == s))
                        .values(merged_into=t))   # aplana la cadena: lo absorbido por s ahora apunta a t
+    _drop_merge_map()
     moved = db.session.execute(update(PlayerGameStats).where(PlayerGameStats.player_id == s)
                                .values(player_id=t)).rowcount
     for col in ("first_name", "family_name", "photo_url"):

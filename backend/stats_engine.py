@@ -136,6 +136,7 @@ def calc_team_stats(t: dict, opp: dict) -> dict:
     pps  = _safe_div(pts, fga)                             # Points Per Shot
     fg2_uso = _safe_div(t["fga2"], fga)                    # %2P uso
     fg3_uso = _safe_div(t["fga3"], fga)                    # %3P uso
+    ft_uso  = _safe_div(0.44 * fta, fga + 0.44 * fta)      # uso de TL: peso de los libres en las jugadas de tiro
     fg2_pct = _safe_div(t["fgm2"], t["fga2"])
     fg3_pct = _safe_div(t["fgm3"], t["fga3"])
     ft_pct  = _safe_div(ftm, fta)
@@ -210,6 +211,7 @@ def calc_team_stats(t: dict, opp: dict) -> dict:
         "ppt":         ppt,
         "fg2_uso":     fg2_uso,
         "fg3_uso":     fg3_uso,
+        "ft_uso":      ft_uso,
         "ppt_2":       ppt_2,
         "ppt_3":       ppt_3,
         "ppt_ft":      ppt_ft,
@@ -439,6 +441,7 @@ def calc_player_stats(p: dict, team_pos: float, team: dict = None, game_minutes:
     ft   = _safe_div(ftm, fta)
     fg2_uso = _safe_div(p["fga2"], fga)
     fg3_uso = _safe_div(p["fga3"], fga)
+    ft_uso  = _safe_div(0.44 * fta, fga + 0.44 * fta)      # uso de TL (ver calc_team_stats)
     # C-07: PPT (glosario: puntos de campo / tiros de campo intentados)
     ppt    = _safe_div(2 * p["fgm2"] + 3 * p["fgm3"], p["fga2"] + p["fga3"])
     ppt_2  = _safe_div(2 * p["fgm2"], p["fga2"])
@@ -522,6 +525,7 @@ def calc_player_stats(p: dict, team_pos: float, team: dict = None, game_minutes:
         "ft_pct":         ft,
         "fg2_uso":        fg2_uso,
         "fg3_uso":        fg3_uso,
+        "ft_uso":         ft_uso,
         "ppt_2":          ppt_2,
         "ppt_3":          ppt_3,
         "ppt_ft":         ppt_ft,
@@ -580,7 +584,7 @@ def calc_player_stats(p: dict, team_pos: float, team: dict = None, game_minutes:
 TEAM_AVG_KEYS = [
     "oer", "der", "net_rating", "efg_pct", "ts_pct",
     "fg2_pct", "fg3_pct", "ft_pct", "ft_rate", "ft_rate_report",
-    "pps", "ppt", "fg2_uso", "fg3_uso",
+    "pps", "ppt", "fg2_uso", "fg3_uso", "ft_uso",
     "or_pct", "dr_pct", "trb_pct", "to_pct", "to_ratio",
     "as_pct", "ast_ratio", "pace", "pts", "possessions", "plays",
     "peso_1p", "peso_2p", "peso_3p",
@@ -594,7 +598,7 @@ TEAM_AVG_KEYS = [
 PLAYER_AVG_KEYS = [
     "efg_pct", "ts_pct", "fg2_pct", "fg3_pct",
     "ft_pct", "ft_rate", "ft_rate_report", "pps", "ppp", "ppt",
-    "fg2_uso", "fg3_uso", "peso_1p", "peso_2p", "peso_3p",
+    "fg2_uso", "fg3_uso", "ft_uso", "peso_1p", "peso_2p", "peso_3p",
     "to_pct", "to_ratio", "as_pct", "ast_ratio",
     "ppt_2", "ppt_3", "ppt_ft",
     "stocks", "def_playmaking", "physical_impact",
@@ -672,6 +676,42 @@ def _sum_games(per_game: list) -> dict:
     return sums
 
 
+def origin_rates(c: dict) -> dict:
+    """Tasas de las posesiones de un origen (A-02; fórmulas de docs/metrics.md, agregación pooled).
+
+    `c`: sumas de las posesiones del origen — `n`, `pts`, `fga2`/`fgm2`/`fga3`/`fgm3`, `fta`, `tov`,
+    `duration_sum`. Denominador 0 → `None` (el origen no tuvo intentos)."""
+    fga = c["fga2"] + c["fga3"]
+    return {
+        "ppp": _safe_div(c["pts"], c["n"]),
+        "efg_pct": _safe_div(c["fgm2"] + c["fgm3"] + 0.5 * c["fgm3"], fga),
+        "to_pct": _safe_div(c["tov"], c["n"]),
+        "ft_rate": _safe_div(c["fta"], fga),
+        "duration_avg": _safe_div(c["duration_sum"], c["n"]),
+    }
+
+
+def clock_rates(c: dict) -> dict:
+    """Tasas de un bloque de tramo de reloj (A-05; fórmulas de docs/metrics.md, agregación pooled).
+
+    `c`: `n` (oportunidades), `pts` (puntos de las oportunidades), `fga`/`fgm`/`fga3`/`fgm3`/`pts_fg`/`paint`
+    (tiros de campo del tramo), `fta`/`ftm`/`tov`/`viol24` y el reparto `t2`/`t3`/`tl`/`perdida`.
+    Denominador 0 → `None`."""
+    fga = c["fga"]
+    return {
+        "metrics": {
+            "efg_pct": _safe_div(c["fgm"] + 0.5 * c["fgm3"], fga),
+            "ts_pct": _safe_div(c["pts_fg"] + c["ftm"], 2 * (fga + 0.44 * c["fta"])),
+            "ppt": _safe_div(c["pts_fg"], fga),
+            "ppp": _safe_div(c["pts"], c["n"]),
+            "to_pct": _safe_div(c["tov"], c["n"]),
+            "viol24_rate": _safe_div(c["viol24"], c["n"]),
+        },
+        "mix": {k: _safe_div(c[k], c["n"]) for k in ("t2", "t3", "tl", "perdida")},
+        "paint_share": _safe_div(c["paint"], fga),
+    }
+
+
 def aggregate_games(per_game: list, keys: list, *, entity_type: str = "team",
                     empty_reason: str = "sin_datos") -> dict:
     """Promedios, totales y razones de nulo de una selección de partidos de UNA entidad.
@@ -731,13 +771,15 @@ def league_averages(member_values: list, keys: list) -> dict:
 
 
 # ── T-05: conjunto estándar de métricas (Grupo B) ────────────────────────────
-# `compute_standard` es el único lugar con las 86 fórmulas del catálogo (metrics_catalog.py,
+# `compute_standard` es el único lugar con las 89 fórmulas del catálogo (metrics_catalog.py,
 # Grupo C, solo metadatos). `StatBundle` es el contrato de entrada: conteos crudos ya sumados
 # de una selección de partidos de una entidad (equipo, jugador, quinteto, ON/OFF, cierre).
 
 NULL_REASON_CODES = (
     "sin_intentos", "sin_perdidas", "sin_pbp", "no_registrado",
     "no_aplica", "sin_datos", "no_disponible", "dnp",
+    # A-01 / A-12: el dato existe pero lo aporta un motor que todavía no está, o no hubo asistencias
+    "requiere_posesiones", "sin_asistencias",
 )
 
 RAW_KEYS = (
@@ -774,6 +816,10 @@ class StatBundle:
     possessions_counted: float | None
     null_reasons: dict
     poss_seconds: float | None = None
+    # A-12: vínculo de asistencias del jugador ({fg2, fg3, ft, unlinked, ast_points, status})
+    ast_links: dict | None = None
+    # A-12: asistencias del EQUIPO en los partidos que el jugador disputó (denominador de la cuota)
+    team_ast: int | None = None
     finished_poss: dict | None = None
     derived: dict | None = None
     meta: dict = field(default_factory=dict)
@@ -1044,6 +1090,9 @@ def _shooting_profile(c: dict, shots: dict | None) -> dict:
     out["fg3_uso"] = _rate_metric(c.get("fga3"), f)
     out["fg2_uso"] = _rate_metric(c.get("fga2"), f)
     out["ft_rate"] = _rate_metric(c.get("fta"), f)
+    fta_ = c.get("fta")
+    out["ft_uso"] = (_m(None, "no_registrado") if fta_ is None or f is None
+                     else _rate_metric(0.44 * fta_, f + 0.44 * fta_))
     if shots:
         out["paint_fga_share"] = _rate_metric(shots.get("paint_fga"), f)
         out["mid_fga_share"] = _rate_metric(shots.get("mid_fga"), f)
@@ -1061,9 +1110,47 @@ def _teamlike_ball(bundle: "StatBundle") -> dict:
     out["ast_to"] = _rate_metric(own.get("ast"), own.get("tov"), reason="sin_perdidas")
     own_pos = pos(own)
     out["as_pos"] = _rate_metric(own.get("ast"), own_pos)
+    # Creación de juego es solo de jugador: en equipo/quinteto/cierre no aplica.
+    for key in ("ast_team_share", "ast_points", "pts_per_ast"):
+        out[key] = _na()
     f_, g_ = fga(own), fgm(own)
     out["as_pct"] = _rate_metric(own.get("ast"), g_)
     out["to_pct"] = _rate_metric(own.get("tov"), own_pos)   # DA-04: sobre posesiones (no plays)
+    return out
+
+
+def _player_creation(bundle: "StatBundle") -> dict:
+    """Creación de juego (A-12): cuota de asistencias del equipo y puntos generados por asistencias.
+
+    `ast_team_share` = asistencias del jugador / asistencias del equipo en los partidos que disputó.
+    `ast_points` = 2 × asistencias a 2 puntos + 3 × a 3 puntos (los tiros libres no suman: no se sabe
+    cuántos de la serie entraron). `pts_per_ast` = puntos generados / asistencias a tiros de campo.
+    """
+    out = {}
+    own = bundle.own
+    ast_v = own.get("ast")
+
+    # Cuota de asistencias del equipo: NO depende del vínculo, solo de los totales.
+    team_ast = bundle.team_ast
+    if ast_v is None or team_ast is None:
+        out["ast_team_share"] = _m(None, "no_registrado")
+    elif team_ast == 0:
+        out["ast_team_share"] = _m(None, "sin_asistencias")
+    else:
+        out["ast_team_share"] = _m(round(ast_v / team_ast, 4), None)
+
+    links = bundle.ast_links
+    if not links or links.get("status") != "ok":
+        # Sin vínculo no se puede afirmar que generó 0 puntos (C-11).
+        reason = (links or {}).get("status") or "requiere_posesiones"
+        reason = reason if reason in ("sin_pbp", "no_registrado") else "no_registrado"
+        out["ast_points"] = _m(None, reason)
+        out["pts_per_ast"] = _m(None, reason)
+    else:
+        fg_ast = links["fg2"] + links["fg3"]
+        out["ast_points"] = _m(links["ast_points"], None)
+        out["pts_per_ast"] = (_m(round(links["ast_points"] / fg_ast, 4), None) if fg_ast
+                              else _m(None, "sin_asistencias"))
     return out
 
 
@@ -1076,6 +1163,7 @@ def _player_ball(bundle: "StatBundle") -> dict:
     out["ast_to"] = _rate_metric(own.get("ast"), own.get("tov"), reason="sin_perdidas")
     own_pos = pos(own)
     out["as_pos"] = _rate_metric(own.get("ast"), own_pos)
+    out.update(_player_creation(bundle))
     ast_v, fgm_team_w, own_fgm = own.get("ast"), derived.get("fgm_team_w"), fgm(own)
     if ast_v is None or fgm_team_w is None or own_fgm is None:
         out["as_pct"] = _m(None, "no_registrado")
@@ -1337,7 +1425,7 @@ def _player_extra(bundle: "StatBundle") -> dict:
 
 
 def compute_standard(bundle: "StatBundle") -> dict:
-    """Las 86 métricas del catálogo estándar (plan §4.2/§4.3) a partir de un `StatBundle`.
+    """Las 90 métricas del catálogo estándar (plan §4.2/§4.3) a partir de un `StatBundle`.
 
     Entidades *teamlike* (`team`, `lineup`, `onoff`, `clutch`) usan `own`/`opp`. *player* usa
     `own` para tiro/balón/rebote/defensa/faltas/USO y `on_court` (equipo con el jugador en
@@ -1417,7 +1505,7 @@ def compute_standard(bundle: "StatBundle") -> dict:
 
 
 def metrics_catalog_keys() -> frozenset:
-    """Las 86 claves de `compute_standard` (plan §4.2). Vive acá (no en `metrics_catalog.py`,
+    """Las 90 claves de `compute_standard` (plan §4.2). Vive acá (no en `metrics_catalog.py`,
     Grupo C) para que `compute_standard` no dependa de ese módulo nuevo; cuando exista,
     `metrics_catalog.METRICS` debe tener el mismo `set` (se verifica en T-C1/T-F3)."""
     groups = {
@@ -1427,8 +1515,9 @@ def metrics_catalog_keys() -> frozenset:
         "tiro_volumen": ("fga2", "fgm2", "fga3", "fgm3", "fta", "ftm", "fga", "fgm"),
         "tiro_pct": ("fg_pct", "fg2_pct", "fg3_pct", "ft_pct", "efg_pct", "ts_pct"),
         "tiro_valor": ("ppt", "ppt_2", "ppt_3", "ppt_ft"),
-        "tiro_perfil": ("fg3_uso", "fg2_uso", "ft_rate", "paint_fga_share", "mid_fga_share"),
-        "balon": ("ast", "tov", "ast_to", "as_pos", "as_pct", "to_pct"),
+        "tiro_perfil": ("fg3_uso", "fg2_uso", "ft_uso", "ft_rate", "paint_fga_share", "mid_fga_share"),
+        "balon": ("ast", "tov", "ast_to", "as_pos", "as_pct", "to_pct",
+                  "ast_team_share", "ast_points", "pts_per_ast"),
         "rebote": ("orb", "drb", "trb", "or_pct", "dr_pct", "trb_pct", "orb_pos", "drb_min", "orb_min"),
         "defensa": ("stl", "blk", "blk_received", "stops"),
         "faltas": ("pf", "fouls_drawn"),

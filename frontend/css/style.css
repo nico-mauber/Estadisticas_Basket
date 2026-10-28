@@ -1576,3 +1576,65 @@ tbody tr.fuera-poblacion { opacity: .6; }
 .ph-form-actions { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; }
 .ph-form-msg { font-size: 12px; }
 @media (max-width: 479px) { .ph-main { flex-wrap: wrap; } }
+
+/* ── Creación de juego (A-12) ── */
+.assist-note { margin: 8px 0 0; font-size: 12px; }
+
+/* ── origin (A-02) ── */
+.of-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.of-table th, .of-table td { padding: 6px 8px; text-align: right; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.of-table th.of-origin, .of-table td.of-origin { text-align: left; position: sticky; left: 0; background: var(--surface); z-index: 1; }
+.of-table tr.of-low td:not(.of-origin):not(.of-finish) { color: var(--muted); }
+.of-table tr.of-info td { color: var(--muted); font-style: italic; white-space: normal; text-align: left; }
+.of-table td.of-origin { white-space: normal; min-width: 130px; }
+.of-finish { min-width: 120px; }
+.of-bar { display: flex; height: 10px; border-radius: 3px; overflow: hidden; background: var(--border); }
+.of-bar span { display: block; height: 100%; }
+.of-t2, .of-legend .of-t2 { background: #3b82f6; }
+.of-t3, .of-legend .of-t3 { background: #22c55e; }
+.of-tl, .of-legend .of-tl { background: #eab308; }
+.of-to, .of-legend .of-to { background: #ef4444; }
+.of-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 8px 0; font-size: 12px; color: var(--muted); }
+.of-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+@media (max-width: 768px) { .of-finish { min-width: 160px; } }
+
+/* ── transición (A-03) ── */
+.tp-h { margin: 16px 0 6px; font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.tp-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; margin: 8px 0 12px; }
+.tp-stat { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; }
+.tp-stat em { font-style: normal; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.tp-stat strong { font-size: 20px; }
+.tp-stat span { font-size: 12px; color: var(--muted); }
+.tp-hist { display: flex; gap: 8px; align-items: flex-end; height: 110px; margin: 6px 0; }
+.tp-hist > div { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; gap: 2px; font-size: 11px; color: var(--muted); }
+.tp-hist span { display: block; width: 100%; background: var(--accent); border-radius: 3px 3px 0 0; min-height: 2px; }
+.tp-hist b { color: var(--text, inherit); font-weight: 600; }
+.tp-recon { margin-top: 12px; }
+.tp-recon > summary { cursor: pointer; font-weight: 600; font-size: 13px; margin-bottom: 8px; }
+@media (max-width: 480px) { .tp-stats { grid-template-columns: 1fr 1fr; } .tp-stat strong { font-size: 17px; } }
+
+/* ── Tramo de reloj y composición de puntos (A-05) ── */
+.cp-bar { display: flex; height: 28px; border-radius: 6px; overflow: hidden; margin: 8px 0 10px; font-size: 12px; font-weight: 600; }
+.cp-bar span { display: flex; align-items: center; justify-content: center; min-width: 0; color: #fff; white-space: nowrap; overflow: hidden; }
+.cp-seg-3 { background: #3b82f6; }
+.cp-seg-2 { background: #22a06b; }
+.cp-seg-ft { background: #d98a1a; }
+.cp-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; }
+.of-table tr.of-total td { font-weight: 600; border-top: 2px solid var(--border); }
+.of-table small { color: var(--muted); font-weight: 400; }
+
+/* ── Análisis del equipo ── */
+.ti-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.ti-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.ti-item { display: flex; gap: 10px; align-items: flex-start; font-size: 14px; }
+.ti-pct { flex: none; min-width: 40px; text-align: center; font-size: 12px; font-weight: 700; padding: 2px 6px; border-radius: 6px; color: #fff; }
+.ti-up .ti-pct { background: #22a06b; }
+.ti-down .ti-pct { background: #d6504a; }
+@media (max-width: 720px) { .ti-cols { grid-template-columns: 1fr; } }
+
+/* ── Tarjetas desplegables ── */
+.cd-header { display: flex; align-items: center; gap: 8px; }
+.cd-header > .card-title { flex: 1; }
+.cd-toggle { flex: none; background: transparent; border: 1px solid var(--border); color: var(--text, inherit); border-radius: 6px;
+  width: 30px; height: 30px; cursor: pointer; font-size: 16px; line-height: 1; }
+.cd-body[hidden] { display: none; }

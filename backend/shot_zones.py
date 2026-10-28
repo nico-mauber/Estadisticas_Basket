@@ -3,6 +3,7 @@
 Moved from app.py: zone constants, classification, and zone table builder.
 New: `zones_with_stats` adds PPT percentile and sample badge per zone.
 """
+import cache
 import config
 import population as population_mod
 import sample as sample_mod
@@ -40,49 +41,54 @@ _PAINT_KWORDS = {"layup", "dunk", "alley", "tip", "hook", "putback", "driving", 
 
 # ── Classification ─────────────────────────────────────────────────────────
 
-def classify_zone(action_type: str, sub_type: str, court_x: float = 0,
-                  court_y: float = 0, qualifiers=None) -> str:
-    """Classify a shot into one of 11 zones.
+# Geometría FIBA en metros: cancha de 28 × 15 m. Las coordenadas de FIBA (`court_x` a lo largo, `court_y` a lo
+# ancho, 0–100) abarcan la cancha COMPLETA y los dos equipos tiran a los dos aros (cambian de lado en el
+# entretiempo), así que primero se llevan todos los tiros a UNA media cancha (`to_half_court`).
+COURT_LEN_M = 28.0
+KEY_DEPTH_M = 5.8          # la pintura llega hasta la línea de tiros libres (5,80 m de la línea de fondo)
+CORNER_DEPTH_M = 2.99      # hasta ahí llega el tramo recto de la línea de 6,75 m (esquina)
+KEY_ACROSS = (33.7, 66.3)  # ancho de la pintura (4,90 m de 15 m) en % del ancho de la cancha
 
-    Coordinate system (FIBA LiveStats normalized):
-      x: 0–100, center=50, left<50
-      y: 0–100, baseline=0, increases away from basket
 
-    Zone geometry matches SVG rendering:
-      restricted_area  = full paint box (x 34–66)
-      mid_left_close   = outside paint left, near baseline (x<34, y<25)
-      mid_right_close  = outside paint right, near baseline (x>66, y<25)
-      mid_left_far     = left elbow / wing mid (x<42, y>=25)
-      mid_right_far    = right elbow (x>=58, y>=25)
-      mid_top          = high post center (x 42–58, y>=25)
+def classify_zone(action_type: str, sub_type: str, across: float = 0,
+                  depth: float = 0, qualifiers=None) -> str:
+    """Clasifica un tiro en una de las 11 zonas.
+
+    `across` / `depth` salen de `to_half_court`: `across` = posición a lo ancho en % (0–100, centro 50) y
+    `depth` = distancia en metros a la línea de fondo del aro al que tira. (0, 0) = sin coordenadas.
+
+      restricted_area  = dentro de la pintura (ancho 33,7–66,3 %, hasta la línea de tiros libres)
+      mid_left_close / mid_right_close = fuera de la pintura, antes de la línea de tiros libres
+      mid_left_far / mid_right_far     = tiro de media distancia de lado, pasada la línea de tiros libres
+      mid_top          = media distancia de frente
+      left/right_corner_3 = triple desde la esquina; left/right_wing_3 y top_key_3 = resto de los triples
     """
     sub       = (sub_type or "").lower()
-    has_coord = court_x != 0 or court_y != 0
+    has_coord = across != 0 or depth != 0
 
     if action_type == "3pt":
-        if has_coord and court_y < 14:
-            return "left_corner_3" if court_x < 50 else "right_corner_3"
         if not has_coord:
             return "top_key_3"
-        if court_x < 38:
+        if depth < CORNER_DEPTH_M:
+            return "left_corner_3" if across < 50 else "right_corner_3"
+        if across < 38:
             return "left_wing_3"
-        if court_x >= 62:
+        if across >= 62:
             return "right_wing_3"
         return "top_key_3"
 
-    # 2pt — paint keywords always -> restricted area
-    paint_sub = any(k in sub for k in _PAINT_KWORDS)
-    if paint_sub:
+    # 2pt — las bandejas, volcadas y similares son siempre del aro
+    if any(k in sub for k in _PAINT_KWORDS):
         return "restricted_area"
 
     if has_coord:
-        if 34 <= court_x <= 66:
-            return "restricted_area"
-        if court_y < 25:
-            return "mid_left_close" if court_x < 50 else "mid_right_close"
-        if court_x < 42:
+        if depth <= KEY_DEPTH_M:
+            if KEY_ACROSS[0] <= across <= KEY_ACROSS[1]:
+                return "restricted_area"
+            return "mid_left_close" if across < 50 else "mid_right_close"
+        if across < 42:
             return "mid_left_far"
-        if court_x >= 58:
+        if across >= 58:
             return "mid_right_far"
         return "mid_top"
 
@@ -90,8 +96,14 @@ def classify_zone(action_type: str, sub_type: str, court_x: float = 0,
 
 
 def to_half_court(court_x, court_y):
-    """Convert full-court coordinates to half-court. Identity until F-11 integration."""
-    return court_x, court_y
+    """Coordenadas de FIBA (cancha completa) → `(across_pct, depth_m)` de una media cancha.
+
+    Si el tiro es al aro del otro lado (`court_x` > 50) se gira la cancha 180°. Sin coordenadas → (0, 0)."""
+    if court_x is None or court_y is None or (not court_x and not court_y):
+        return 0, 0
+    if court_x > 50:
+        court_x, court_y = 100 - court_x, 100 - court_y
+    return court_y, round(court_x / 100 * COURT_LEN_M, 3)
 
 
 # ── Zone table ─────────────────────────────────────────────────────────────
@@ -108,17 +120,20 @@ def zone_table(shots, *, context_totals=None):
             return row.get(attr, default)
         return getattr(row, attr, default)
 
-    has_coordinates = any(
-        (_get(row, "x", 0) or 0) != 0 or (_get(row, "y", 0) or 0) != 0
-        for row in shots
-    )
+    def _xy(row):
+        # las filas de la base traen `court_x/court_y` (reales, de FIBA); `x/y` (legado) siguen en 0
+        cx, cy = _get(row, "court_x", None), _get(row, "court_y", None)
+        if cx is None and cy is None:
+            cx, cy = _get(row, "x", 0), _get(row, "y", 0)
+        return cx or 0, cy or 0
+
+    has_coordinates = any(_xy(row) != (0, 0) for row in shots)
     zones = {k: {"made": 0, "attempts": 0} for k in ZONE_KEYS_11}
     for row in shots:
         z = classify_zone(
             _get(row, "action_type", ""),
             _get(row, "sub_type", ""),
-            _get(row, "x", 0) or 0,
-            _get(row, "y", 0) or 0,
+            *to_half_court(*_xy(row)),
         )
         zones[z]["attempts"] += 1
         zones[z]["made"]     += _get(row, "made", 0)
@@ -329,6 +344,33 @@ def zones_with_stats(entity_type, entity_id, comp_id, last, shots_query_fn):
         "summary": summary,
         "has_coordinates": has_coordinates,
     }
+
+
+_MID_ZONES = frozenset({"mid_left_close", "mid_right_close", "mid_left_far", "mid_right_far", "mid_top"})
+
+
+def game_zone_counts(game_id) -> dict | None:
+    """Tiros de campo de un partido por equipo y jugador: `{(team_code, player_name | None): {paint_fga, mid_fga}}`.
+
+    `paint_fga` = tiros en la pintura (zona `restricted_area`); `mid_fga` = tiros de 2 desde fuera de ella
+    (media distancia). `None` si el partido no trae coordenadas reales: sin ellas no se puede decir en qué zona
+    cayó cada tiro y el dato queda como no disponible, nunca como 0. Cacheado por versión de datos."""
+    def build():
+        t = Shot.__table__
+        rows = db.session.execute(db.select(t.c.team_code, t.c.player_name, t.c.action_type, t.c.sub_type,
+                                            t.c.court_x, t.c.court_y, t.c.made).where(t.c.game_id == game_id)).all()
+        if not any((r.court_x or 0) or (r.court_y or 0) for r in rows):
+            return None
+        out: dict = {}
+        for r in rows:
+            zone = classify_zone(r.action_type or "", r.sub_type or "", *to_half_court(r.court_x, r.court_y))
+            for key in ((r.team_code, None), (r.team_code, r.player_name)):
+                d = out.setdefault(key, {"paint_fga": 0, "mid_fga": 0, "paint_pts": 0})
+                d["paint_fga"] += 1 if zone == "restricted_area" else 0
+                d["mid_fga"] += 1 if zone in _MID_ZONES else 0
+                d["paint_pts"] += 2 * (r.made or 0) if zone == "restricted_area" else 0
+        return out
+    return cache.memo("shots:zone_counts", game_id, build)
 
 
 def _get_game_id(shot):
