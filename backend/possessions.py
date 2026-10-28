@@ -599,6 +599,20 @@ def team_possessions(team_code, comp_id, ctx=None, *, side="ataque"):
     return out
 
 
+def team_possessions_in(team_code, game_ids, *, side="ataque"):
+    """Posesiones completas del equipo en los partidos `game_ids` (los de la selección activa).
+
+    No carga eventos: cada partido sale del caché de `game_possessions`. Los partidos sin pbp aportan 0."""
+    out = []
+    for gid in game_ids:
+        for p in game_possessions(gid):
+            if p.incomplete:
+                continue
+            if (p.team if side == "ataque" else p.opp) == team_code:
+                out.append(p)
+    return out
+
+
 def possessions_bundle(possessions, *, entity_type, entity_id, name, games):
     """Posesiones completadas → StatBundle (plan §4.6, PROPUESTA)."""
     from stats_engine import StatBundle
@@ -627,7 +641,12 @@ def possessions_bundle(possessions, *, entity_type, entity_id, name, games):
 
 
 def ppp_stats(comp_id):
-    """PPP stats de la competencia: {mean, sd, n} (plan §4.10, PROPUESTA)."""
+    """PPP stats de la competencia: {mean, sd, n} (plan §4.10, PROPUESTA). Cacheado por versión de datos: el
+    ajuste por muestra lo pide por cada fila de cada tabla y recorría las posesiones de toda la liga cada vez."""
+    return cache.memo("poss:ppp_stats", comp_id, lambda: _ppp_stats(comp_id))
+
+
+def _ppp_stats(comp_id):
     import math
     games = Game.query.filter_by(competition_id=comp_id).all()
     ppp_vals = []

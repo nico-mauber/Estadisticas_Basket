@@ -22,6 +22,7 @@ import { renderOriginPanel } from "./components/origin-panel.js";
 import { renderTransitionPanel } from "./components/transition-panel.js";
 import { renderSecondChancePanel } from "./components/second-chance-panel.js";
 import { renderClockPanel } from "./components/clock-panel.js";
+import { renderTeamInsights } from "./components/team-insights.js";
 import { renderLineupsBlock } from "./components/lineups-block.js";
 import { renderComparePlayers, comparePlayersFromUrl } from "./components/compare-players.js";
 import { renderPlayerHeader } from "./components/player-header.js";
@@ -1090,7 +1091,50 @@ const LEAGUE_MAPS = [
             yKey: "pts", yName: "Puntos",    yLabel: "Puntos por partido",    yDir: "higher", yQual: "más puntos", yPct: false },
     hint: "Derecha = más robos &nbsp;|&nbsp; Arriba = más puntos &nbsp;|&nbsp; Arriba-derecha = elite",
   },
+  {
+    id: "uso3", label: "Uso de 3P / eFG%",
+    axis: { xKey: "fg3_uso", xName: "Uso 3P", xLabel: "Uso de triple (% de los tiros de campo)", xDir: "higher", xQual: "más triples", xPct: true,
+            yKey: "efg_pct", yName: "eFG%", yDir: "higher", yQual: "mejor tiro", yPct: true },
+    hint: "Derecha = tira más triples &nbsp;|&nbsp; Arriba = mejor eFG% &nbsp;|&nbsp; Arriba-derecha = muchos triples y los convierte",
+  },
+  {
+    id: "uso2", label: "Uso de 2P / Uso de TL",
+    axis: { xKey: "fg2_uso", xName: "Uso 2P", xLabel: "Uso de 2 (% de los tiros de campo)", xDir: "higher", xQual: "más dobles", xPct: true,
+            yKey: "ft_uso", yName: "Uso TL", yLabel: "Uso de tiros libres (peso en las jugadas de tiro)", yDir: "higher", yQual: "más libres", yPct: true },
+    hint: "Derecha = ataca más con tiros de 2 &nbsp;|&nbsp; Arriba = pesan más los tiros libres &nbsp;|&nbsp; Arriba-derecha = ataca el aro y llega a la línea",
+  },
 ];
+
+// Tablas y gráficos desplegables: el título lleva un botón ▾ y el resto de la card se oculta o muestra. El estado
+// se recuerda por título mientras dura la sesión.
+function _makeCollapsible(card, key) {
+  if (!card || card.dataset.collapsible) return;
+  const title = card.querySelector(".card-title");
+  if (!title) return;
+  card.dataset.collapsible = "1";
+  const header = title.closest(".map-header") || title;
+  const body = document.createElement("div");
+  body.className = "cd-body";
+  while (header.nextSibling) body.appendChild(header.nextSibling);
+  card.appendChild(body);
+  let open = true;
+  try { open = sessionStorage.getItem(`sb.cd.${key}`) !== "0"; } catch { /* sin almacenamiento */ }
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "cd-toggle";
+  btn.setAttribute("aria-label", "Mostrar u ocultar");
+  const apply = () => { body.hidden = !open; btn.textContent = open ? "▾" : "▸"; btn.setAttribute("aria-expanded", String(open)); };
+  btn.addEventListener("click", e => {
+    e.stopPropagation();
+    open = !open;
+    apply();
+    try { sessionStorage.setItem(`sb.cd.${key}`, open ? "1" : "0"); } catch { /* sin almacenamiento */ }
+    if (open) window.dispatchEvent(new Event("resize"));   // los gráficos recalculan su ancho
+  });
+  header.classList.add("cd-header");
+  header.appendChild(btn);
+  apply();
+}
 
 // Flecha hacia el lado de la pantalla donde está el mejor rendimiento. El eje Y no está invertido
 // (`reverse: false` en drawLeagueScatter): los valores crecen hacia arriba.
@@ -1192,6 +1236,8 @@ async function renderLeague() {
 
     const compSel = document.getElementById("league-comp");
     if (compSel) compSel.addEventListener("change", e => { _leagueComp = e.target.value; renderLeague(); });
+    _makeCollapsible(sec.children[0], "liga-tabla");
+    _makeCollapsible(sec.children[1], "liga-ranking");
 
     if (_leagueTeams.length >= 2) {
       const mapOpts = LEAGUE_MAPS.map(m =>
@@ -1209,6 +1255,7 @@ async function renderLeague() {
             <button class="btn btn-ghost btn-sm" id="btn-reset-scatter">↺ Resetear zoom</button>
           </div>
         </div>`);
+      _makeCollapsible(sec.lastElementChild, "liga-mapa");
       _drawLeagueMap();
       document.getElementById("map-select").addEventListener("change", e => {
         _leagueMap = e.target.value;
@@ -1331,6 +1378,14 @@ function _selectedPlayer() {
 }
 
 
+// Desglose ofensivo: si FIBA no lo publica en la competencia se calcula desde el play-by-play y se avisa.
+function _extrasNote(data) {
+  const calc = Object.values(data.extras_source || {}).filter(v => v === "calculado").length;
+  if (!calc) return "";
+  return `<p class="td-muted">${calc === 5 ? "Calculado" : "En parte calculado"} desde el play-by-play: FIBA no publica este desglose en la competencia. ` +
+    `El contraataque cuenta las posesiones de transición (aproximación).</p>`;
+}
+
 function _renderTeamContent(main, data) {
   const av  = { ...data.averages, null_reasons: data.null_reasons };
   const rs  = av.null_reasons;   // razón de cada nulo (C-11 RF-4)
@@ -1362,7 +1417,9 @@ function _renderTeamContent(main, data) {
     { title: "Tiro", extra: _shotDetailGrid(av, data.totals), metrics: [
       ["eFG%", "efg_pct", av.efg_pct, PCT(av.efg_pct)], ["TS%", "ts_pct", av.ts_pct, PCT(av.ts_pct)],
       ["FG2%", "fg2_pct", av.fg2_pct, PCT(av.fg2_pct)], ["FG3%", "fg3_pct", av.fg3_pct, PCT(av.fg3_pct)],
-      ["FT%", "ft_pct", av.ft_pct, PCT(av.ft_pct)], ["Uso 3P", "fg3_uso", av.fg3_uso, PCT(av.fg3_uso)] ] },
+      ["FT%", "ft_pct", av.ft_pct, PCT(av.ft_pct)], ["Uso 2P", "fg2_uso", av.fg2_uso, PCT(av.fg2_uso)],
+      ["Uso 3P", "fg3_uso", av.fg3_uso, PCT(av.fg3_uso)],
+      [_hint("Uso TL", "Peso de los tiros libres en las jugadas de tiro del equipo: 0,44 × TLi / (TCi + 0,44 × TLi)"), "ft_uso", av.ft_uso, PCT(av.ft_uso)] ] },
     { title: "Rebotes & Misc", trailing: _astPerBox(av, data.totals), metrics: [
       ["OR%", "or_pct", av.or_pct, PCT(av.or_pct)], ["DR%", "dr_pct", av.dr_pct, PCT(av.dr_pct)],
       ["Reb%", "trb_pct", av.trb_pct, PCT(av.trb_pct)], ["PER", "tov", av.tov, DEC2(av.tov)],
@@ -1377,7 +1434,8 @@ function _renderTeamContent(main, data) {
       ["Seg. Op.", "second_chance_pts", av.second_chance_pts, DEC2(av.second_chance_pts)],
       ["Ptos/PER", "pts_from_tov", av.pts_from_tov, DEC2(av.pts_from_tov)],
       ["Banca", "bench_pts", av.bench_pts, DEC2(av.bench_pts)],
-      ["PCA", "fast_break_pts", av.fast_break_pts, DEC2(av.fast_break_pts)] ] },
+      ["PCA", "fast_break_pts", av.fast_break_pts, DEC2(av.fast_break_pts)] ],
+      extra: _extrasNote(data) },
   ];
 
   main.innerHTML = `
@@ -1603,6 +1661,8 @@ function _applyTeamData(main, data) {
   renderTransitionPanel(document.getElementById("team-transition"), data.team_code, { mode: "team", params: _teamParams() });
   renderSecondChancePanel(document.getElementById("team-second-chance"), data.team_code, { mode: "team", params: _teamParams() });
   renderClockPanel(document.getElementById("team-clock"), data.team_code, { mode: "team", params: _teamParams() });
+  renderTeamInsights(document.getElementById("team-insights"), data.team_code, { params: _teamParams() });
+  renderTeamShotmapTeam(data.team_code);   // mapa de tiro del equipo (Feature 10), de la selección activa
   _renderTeamRoster(data.team_code);
   _renderTeamLineups(data.team_code, data.team_name);
 }
@@ -1635,7 +1695,29 @@ async function _reloadTeam({ clutch = false } = {}) {
   }
   if (req !== _teamReq) return;
   _applyTeamData(main, data);
+  _loadTeamPlayers(code, req).catch(() => {});
   if (clutch) renderTeamClutch(code);
+}
+
+// Selector de jugador y combinaciones del equipo: solo los de la competencia elegida (no los de otra liga).
+async function _loadTeamPlayers(teamCode, req = _teamReq) {
+  const players = await api.players(teamCode, { competition: _teamComp });
+  if (req !== _teamReq) return;
+  const pSel = document.getElementById("player-select");
+  const keep = pSel.value;
+  pSel.innerHTML = '<option value="">— Seleccionar jugador —</option>' +
+    players.map(p => `<option value="${p.player_id ?? ""}" data-name="${esc(p.name)}">${esc(p.name)}</option>`).join("");
+  if (keep && players.some(p => String(p.player_id) === keep)) pSel.value = keep;
+  const lineupCard = document.getElementById("team-lineup-card");
+  const picker = document.getElementById("team-lineup-picker");
+  if (players.length >= 3) {
+    picker.innerHTML = players.map(p => `
+      <label class="lineup-check"><input type="checkbox" value="${esc(p.name)}" data-player-id="${p.player_id ?? ""}">${esc(p.name)}</label>`).join("");
+    lineupCard.style.display = "";
+  } else {
+    lineupCard.style.display = "none";
+  }
+  document.getElementById("team-lineup").innerHTML = "";   // una combinación de la competencia anterior ya no aplica
 }
 
 let _ctxTeam = null;   // último equipo mostrado: con/sin jugador no viajan a otro equipo
@@ -1653,23 +1735,8 @@ async function renderTeam(teamCode) {
     if (req !== _teamReq) return;
     _applyTeamData(main, data);
 
-    const players = await api.players(teamCode);
-    if (req !== _teamReq) return;
-    const pSel = document.getElementById("player-select");
-    pSel.innerHTML = '<option value="">— Seleccionar jugador —</option>' +
-      players.map(p => `<option value="${p.player_id ?? ""}" data-name="${esc(p.name)}">${esc(p.name)}</option>`).join("");
+    await _loadTeamPlayers(teamCode, req);
 
-    const lineupCard = document.getElementById("team-lineup-card");
-    const picker = document.getElementById("team-lineup-picker");
-    if (players.length >= 3) {
-      picker.innerHTML = players.map(p => `
-        <label class="lineup-check"><input type="checkbox" value="${p.name}" data-player-id="${p.player_id ?? ""}">${p.name}</label>`).join("");
-      lineupCard.style.display = "";
-    } else {
-      lineupCard.style.display = "none";
-    }
-
-    renderTeamShotmapTeam(teamCode);   // mapa de tiro del equipo (Feature 10)
     renderTeamClutch(teamCode);        // cierres del equipo, de la competencia elegida (Feature 05 v2)
   } catch (e) {
     if (req === _teamReq) main.innerHTML = `<p class="empty below-avg">${e.message}</p>`;
@@ -1681,7 +1748,7 @@ function renderTeamShotmapTeam(teamCode) {
   const box = document.getElementById("team-teamshot");
   if (!box) return;
   box.innerHTML = '<div class="card"><p class="empty"><span class="spinner"></span>Cargando mapa de tiro del equipo...</p></div>';
-  api.shotZones({ entity: 'team', id: teamCode, competition: _teamComp }).then(shots => {
+  api.shotZones({ entity: 'team', id: teamCode, competition: _teamComp, last: _teamLastN || null }).then(shots => {
     if (!shots || !shots.summary?.total_shots) {
       box.innerHTML = '<div class="card"><p class="empty">Sin tiros registrados para este equipo.</p></div>';
       return;
@@ -1702,7 +1769,7 @@ function renderTeamShotmap(teamCode, playerName) {
   box.innerHTML = '<div class="card"><p class="empty"><span class="spinner"></span>Cargando mapa de tiro...</p></div>';
   const playerId = _selectedPlayer()?.id;
   if (!playerId) { box.innerHTML = ""; return; }
-  api.shotZones({ entity: 'player', id: playerId, competition: _teamComp }).then(shots => {
+  api.shotZones({ entity: 'player', id: playerId, competition: _teamComp, last: _teamLastN || null }).then(shots => {
     if (!shots || !shots.summary?.total_shots) {
       box.innerHTML = '<div class="card"><p class="empty">Sin tiros registrados para este jugador.</p></div>';
       return;
@@ -1726,7 +1793,7 @@ async function renderTeamOnOff(teamCode, playerName, playerId = null) {
   const box = document.getElementById("team-onoff");
   box.innerHTML = '<div class="card"><p class="empty"><span class="spinner"></span>Calculando ON/OFF...</p></div>';
   try {
-    const r = await api.onoff(teamCode, playerName);
+    const r = await api.onoff(teamCode, playerName, { competition: _teamComp });
 
     box.innerHTML = `
       <div class="card">
@@ -1765,7 +1832,7 @@ async function renderTeamLineup(teamCode, players, playerIds = []) {
   const box = document.getElementById("team-lineup");
   box.innerHTML = '<div class="card"><p class="empty"><span class="spinner"></span>Calculando combinación...</p></div>';
   try {
-    const r = await api.lineup(teamCode, players);
+    const r = await api.lineup(teamCode, players, { competition: _teamComp });
     const lead = (l, key) => l ? `${l.name} (${l[key]})` : "—";
     box.innerHTML = `
       <div class="card">
@@ -2169,7 +2236,8 @@ function _renderPlayerContent(main, data) {
       { title: "Tiro", extra: _shotDetailGrid(av, data.totals), metrics: [
         ["FG2%", "fg2_pct", av.fg2_pct, PCT(av.fg2_pct)], ["FG3%", "fg3_pct", av.fg3_pct, PCT(av.fg3_pct)],
         ["FT%", "ft_pct", av.ft_pct, PCT(av.ft_pct)], ["Uso 2P", "fg2_uso", av.fg2_uso, PCT(av.fg2_uso)],
-        ["Uso 3P", "fg3_uso", av.fg3_uso, PCT(av.fg3_uso)] ] },
+        ["Uso 3P", "fg3_uso", av.fg3_uso, PCT(av.fg3_uso)],
+        [_hint("Uso TL", "Peso de los tiros libres en sus jugadas de tiro: 0,44 × TLi / (TCi + 0,44 × TLi)"), "ft_uso", av.ft_uso, PCT(av.ft_uso)] ] },
       { title: "Rebotes & distribución", trailing: _astPerBox(av, data.totals), metrics: [
         [_hint("OR%", "Porción de los rebotes ofensivos disponibles que capturó mientras estuvo en cancha, " + _PCT_REB_HINT.replace("%s", "OR%")), "or_pct", av.or_pct, PCT(av.or_pct)],
         [_hint("DR%", "Porción de los rebotes defensivos disponibles que capturó mientras estuvo en cancha, " + _PCT_REB_HINT.replace("%s", "DR%")), "dr_pct", av.dr_pct, PCT(av.dr_pct)],
@@ -2531,6 +2599,7 @@ function renderApp() {
         </div>
         <div id="team-lineup"></div>
         <div id="team-main"></div>
+        <div id="team-insights"></div>
         <div id="team-roster"></div>
         <div id="team-lineups-block"></div>
         <div id="team-periods"></div>

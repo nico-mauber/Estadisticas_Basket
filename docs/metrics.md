@@ -260,6 +260,16 @@ Cada rebote ofensivo propio (incluido el de equipo) abre una oportunidad nueva (
 
 Con el box oficial de los partidos de la selección (en defensa, el del rival): puntos de triples = 3 × T3c, de dobles = 2 × T2c, de tiros libres = TLc; el peso de cada uno es su parte de los puntos (suman 100 %). **Peso de las pérdidas**: pérdidas / posesiones (`TC + 0,44 × TL + TO − RO`) y puntos perdidos estimados = pérdidas × PPP del equipo (estimación). **Peso de las asistencias**: asistencias / canastas de campo, y puntos generados = 2 × asistencias a doble + 3 × asistencias a triple (A-12; los tiros libres asistidos no suman).
 
+## Uso de tiro: 2P, 3P y TL, y zonas *(correcciones de Equipo, 2026-10)*
+
+**Uso de 2P / 3P** = tiros de 2 (de 3) intentados / tiros de campo intentados. **Uso de TL** (`ft_uso`) = 0,44 × TLi / (TCi + 0,44 × TLi): el peso de los tiros libres en las jugadas de tiro. Están en el perfil de tiro de equipo y jugador y en la tabla del ranking de Liga.
+
+**Zonas de tiro.** Las coordenadas de FIBA (`court_x` a lo largo, `court_y` a lo ancho, 0–100) son de la cancha completa y cada equipo tira a los dos aros. `shot_zones.to_half_court` gira los tiros del aro de la derecha 180° y devuelve (posición a lo ancho en %, distancia a la línea de fondo en metros, cancha de 28 × 15 m). Zonas: **pintura** (`restricted_area`) = dentro del área (ancho 33,7–66,3 %, hasta la línea de tiros libres a 5,80 m) o bandeja, volcada y similares; **esquina** = triple a menos de 2,99 m de la línea de fondo; **media distancia** = tiro de 2 fuera de la pintura (cerca del fondo: `mid_*_close`; pasada la línea de tiros libres: `mid_*_far` y `mid_top`). Antes se clasificaba con las coordenadas legadas `x/y` (siempre 0) y todos los tiros caían en pocas zonas. **% tiros en pintura** (`paint_fga_share`) = tiros en `restricted_area` / tiros de campo; **% tiros de media** (`mid_fga_share`) = tiros en las cinco zonas de media / tiros de campo. Sin coordenadas en algún partido de la selección, ambos quedan `no_disponible`.
+
+**Desglose ofensivo calculado.** Si FIBA no publica el campo, banca = puntos de los no titulares (exacto); pintura = 2 × tiros de campo convertidos en la pintura; segunda oportunidad = puntos de las oportunidades que siguen a un rebote ofensivo (A-04); tras pérdida rival = puntos de las posesiones que empiezan con robo o pérdida rival (A-02); contraataque = puntos de las posesiones de transición (A-03, aproximación). Lo que FIBA informa, incluso 0, no se toca.
+
+**Promedio de liga con competencia joven.** Si ningún equipo llega al mínimo de muestra (`sample.team.min`) la ficha quedaba sin promedio, puesto ni percentil; ahora se compara contra todos los equipos con partidos y `population.fallback` = `sin_umbral` lo avisa.
+
 ## Pace
 
 ```

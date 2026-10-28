@@ -25,15 +25,17 @@ async function _teams(competition) {
 
 const _playersByTeam = new Map();   // equipo → [{id, name}]
 
-async function _players(teamCode) {
-  if (_playersByTeam.has(teamCode)) return _playersByTeam.get(teamCode);
+// Solo los jugadores de la competencia activa: con otra competencia en pantalla no se ofrecen los de la anterior.
+async function _players(teamCode, competition) {
+  const key = `${teamCode}|${competition ?? ""}`;
+  if (_playersByTeam.has(key)) return _playersByTeam.get(key);
   try {
-    const list = await api.players(teamCode);
-    _playersByTeam.set(teamCode, list.filter(p => p.player_id != null).map(p => ({ id: String(p.player_id), name: p.name })));
+    const list = await api.players(teamCode, { competition: competition || null });
+    _playersByTeam.set(key, list.filter(p => p.player_id != null).map(p => ({ id: String(p.player_id), name: p.name })));
   } catch {
     return null;
   }
-  return _playersByTeam.get(teamCode);
+  return _playersByTeam.get(key);
 }
 
 export function invalidateContextOptions() {
@@ -76,7 +78,7 @@ ${!teamCode && EVENT_KEYS.some(k => ctx[k]) ? '      <p class="td-muted ctx-hint
   });
 
   if (teamCode) {
-    _players(teamCode).then(players => {
+    _players(teamCode, competition).then(players => {
       for (const key of ["on", "off"]) {
         const sel = el.querySelector(`[data-ctx="${key}"]`);
         if (!sel) continue;

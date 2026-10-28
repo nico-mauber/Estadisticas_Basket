@@ -228,6 +228,9 @@ neutra si falta cualquiera de los dos lados. Ver `sdd/specs/12-nulos-orden-color
 ### Tramo de reloj y composición de puntos (A-05)
 `components/clock-panel.js` → `renderClockPanel(el, team, {mode: "team"|"game", params, gameId, teams, team})`. Se monta en Equipo (`#team-clock`, después de Segunda oportunidad) y en Partido (pestaña "Reloj y puntos", con selector de los dos equipos). Chips Ataque / Defensa (`?cside=`). Muestra: barra y tabla de composición de los puntos (triples, dobles, tiros libres), pérdidas y asistencias con su peso; tabla del reloj de 24 s por tramo (tiros, % de los tiros, triples, % de sus tiros que son triples, peso en los triples del equipo, eFG%, PPT, PPP, TO%, violaciones de 24 s), tabla aparte del reloj de 14 s, fila "Sin reloj derivable", pérdidas por tipo y tramo, nota de fuente derivada y leyenda de conciliación con el box oficial. `sw.js` v48.
 
+### Análisis del equipo y correcciones de Equipo / Liga (2026-10)
+`components/team-insights.js` → `renderTeamInsights(el, team, {params})`: card "Análisis del equipo" en Equipo (`#team-insights`), fortalezas y "para mejorar" con el percentil de cada métrica en la competencia. El selector de jugador, el picker de combinaciones, la barra de contexto (con/sin jugador) y las llamadas a `api.lineup` / `api.onoff` usan la competencia elegida y se recargan al cambiarla; el mapa de tiro del equipo respeta la competencia y "últimos N". La card Tiro suma Uso 2P y Uso TL; el desglose ofensivo avisa cuando está calculado. En Liga, cada tarjeta es desplegable (`_makeCollapsible`: botón ▾/▸ en el título, estado recordado en `sessionStorage`) y el mapa de liga ofrece "Uso de 3P / eFG%" y "Uso de 2P / Uso de TL"; el ranking suma Uso de 2 y Uso de TL. `sw.js` v49.
+
 ## Shot chart (`components/shot-chart.js`, C-03)
 
 SVG de cancha clara estilo "El Metro", extraído de `app.js` a `components/shot-chart.js`. Consume `GET /api/shot-zones` vía `api.shotZones(params)`.

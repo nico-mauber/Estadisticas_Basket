@@ -544,7 +544,7 @@ def game_shots(game_id: str, team_code: str, *,
     for s in shots:
         z = shot_zones.classify_zone(
             s.action_type or "", s.sub_type or "",
-            s.court_x or 0, s.court_y or 0,
+            *shot_zones.to_half_court(s.court_x, s.court_y),
         )
         bi = band_index.get(s.action_number, {})
         band = bi.get("band")
