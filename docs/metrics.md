@@ -268,7 +268,7 @@ Con el box oficial de los partidos de la selección (en defensa, el del rival): 
 
 **Desglose ofensivo calculado.** Si FIBA no publica el campo, banca = puntos de los no titulares (exacto); pintura = 2 × tiros de campo convertidos en la pintura; segunda oportunidad = puntos de las oportunidades que siguen a un rebote ofensivo (A-04); tras pérdida rival = puntos de las posesiones que empiezan con robo o pérdida rival (A-02); contraataque = puntos de las posesiones de transición (A-03, aproximación). Lo que FIBA informa, incluso 0, no se toca.
 
-**Promedio de liga con competencia joven.** Si ningún equipo llega al mínimo de muestra (`sample.team.min`) la ficha quedaba sin promedio, puesto ni percentil; ahora se compara contra todos los equipos con partidos y `population.fallback` = `sin_umbral` lo avisa.
+**Promedio de liga con competencia joven.** Si ningún equipo llega al mínimo de muestra (`sample.team.min`), o si menos de la mitad de los equipos lo alcanza, la ficha quedaba sin promedio o decía "4.º de 4" con 16 equipos en la liga; ahora se compara contra todos los equipos con partidos y `population.fallback` = `sin_umbral` lo avisa.
 
 ## Pace
 
