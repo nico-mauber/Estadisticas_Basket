@@ -672,6 +672,42 @@ def _sum_games(per_game: list) -> dict:
     return sums
 
 
+def origin_rates(c: dict) -> dict:
+    """Tasas de las posesiones de un origen (A-02; fórmulas de docs/metrics.md, agregación pooled).
+
+    `c`: sumas de las posesiones del origen — `n`, `pts`, `fga2`/`fgm2`/`fga3`/`fgm3`, `fta`, `tov`,
+    `duration_sum`. Denominador 0 → `None` (el origen no tuvo intentos)."""
+    fga = c["fga2"] + c["fga3"]
+    return {
+        "ppp": _safe_div(c["pts"], c["n"]),
+        "efg_pct": _safe_div(c["fgm2"] + c["fgm3"] + 0.5 * c["fgm3"], fga),
+        "to_pct": _safe_div(c["tov"], c["n"]),
+        "ft_rate": _safe_div(c["fta"], fga),
+        "duration_avg": _safe_div(c["duration_sum"], c["n"]),
+    }
+
+
+def clock_rates(c: dict) -> dict:
+    """Tasas de un bloque de tramo de reloj (A-05; fórmulas de docs/metrics.md, agregación pooled).
+
+    `c`: `n` (oportunidades), `pts` (puntos de las oportunidades), `fga`/`fgm`/`fga3`/`fgm3`/`pts_fg`/`paint`
+    (tiros de campo del tramo), `fta`/`ftm`/`tov`/`viol24` y el reparto `t2`/`t3`/`tl`/`perdida`.
+    Denominador 0 → `None`."""
+    fga = c["fga"]
+    return {
+        "metrics": {
+            "efg_pct": _safe_div(c["fgm"] + 0.5 * c["fgm3"], fga),
+            "ts_pct": _safe_div(c["pts_fg"] + c["ftm"], 2 * (fga + 0.44 * c["fta"])),
+            "ppt": _safe_div(c["pts_fg"], fga),
+            "ppp": _safe_div(c["pts"], c["n"]),
+            "to_pct": _safe_div(c["tov"], c["n"]),
+            "viol24_rate": _safe_div(c["viol24"], c["n"]),
+        },
+        "mix": {k: _safe_div(c[k], c["n"]) for k in ("t2", "t3", "tl", "perdida")},
+        "paint_share": _safe_div(c["paint"], fga),
+    }
+
+
 def aggregate_games(per_game: list, keys: list, *, entity_type: str = "team",
                     empty_reason: str = "sin_datos") -> dict:
     """Promedios, totales y razones de nulo de una selección de partidos de UNA entidad.

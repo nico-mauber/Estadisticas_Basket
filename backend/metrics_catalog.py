@@ -73,7 +73,7 @@ GROUPS = [
      ]},
 ]
 
-_ALL_ENTITIES = ("team", "player", "lineup", "onoff", "clutch")
+_ALL_ENTITIES = ("team", "player", "lineup", "onoff", "clutch", "origin", "ptype")
 _PLAYER_ONLY = ("player",)
 _TEAM_ONLY = ("team",)
 
@@ -415,7 +415,7 @@ def _entity_id_kwargs(entity_type: str, raw_id: str) -> dict:
         return {"team_code": team_code.upper()}
     if entity_type == "clutch":
         return {"team_code": raw_id.upper()}
-    if entity_type == "period":
+    if entity_type in ("period", "origin", "ptype"):
         return {"team_code": raw_id.split(":", 1)[0].upper()}
     return {}
 
@@ -463,6 +463,9 @@ def build_payload(entity_type: str, args) -> dict:
             params["margin"] = int(margin)
         if window_secs not in (None, ""):
             params["window_secs"] = int(window_secs)
+
+    if entity_type in ("origin", "ptype"):
+        params["side"] = args.get("side") or "ataque"
 
     req = EntityRequest(entity_type=entity_type, entity_id=entity_id, comp_id=ctx.competition_id,
                         ctx=ctx, base=base, params=params)
@@ -533,7 +536,7 @@ def build_payload(entity_type: str, args) -> dict:
         }
 
     team_poss = None
-    if entity_type in ("lineup", "pair", "onoff", "split", "clutch"):
+    if entity_type in ("lineup", "pair", "onoff", "split", "clutch", "origin", "ptype"):
         team_code = meta0.get("team_code")
         if team_code:
             team_poss = sample_mod.team_offensive_possessions(team_code, ctx.competition_id, ctx)
@@ -640,6 +643,8 @@ def _population_variant(entity_type, bundle):
     el tramo (cada ventana tiene su propia población); si no, None."""
     if entity_type == "period":
         return (bundle.meta or {}).get("window")
+    if entity_type in ("origin", "ptype"):
+        return (bundle.meta or {}).get("variant")
     if entity_type == "lineup":
         pids = (bundle.meta or {}).get("player_ids")
         if pids:

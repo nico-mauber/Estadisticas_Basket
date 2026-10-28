@@ -50,6 +50,15 @@ class Chance:
     end_type: str | None = None      # t2c, t2f, t3c, t3f, falta, perdida, fin_periodo
     pts: int = 0
     outcome: str | None = None       # lo llena A-04
+    mode: str | None = None          # A-04: modo del tiro (putback, kickout, reinicio); None si no hubo tiro
+    shot_secs: int | None = None     # A-04: segundos del rebote al primer tiro de la oportunidad
+    source: str | None = None        # A-04: tipo de tiro fallado que dio el rebote (triple, media_distancia, cercano, tiro_libre)
+    rebounder_id: int | None = None  # A-04: quien capturó el rebote ofensivo (None = rebote de equipo)
+    finisher_id: int | None = None   # A-04: quien tiró, perdió el balón o recibió la falta
+    band: str | None = None          # A-05: tramo del reloj de posesión del evento de decisión
+    end_elapsed: int | None = None   # A-05: segundos de reloj de posesión del evento de decisión
+    box: dict | None = None          # A-05: conteos propios de la oportunidad (tiros, libres, pérdidas)
+    turnover_kind: str | None = None  # A-05: pase, manejo, pasos, viol24, otras
 
 
 @dataclass
@@ -82,6 +91,11 @@ class Possession:
     score_start: tuple | None = None       # (s1, s2) al inicio
     origin: str | None = None              # lo llena A-02
     ptype: str | None = None               # lo llena A-03
+    ptype_reason: str | None = None        # A-03: por qué no hay tipo (sin_accion, reloj_no_derivable)
+    first_elapsed: int | None = None       # A-03: segundos de posesión hasta el primer evento de decisión
+    finish_kind: str | None = None         # A-03: bandeja_volcada, otro_2, triple_esquina, triple_frontal, tiro_libre, perdida, fin_periodo
+    starter_id: int | None = None          # A-03: quien recuperó el balón (rebote defensivo o robo)
+    end_player_id: int | None = None       # A-03: quien tiró, perdió el balón o recibió la falta que cerró la posesión
     event_numbers: tuple | None = None     # action_numbers de [start_event, end_event]
 
 
@@ -332,7 +346,7 @@ class _Walker:
         xy = self.p["xy"].get(an)
         zone = (self.p["zone"](ev["action_type"], ev.get("sub_type") or "", xy[0], xy[1])
                 if xy and xy[0] is not None and xy[1] is not None else None)
-        po.shots.append({"action_number": an, "elapsed": el, "band": None, "zone": zone,
+        po.shots.append({"action_number": an, "elapsed": el, "band": None, "zone": zone, "three": n == 3,
                          "made": ok, "pts": n if ok else 0, "player_id": pid})
         if not ok:
             self.miss = {"team": T, "end": f"t{n}f", "an": an, "i": i}

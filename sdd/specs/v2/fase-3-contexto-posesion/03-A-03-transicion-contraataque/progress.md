@@ -1,95 +1,51 @@
 # Progress — A-03: Transición y contraataque
 
-> **Estado:** ⬜ No iniciado
+> **Estado:** 🔶 Implementado en Equipo (ataque y defensa) y Jugador, con entidad `ptype` (T-05) y tabla `team_ptypes` (T-06); falta el filtro de contexto `ptype` sobre otras vistas
 
 ## Estado de tareas
-
-### Grupo A — Backend: configuración, datos de posesión y enriquecedor
-- [ ] T-A1 · Activar claves `transition.max_secs` / `early_offense.max_secs`
-- [ ] T-A2 · Campos nuevos de `Possession` y `include_incomplete`
-- [ ] T-A3 · `enrich_ptype` (tipo por primer evento de decisión)
-- [ ] T-A4 · `finish_kind`
-- [ ] T-A5 · `end_player_id` y `starter_id`
-- [ ] T-A6 · Registro del enriquecedor
-
-### Grupo B — Backend: fórmulas y agregación
-- [ ] T-B1 · `stats_engine.ptype_rates`
-- [ ] T-B2 · `transition_report` ataque (tipos, diff, primer tiro, fichas)
-- [ ] T-B3 · Origen del contraataque
-- [ ] T-B4 · Finalización en transición
-- [ ] T-B5 · % RD → transición
-- [ ] T-B6 · Corredores y primer pase de salida
-- [ ] T-B7 · Bloque defensivo (por 100 y origen concedido)
-- [ ] T-B8 · Pérdidas propias convertidas y balance defensivo
-- [ ] T-B9 · `player_transition`
-- [ ] T-B10 · `reconcile_fastbreak`
-- [ ] T-B11 · Manejo de nulos
-
-### Grupo C — Backend: registros T-05/T-03/T-06 y ruta
-- [ ] T-C1 · `ptype_bundles` + `register_entity`
-- [ ] T-C2 · `register_dimension("ptype")` y predicado
-- [ ] T-C3 · `table_rows` + `register_table("team_ptypes")`
-- [ ] T-C4 · `GET /api/transition`
-- [ ] T-C5 · Errores 400/404
-
-### Grupo D — Frontend
-- [ ] T-D1 · `api.transition`
-- [ ] T-D2 · `transition-panel.js`
-- [ ] T-D3 · Montaje en Equipo/Jugador
-- [ ] T-D4 · Estados loading/vacío/error/offline
-- [ ] T-D5 · Estilos mobile
-- [ ] T-D6 · Bump `sw.js`
-
-### Grupo E — Documentación
-- [ ] T-E1 · `docs/api.md`
-- [ ] T-E2 · `docs/metrics.md`
-- [ ] T-E3 · `docs/frontend.md`
-- [ ] T-E4 · `docs/architecture.md`
-
-### Grupo F — Verificación
-- [ ] T-F1…T-F28
+- [x] Enriquecedor `enrich_ptype` (tipo, motivo, finalización, iniciador y finalizador), registrado después de `origin`
+- [x] Cortes de `transition.max_secs` / `early_offense.max_secs` activados en `CONFIG_SPEC` (`status="activa"`)
+- [x] `transition_report` ataque: tipos, diferencial de PPP, primer tiro, origen del contraataque, finalización, rebote → transición, corredores, primer pase `no_registrado`
+- [x] `transition_report` defensa: concedidas por 100, origen concedido, pérdidas propias → transición rival, balance defensivo
+- [x] `player_transition` y `GET /api/transition`
+- [x] `reconcile_fastbreak` (RF-21, informativo)
+- [x] Entidad `ptype` (`/api/metrics/ptype?id=<equipo>:<tipo>&side=`) y tabla `team_ptypes`
+- [x] Panel `transition-panel.js` en Equipo y Jugador; `sw.js` v46
+- [x] Docs: `api.md`, `metrics.md`, `frontend.md`, `architecture.md`
+- [ ] Filtro de contexto `ptype` en otras vistas (CA-17): los valores válidos se alinearon con `transicion|early|media_cancha`, el filtro sigue en `context.ignored`
 
 ## Estado de CA (gate de aceptación)
+Seed local (Liga de Ascenso, 13 partidos): `test_client` y Chromium 1280 y 360 px.
+
 | CA | Estado | Evidencia |
 |---|---|---|
-| CA-1 (CA del cliente, reparto 100 %) | ⬜ | |
-| CA-2 (CA del cliente, estabilidad) | ⬜ | |
-| CA-3 | ⬜ | |
-| CA-4 | ⬜ | |
-| CA-5 | ⬜ | |
-| CA-6 | ⬜ | |
-| CA-7 | ⬜ | |
-| CA-8 | ⬜ | |
-| CA-9 | ⬜ | |
-| CA-10 | ⬜ | |
-| CA-11 | ⬜ | |
-| CA-12 | ⬜ | |
-| CA-13 | ⬜ | |
-| CA-14 | ⬜ | |
-| CA-15 | ⬜ | |
-| CA-16 | ⬜ | |
-| CA-17 | ⬜ | |
-| CA-18 | ⬜ | |
-| CA-19 | ⬜ | |
-| CA-20 | ⬜ | |
-| CA-21 | ⬜ | |
-| CA-22 | ⬜ | |
-| CA-23 | ⬜ | |
+| CA-1 | ✅ | ALB ataque 39 + 31 + 87 = 157 = `classified`; `reconciled: true` en ALB y COL, ataque y defensa |
+| CA-2 | ✅ | ALB: local 73 + visitante 84 = 157 clasificadas; transiciones 12 + 27 = 39 |
+| CA-3 | ✅ (por construcción) | `_ptype_of`: ≤ 7 transición, ≤ 12 early, resto media cancha |
+| CA-4 | ✅ | `transition.max_secs` 7 → 6 por `PUT /api/settings`: transiciones 39 → 34, early 31 → 36; tras `reset` vuelve a 39/31/87 sin reiniciar. 13 (≥ `early_offense.max_secs`) rechazado por la regla de coherencia |
+| CA-5 | ✅ | el tipo sale del reloj, el origen del evento previo: se calculan por separado |
+| CA-6 | ✅ | `summary.unclassified` cuenta `incompleta`, `sin_accion`, `reloj_no_derivable` (ALB defensa: 151 clasificadas de 159 = 6 + 2) |
+| CA-8 | ✅ | origen del contraataque ALB: 20 + 5 + 6 + 4 + 4 = 39 = transiciones |
+| CA-9 | ✅ | histograma 13 + 15 + 21 + 42 + 26 = 117 posesiones con tiro; 40 sin tiro |
+| CA-10 | ✅ | 15 + 1 + 4 + 7 + 5 + 6 = 38 = transiciones no `fin_periodo` |
+| CA-11 | ✅ | 53 rebotes defensivos, 20 a transición (37,7 %), 9 con puntos |
+| CA-12 | ✅ | iniciadores identificados 24 de 39 (cobertura explícita) |
+| CA-13 | ✅ | `pass_out` = `null` / `no_registrado` con la nota |
+| CA-14 | ✅ | defensa usa las posesiones del rival del mismo partido |
+| CA-15 / CA-16 | ✅ | ALB: 24 pérdidas, 13 seguidas de transición rival, 8 con puntos; balance 9 de 74 tiros fallados |
+| CA-17 | ❌ | filtro `ptype` pendiente |
+| CA-18 | ✅ | `/api/metrics/ptype?id=ALB:transicion` devuelve las 89 claves, población de 13 equipos |
+| CA-19 | ✅ | sin posesiones: `null` / `sin_intentos`; equipo inexistente 404 `no_encontrado` |
+| CA-20 | ✅ | badge "baja" y fila en gris bajo `sample.split.min` |
+| CA-21 | ✅ | las prórrogas entran con el mismo criterio (reloj dentro del período) |
+| CA-22 | ✅ | `reconcile_fastbreak` informa por partido (p. ej. 26 reconstruidos vs 16 oficiales); sin error |
+| CA-23 | ✅ | 360 px: `scrollWidth` 360, consola sin errores |
 
-## Gates técnicos
-- Backend arranca sin traceback: ⬜
-- `upgrade_db()` idempotente (no aplica: sin cambios de esquema): —
-- Endpoints probados manualmente: ⬜
-- Consola del navegador sin errores JS: ⬜
+## Desviaciones
+- El calificador `fastbreak` de FIBA no se guarda (no hay columna `qualifiers`): la validación cruzada usa solo `fast_break_pts`.
+- Balance defensivo: cuenta posesiones rivales de origen `rebote_defensivo` en transición con puntos; no revisa si el tiro fallado era de campo (los rebotes de tiro libre ya caen en `tiro_libre_rival` de A-02).
+- La reconstrucción da más puntos de transición que el box oficial (26 vs 16 en un partido): el criterio del cliente (primeros 7 s) es más amplio que el de FIBA.
+- `pace`, `net_rating` y `der` de `/api/metrics/ptype` se calculan sin sentido sobre un subconjunto (igual que en `origin`).
 
-## Desviaciones respecto a docs/ o plan
-(completar durante la implementación)
-
-## Docs a actualizar
-- `docs/api.md` — `GET /api/transition`, tabla `team_ptypes`, tipo de entidad `ptype`, filtro de contexto `ptype`.
-- `docs/metrics.md` — tres tipos y cortes configurables, primer evento de decisión, reloj derivado (resolución de 1 s), métricas ofensivas y defensivas de transición, primer pase de salida no registrado.
-- `docs/frontend.md` — bloque "Transición y contraataque" de la pestaña Posesión (S3/S4), copy nuevo.
-- `docs/architecture.md` — módulo `backend/transition.py`.
-
-## Deuda / TODO
-(completar durante la implementación)
+## Docs pendientes
+Ninguno.
