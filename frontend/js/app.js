@@ -82,6 +82,8 @@ function _creationNote(std) {
 }
 
 // Etiqueta con su definición al pasar el cursor / tocar (C-01): `statBox` inserta el label como HTML.
+// Uso de 2P / 3P / TL: los tres suman 100 % (mismo denominador)
+const _USO_HINT = "Reparto de las jugadas de tiro: TC2i, TC3i y 0,44 × TLi sobre (TCi + 0,44 × TLi). Uso 2P + Uso 3P + Uso TL = 100 %";
 const _hint = (label, text) => `<span title="${esc(text)}">${label}</span>`;
 const _PCT_REB_HINT = "estimado por minutos mientras estuvo en cancha. No es comparable con el %s de equipo.";
 
@@ -1093,14 +1095,14 @@ const LEAGUE_MAPS = [
   },
   {
     id: "uso3", label: "Uso de 3P / eFG%",
-    axis: { xKey: "fg3_uso", xName: "Uso 3P", xLabel: "Uso de triple (% de los tiros de campo)", xDir: "higher", xQual: "más triples", xPct: true,
+    axis: { xKey: "fg3_uso", xName: "Uso 3P", xLabel: "Uso de triple (% de las jugadas de tiro)", xDir: "higher", xQual: "más triples", xPct: true,
             yKey: "efg_pct", yName: "eFG%", yDir: "higher", yQual: "mejor tiro", yPct: true },
     hint: "Derecha = tira más triples &nbsp;|&nbsp; Arriba = mejor eFG% &nbsp;|&nbsp; Arriba-derecha = muchos triples y los convierte",
   },
   {
     id: "uso2", label: "Uso de 2P / Uso de TL",
-    axis: { xKey: "fg2_uso", xName: "Uso 2P", xLabel: "Uso de 2 (% de los tiros de campo)", xDir: "higher", xQual: "más dobles", xPct: true,
-            yKey: "ft_uso", yName: "Uso TL", yLabel: "Uso de tiros libres (peso en las jugadas de tiro)", yDir: "higher", yQual: "más libres", yPct: true },
+    axis: { xKey: "fg2_uso", xName: "Uso 2P", xLabel: "Uso de 2 (% de las jugadas de tiro)", xDir: "higher", xQual: "más dobles", xPct: true,
+            yKey: "ft_uso", yName: "Uso TL", yLabel: "Uso de tiros libres (% de las jugadas de tiro)", yDir: "higher", yQual: "más libres", yPct: true },
     hint: "Derecha = ataca más con tiros de 2 &nbsp;|&nbsp; Arriba = pesan más los tiros libres &nbsp;|&nbsp; Arriba-derecha = ataca el aro y llega a la línea",
   },
 ];
@@ -1417,9 +1419,10 @@ function _renderTeamContent(main, data) {
     { title: "Tiro", extra: _shotDetailGrid(av, data.totals), metrics: [
       ["eFG%", "efg_pct", av.efg_pct, PCT(av.efg_pct)], ["TS%", "ts_pct", av.ts_pct, PCT(av.ts_pct)],
       ["FG2%", "fg2_pct", av.fg2_pct, PCT(av.fg2_pct)], ["FG3%", "fg3_pct", av.fg3_pct, PCT(av.fg3_pct)],
-      ["FT%", "ft_pct", av.ft_pct, PCT(av.ft_pct)], ["Uso 2P", "fg2_uso", av.fg2_uso, PCT(av.fg2_uso)],
-      ["Uso 3P", "fg3_uso", av.fg3_uso, PCT(av.fg3_uso)],
-      [_hint("Uso TL", "Peso de los tiros libres en las jugadas de tiro del equipo: 0,44 × TLi / (TCi + 0,44 × TLi)"), "ft_uso", av.ft_uso, PCT(av.ft_uso)] ] },
+      ["FT%", "ft_pct", av.ft_pct, PCT(av.ft_pct)],
+      [_hint("Uso 2P", _USO_HINT), "fg2_uso", av.fg2_uso, PCT(av.fg2_uso)],
+      [_hint("Uso 3P", _USO_HINT), "fg3_uso", av.fg3_uso, PCT(av.fg3_uso)],
+      [_hint("Uso TL", _USO_HINT), "ft_uso", av.ft_uso, PCT(av.ft_uso)] ] },
     { title: "Rebotes & Misc", trailing: _astPerBox(av, data.totals), metrics: [
       ["OR%", "or_pct", av.or_pct, PCT(av.or_pct)], ["DR%", "dr_pct", av.dr_pct, PCT(av.dr_pct)],
       ["Reb%", "trb_pct", av.trb_pct, PCT(av.trb_pct)], ["PER", "tov", av.tov, DEC2(av.tov)],
@@ -2235,9 +2238,10 @@ function _renderPlayerContent(main, data) {
         [_hint("RD/min", "Rebotes defensivos por minuto disputado"), "drb_min", av.drb_min, DEC2(av.drb_min)] ] },
       { title: "Tiro", extra: _shotDetailGrid(av, data.totals), metrics: [
         ["FG2%", "fg2_pct", av.fg2_pct, PCT(av.fg2_pct)], ["FG3%", "fg3_pct", av.fg3_pct, PCT(av.fg3_pct)],
-        ["FT%", "ft_pct", av.ft_pct, PCT(av.ft_pct)], ["Uso 2P", "fg2_uso", av.fg2_uso, PCT(av.fg2_uso)],
-        ["Uso 3P", "fg3_uso", av.fg3_uso, PCT(av.fg3_uso)],
-        [_hint("Uso TL", "Peso de los tiros libres en sus jugadas de tiro: 0,44 × TLi / (TCi + 0,44 × TLi)"), "ft_uso", av.ft_uso, PCT(av.ft_uso)] ] },
+        ["FT%", "ft_pct", av.ft_pct, PCT(av.ft_pct)],
+        [_hint("Uso 2P", _USO_HINT), "fg2_uso", av.fg2_uso, PCT(av.fg2_uso)],
+        [_hint("Uso 3P", _USO_HINT), "fg3_uso", av.fg3_uso, PCT(av.fg3_uso)],
+        [_hint("Uso TL", _USO_HINT), "ft_uso", av.ft_uso, PCT(av.ft_uso)] ] },
       { title: "Rebotes & distribución", trailing: _astPerBox(av, data.totals), metrics: [
         [_hint("OR%", "Porción de los rebotes ofensivos disponibles que capturó mientras estuvo en cancha, " + _PCT_REB_HINT.replace("%s", "OR%")), "or_pct", av.or_pct, PCT(av.or_pct)],
         [_hint("DR%", "Porción de los rebotes defensivos disponibles que capturó mientras estuvo en cancha, " + _PCT_REB_HINT.replace("%s", "DR%")), "dr_pct", av.dr_pct, PCT(av.dr_pct)],
