@@ -31,6 +31,7 @@ import possessions
 import origin  # noqa: F401 — registra el enriquecedor de origen de posesión (A-02)
 import second_chance  # noqa: F401 — registra el enriquecedor de segundas oportunidades (A-04)
 import possession_clock  # noqa: F401 — registra el enriquecedor del tramo de reloj (A-05)
+import breakdown  # noqa: F401 — desglose ofensivo calculado cuando FIBA no lo publica
 import transition  # noqa: F401 — registra el enriquecedor de tipo de posesión (A-03); va DESPUÉS de origin
 import game_analysis
 import live
@@ -418,6 +419,24 @@ def second_chance_route():
     if out["context"]["games_used"] == 0:
         return jsonify({"error": "Este equipo no tiene play-by-play importado. Reimportá sus partidos.",
                         "code": "sin_pbp"}), 404
+    return jsonify(out)
+
+
+@app.route("/api/team-insights/<team_code>")
+@login_required
+def team_insights_route(team_code: str):
+    """Fortalezas y debilidades del equipo contra su competencia (percentiles). `?competition=`, `?last=`."""
+    team_code = team_code.upper()
+    try:
+        ctx = context.parse_context(request.args, team_code=team_code)
+    except ContextError as e:
+        return jsonify(e.payload()), e.status
+    if ctx.competition_id is None:
+        return jsonify({"error": "Elegí una competencia para ver el análisis.", "code": "parametro_invalido"}), 400
+    import team_insights
+    out = team_insights.team_insights(team_code, ctx.competition_id, last=ctx.last)
+    out["entity"] = {"type": "team", "id": team_code}
+    out["context"] = {"competition": {"id": ctx.competition_id}, "last": ctx.last}
     return jsonify(out)
 
 
@@ -1415,7 +1434,11 @@ def lineup_route(team_code: str):
     if len(pids) < 3:   # dos nombres de la misma ficha cuentan una sola vez
         return jsonify({"error": "Elegí entre 3 y 5 jugadores"}), 400
 
-    games = _team_pbp_games(team_code)
+    try:
+        comp_id = competitions.resolve(request.args.get("competition"))   # ausente = todas
+    except CompetitionError as e:
+        return jsonify({"error": str(e)}), e.status
+    games = _team_pbp_games(team_code, comp_id)
     if not games:
         return jsonify({"error": "Equipo no encontrado o sin play-by-play"}), 404
 
@@ -1430,7 +1453,11 @@ def lineup_route(team_code: str):
 def onoff_route(team_code: str, player_name: str):
     """Rendimiento del equipo con un jugador en cancha (ON) vs en el banco (OFF) (Feature 04)."""
     team_code = team_code.upper()
-    games = _team_pbp_games(team_code)
+    try:
+        comp_id = competitions.resolve(request.args.get("competition"))   # ausente = todas
+    except CompetitionError as e:
+        return jsonify({"error": str(e)}), e.status
+    games = _team_pbp_games(team_code, comp_id)
     if not games:
         return jsonify({"error": "Equipo no encontrado o sin play-by-play"}), 404
 
@@ -1934,6 +1961,11 @@ def delete_pref():
 def index():
     return app.send_static_file("index.html")
 
+
+import cache as _cache
+import warmup as _warmup
+_cache.on_data_bump(lambda: _warmup.kick(app))
+_warmup.kick(app)   # solo con SB_WARMUP=1: calcula las posesiones de todos los partidos en segundo plano
 
 if __name__ == "__main__":
     app.run(debug=True, port=5000)

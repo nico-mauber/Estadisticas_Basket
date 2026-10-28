@@ -1086,7 +1086,7 @@ register_table(
     "league_teams", entity_type="team", title="Ranking de Liga",
     builder=_build_league_teams,
     default_columns=("_name", "games", "oer", "der", "net_rating", "pace", "efg_pct", "ts_pct",
-                     "or_pct", "dr_pct", "to_pct", "ft_rate", "fg3_uso", "ast_to", "stl"),
+                     "or_pct", "dr_pct", "to_pct", "ft_rate", "fg2_uso", "fg3_uso", "ft_uso", "ast_to", "stl"),
     bulk_scopes=("competition",), row_kind="entity",
     extra_columns=(("_name", "Equipo", "text"),),
     default_sort={"key": "net_rating", "dir": "desc", "use_adjusted": False},

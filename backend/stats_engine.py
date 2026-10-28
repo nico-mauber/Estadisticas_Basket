@@ -136,6 +136,7 @@ def calc_team_stats(t: dict, opp: dict) -> dict:
     pps  = _safe_div(pts, fga)                             # Points Per Shot
     fg2_uso = _safe_div(t["fga2"], fga)                    # %2P uso
     fg3_uso = _safe_div(t["fga3"], fga)                    # %3P uso
+    ft_uso  = _safe_div(0.44 * fta, fga + 0.44 * fta)      # uso de TL: peso de los libres en las jugadas de tiro
     fg2_pct = _safe_div(t["fgm2"], t["fga2"])
     fg3_pct = _safe_div(t["fgm3"], t["fga3"])
     ft_pct  = _safe_div(ftm, fta)
@@ -210,6 +211,7 @@ def calc_team_stats(t: dict, opp: dict) -> dict:
         "ppt":         ppt,
         "fg2_uso":     fg2_uso,
         "fg3_uso":     fg3_uso,
+        "ft_uso":      ft_uso,
         "ppt_2":       ppt_2,
         "ppt_3":       ppt_3,
         "ppt_ft":      ppt_ft,
@@ -439,6 +441,7 @@ def calc_player_stats(p: dict, team_pos: float, team: dict = None, game_minutes:
     ft   = _safe_div(ftm, fta)
     fg2_uso = _safe_div(p["fga2"], fga)
     fg3_uso = _safe_div(p["fga3"], fga)
+    ft_uso  = _safe_div(0.44 * fta, fga + 0.44 * fta)      # uso de TL (ver calc_team_stats)
     # C-07: PPT (glosario: puntos de campo / tiros de campo intentados)
     ppt    = _safe_div(2 * p["fgm2"] + 3 * p["fgm3"], p["fga2"] + p["fga3"])
     ppt_2  = _safe_div(2 * p["fgm2"], p["fga2"])
@@ -522,6 +525,7 @@ def calc_player_stats(p: dict, team_pos: float, team: dict = None, game_minutes:
         "ft_pct":         ft,
         "fg2_uso":        fg2_uso,
         "fg3_uso":        fg3_uso,
+        "ft_uso":         ft_uso,
         "ppt_2":          ppt_2,
         "ppt_3":          ppt_3,
         "ppt_ft":         ppt_ft,
@@ -580,7 +584,7 @@ def calc_player_stats(p: dict, team_pos: float, team: dict = None, game_minutes:
 TEAM_AVG_KEYS = [
     "oer", "der", "net_rating", "efg_pct", "ts_pct",
     "fg2_pct", "fg3_pct", "ft_pct", "ft_rate", "ft_rate_report",
-    "pps", "ppt", "fg2_uso", "fg3_uso",
+    "pps", "ppt", "fg2_uso", "fg3_uso", "ft_uso",
     "or_pct", "dr_pct", "trb_pct", "to_pct", "to_ratio",
     "as_pct", "ast_ratio", "pace", "pts", "possessions", "plays",
     "peso_1p", "peso_2p", "peso_3p",
@@ -594,7 +598,7 @@ TEAM_AVG_KEYS = [
 PLAYER_AVG_KEYS = [
     "efg_pct", "ts_pct", "fg2_pct", "fg3_pct",
     "ft_pct", "ft_rate", "ft_rate_report", "pps", "ppp", "ppt",
-    "fg2_uso", "fg3_uso", "peso_1p", "peso_2p", "peso_3p",
+    "fg2_uso", "fg3_uso", "ft_uso", "peso_1p", "peso_2p", "peso_3p",
     "to_pct", "to_ratio", "as_pct", "ast_ratio",
     "ppt_2", "ppt_3", "ppt_ft",
     "stocks", "def_playmaking", "physical_impact",
@@ -1086,6 +1090,9 @@ def _shooting_profile(c: dict, shots: dict | None) -> dict:
     out["fg3_uso"] = _rate_metric(c.get("fga3"), f)
     out["fg2_uso"] = _rate_metric(c.get("fga2"), f)
     out["ft_rate"] = _rate_metric(c.get("fta"), f)
+    fta_ = c.get("fta")
+    out["ft_uso"] = (_m(None, "no_registrado") if fta_ is None or f is None
+                     else _rate_metric(0.44 * fta_, f + 0.44 * fta_))
     if shots:
         out["paint_fga_share"] = _rate_metric(shots.get("paint_fga"), f)
         out["mid_fga_share"] = _rate_metric(shots.get("mid_fga"), f)
@@ -1418,7 +1425,7 @@ def _player_extra(bundle: "StatBundle") -> dict:
 
 
 def compute_standard(bundle: "StatBundle") -> dict:
-    """Las 89 métricas del catálogo estándar (plan §4.2/§4.3) a partir de un `StatBundle`.
+    """Las 90 métricas del catálogo estándar (plan §4.2/§4.3) a partir de un `StatBundle`.
 
     Entidades *teamlike* (`team`, `lineup`, `onoff`, `clutch`) usan `own`/`opp`. *player* usa
     `own` para tiro/balón/rebote/defensa/faltas/USO y `on_court` (equipo con el jugador en
@@ -1498,7 +1505,7 @@ def compute_standard(bundle: "StatBundle") -> dict:
 
 
 def metrics_catalog_keys() -> frozenset:
-    """Las 86 claves de `compute_standard` (plan §4.2). Vive acá (no en `metrics_catalog.py`,
+    """Las 90 claves de `compute_standard` (plan §4.2). Vive acá (no en `metrics_catalog.py`,
     Grupo C) para que `compute_standard` no dependa de ese módulo nuevo; cuando exista,
     `metrics_catalog.METRICS` debe tener el mismo `set` (se verifica en T-C1/T-F3)."""
     groups = {
@@ -1508,7 +1515,7 @@ def metrics_catalog_keys() -> frozenset:
         "tiro_volumen": ("fga2", "fgm2", "fga3", "fgm3", "fta", "ftm", "fga", "fgm"),
         "tiro_pct": ("fg_pct", "fg2_pct", "fg3_pct", "ft_pct", "efg_pct", "ts_pct"),
         "tiro_valor": ("ppt", "ppt_2", "ppt_3", "ppt_ft"),
-        "tiro_perfil": ("fg3_uso", "fg2_uso", "ft_rate", "paint_fga_share", "mid_fga_share"),
+        "tiro_perfil": ("fg3_uso", "fg2_uso", "ft_uso", "ft_rate", "paint_fga_share", "mid_fga_share"),
         "balon": ("ast", "tov", "ast_to", "as_pos", "as_pct", "to_pct",
                   "ast_team_share", "ast_points", "pts_per_ast"),
         "rebote": ("orb", "drb", "trb", "or_pct", "dr_pct", "trb_pct", "orb_pos", "drb_min", "orb_min"),

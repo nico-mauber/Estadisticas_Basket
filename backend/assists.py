@@ -88,27 +88,31 @@ def _merge(into: dict, other: dict) -> dict:
     return into
 
 
+def _links_of_game(game_id):
+    """Vínculos de las asistencias de UN partido por jugador; `None` si no tiene play-by-play. Cacheado por versión
+    de datos: la población de jugadores lo pide una vez por jugador y partido (antes, una consulta por jugador)."""
+    import cache
+    import repository
+
+    def build():
+        evs = repository._load_events([game_id], keep=False)[game_id]
+        return dict(game_assist_links(evs)) if evs else None
+    return cache.memo("assists:game", game_id, build)
+
+
 def player_assist_links(player_name: str, team_code: str, game_ids) -> dict:
     """Totales del jugador sobre una selección de partidos (cociente de totales, A-12 RF-1)."""
     game_ids = list(game_ids)
     if not game_ids:
         return _blank()
-    rows = (PbpEvent.query
-            .filter(PbpEvent.game_id.in_(game_ids),
-                    PbpEvent.action_type.in_(("assist", "2pt", "3pt", "freethrow")))
-            .all())
-    by_game = defaultdict(list)
-    for r in rows:
-        by_game[r.game_id].append(r)
-
+    per_game = {gid: _links_of_game(gid) for gid in game_ids}
     total = _blank()
-    total["status"] = "ok" if any(by_game.get(g) for g in game_ids) else "sin_pbp"
+    total["status"] = "ok" if any(per_game[g] is not None for g in game_ids) else "sin_pbp"
     for gid in game_ids:
-        evs = by_game.get(gid)
-        if not evs:
+        links = per_game[gid]
+        if links is None:
             total["status"] = "sin_pbp" if total["status"] == "ok" else total["status"]
             continue
-        links = game_assist_links(evs)
         mine = links.get(player_name)
         if mine is not None:
             _merge(total, mine)

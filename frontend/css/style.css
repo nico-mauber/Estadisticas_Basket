@@ -1622,3 +1622,19 @@ tbody tr.fuera-poblacion { opacity: .6; }
 .cp-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; }
 .of-table tr.of-total td { font-weight: 600; border-top: 2px solid var(--border); }
 .of-table small { color: var(--muted); font-weight: 400; }
+
+/* ── Análisis del equipo ── */
+.ti-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.ti-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.ti-item { display: flex; gap: 10px; align-items: flex-start; font-size: 14px; }
+.ti-pct { flex: none; min-width: 40px; text-align: center; font-size: 12px; font-weight: 700; padding: 2px 6px; border-radius: 6px; color: #fff; }
+.ti-up .ti-pct { background: #22a06b; }
+.ti-down .ti-pct { background: #d6504a; }
+@media (max-width: 720px) { .ti-cols { grid-template-columns: 1fr; } }
+
+/* ── Tarjetas desplegables ── */
+.cd-header { display: flex; align-items: center; gap: 8px; }
+.cd-header > .card-title { flex: 1; }
+.cd-toggle { flex: none; background: transparent; border: 1px solid var(--border); color: var(--text, inherit); border-radius: 6px;
+  width: 30px; height: 30px; cursor: pointer; font-size: 16px; line-height: 1; }
+.cd-body[hidden] { display: none; }

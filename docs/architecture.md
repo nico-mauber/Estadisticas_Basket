@@ -164,6 +164,11 @@ prefijadas por `(data_version, config_version)` leídas de la tabla `app_meta`. 
 `bump_config_version` invalidan todo lo cacheado al escribir datos (ingesta, borrado, competencias, identidad)
 o configuración (F-13). Tolerante a correr fuera de `app_context`.
 
+### `breakdown.py`, `team_insights.py`, `warmup.py` (correcciones de Equipo, 2026-10)
+`breakdown.py` calcula el desglose ofensivo (`paint_pts`, `second_chance_pts`, `pts_from_tov`, `bench_pts`, `fast_break_pts`) cuando FIBA lo deja `NULL`: `repository` lo llama como *row filler* al armar las filas de equipo y marca `_derived`; el perfil informa `extras_source` (`oficial` / `calculado`). `team_insights.py` arma fortalezas y debilidades del equipo con el percentil de cada métrica en su competencia (reglas fijas, como "Ventajas y amenazas" de Preparar); alimenta `GET /api/team-insights/<code>`. `warmup.py` calcula las posesiones de todos los partidos en un hilo (solo con `SB_WARMUP=1`) al arrancar y cuando sube `data_version` (`cache.on_data_bump`).
+
+**Rendimiento:** `cache.NAMESPACE_LIMITS` sube el tope por namespace de los cachés con una entrada por partido (`poss:game` 4000): con el tope general de 64 una liga de más de 32 partidos expulsaba entradas sin parar y cada petición reconstruía todas las posesiones. `repository._load_events` carga los eventos con una consulta de núcleo (sin objetos del ORM); `identity.canonical_id` y `resolve_player_id(create=False)` usan mapas por petición (antes una consulta por llamada: 330 000 consultas para armar la población de jugadores); `possessions.ppp_stats` y `assists._links_of_game` se cachean. Armar el plantel de una liga de 170 partidos pasó de más de 10 minutos a 8 s en frío.
+
 ### `shot_zones.py`
 Zonas de tiro y percentil por zona (C-03). Extrae la clasificación de 11 zonas de `app.py` y agrega enriquecimiento estadístico. `classify_zone(action_type, sub_type, court_x, court_y, qualifiers)` clasifica un tiro en una de las 11 zonas (ZONE_KEYS_11). `zone_table(shots)` agrega tiros por zona con FG%, eFG%, PPT y share. `zones_with_stats(entity_type, entity_id, comp_id, last, shots_query_fn)` añade percentil y muestra por zona comparando con la población de la competencia. Alimenta `GET /api/shot-zones`.
 

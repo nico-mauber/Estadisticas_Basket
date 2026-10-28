@@ -12,11 +12,37 @@ import identity
 import lineups
 import metrics_catalog
 import repository
+import shot_zones
 from database import db, Player
 from stats_engine import (RAW_KEYS, StatBundle, played, _parse_minutes, fga, fgm, plays, pos,
                           sum_bundles)
 
 _RAW_SET = set(RAW_KEYS)
+
+
+def _rows_by_player(comp_id) -> dict:
+    """`{ficha canónica: filas de player_game_stats}` de la competencia. Memo por petición: armar la población de
+    jugadores recorría TODAS las filas de la competencia una vez por jugador."""
+    def build():
+        out: dict = {}
+        for r in repository.player_game_rows(comp_id):
+            out.setdefault(identity.canonical_id(r.get("player_id")), []).append(r)
+        return out
+    return repository.memo(("rows_by_player", comp_id), build)
+
+
+def _player_zone_counts(game_id: str, team_code: str, names) -> dict | None:
+    """Tiros en pintura y de media distancia del jugador en el partido (todas sus grafías); None sin coordenadas."""
+    zones = shot_zones.game_zone_counts(game_id)
+    if zones is None:
+        return None
+    out = {"paint_fga": 0, "mid_fga": 0}
+    for name in set(names):
+        d = zones.get((team_code, name))
+        if d:
+            out["paint_fga"] += d["paint_fga"]
+            out["mid_fga"] += d["mid_fga"]
+    return out
 
 
 def _raw(row: dict) -> dict:
@@ -74,11 +100,13 @@ def team_game_bundles(team_code: str, comp_id: int | None, ctx: "context.Context
         opp["plus_minus"] = None if own.get("pts") is None or opp.get("pts") is None \
             else opp["pts"] - own["pts"]
         minutes = row.get("game_minutes") or 40
+        zones = shot_zones.game_zone_counts(row["game_id"])
         bundle = StatBundle(
             entity_type="team", entity_id=team_code, name=row["team_name"],
             own=own, opp=opp, team=None,
             games=1, minutes=minutes, team_minutes=None, seconds=minutes * 60,
-            on_court=None, shots=None, possessions_counted=None,
+            on_court=None, shots=None if zones is None else zones.get((team_code, None)),
+            possessions_counted=None,
             null_reasons={},
             meta={"team_code": team_code, "team_name": row["team_name"], "game_ids": [row["game_id"]]},
         )
@@ -108,7 +136,9 @@ def _team_bundle_from_games(team_code, comp_id, ctx):
     bundle.meta["games_excluded"] = context.rest_excluded(own_all, ctx, team_code)
     try:
         import possessions as _poss
-        tp = _poss.team_possessions(team_code, comp_id)
+        # solo los partidos de la selección (últimos N, local/visitante, …): antes contaba toda la competencia
+        # y "posesiones contadas" no coincidía con las posesiones y el pace de la misma selección
+        tp = _poss.team_possessions_in(team_code, bundle.meta.get("game_ids") or [])
         if tp:
             bundle.possessions_counted = len(tp)
             bundle.poss_seconds = sum(p.duration or 0 for p in tp)
@@ -153,8 +183,7 @@ def player_game_bundles(player_id: int, comp_id: int | None, ctx: "context.Conte
     team_code = card["team_code"]
     pid = card["player_id"]
 
-    all_player_rows = [r for r in repository.player_game_rows(comp_id)
-                       if identity.canonical_id(r.get("player_id")) == pid]
+    all_player_rows = _rows_by_player(comp_id).get(pid, [])
     if not all_player_rows:
         return []
     sel = context.filter_games(all_player_rows, ctx, team_code)
@@ -164,9 +193,9 @@ def player_game_bundles(player_id: int, comp_id: int | None, ctx: "context.Conte
 
     def _pbp_games():
         if comp_id not in pbp_cache:
-            games = repository.team_pbp_games(team_code, comp_id)
-            pbp_cache[comp_id] = {g["game_id"]: g for g in
-                                  identity.canonicalize_pbp_games(games, team_code)}
+            pbp_cache[comp_id] = repository.memo(("canon_pbp_games", team_code, comp_id), lambda: {
+                g["game_id"]: g for g in identity.canonicalize_pbp_games(
+                    repository.team_pbp_games(team_code, comp_id), team_code)})
         return pbp_cache[comp_id]
 
     out = []
@@ -223,7 +252,8 @@ def player_game_bundles(player_id: int, comp_id: int | None, ctx: "context.Conte
             entity_type="player", entity_id=player_id, name=display_name,
             own=own, opp=opp, team=team,
             games=1, minutes=minutes, team_minutes=gm * 5, seconds=minutes * 60,
-            on_court=on_court, shots=None, possessions_counted=None,
+            on_court=on_court, shots=_player_zone_counts(row["game_id"], team_code, card.get("aliases") or [display_name]),
+            possessions_counted=None,
             null_reasons={}, derived=derived,
             meta={"team_code": team_code, "team_name": row.get("team_name"), "game_ids": [row["game_id"]]},
         )
@@ -243,8 +273,7 @@ def _player_bundle_from_games(player_id, comp_id, ctx):
     if not per_game:
         return None
     card = identity.player_card(player_id)
-    all_rows = [r for r in repository.player_game_rows(comp_id)
-               if identity.canonical_id(r.get("player_id")) == card["player_id"]]
+    all_rows = _rows_by_player(comp_id).get(card["player_id"], [])
     scoped = context.filter_games(all_rows, context.without_last(ctx), card["team_code"])
     games_total = sum(1 for r in scoped if played(r.get("minutes")))
     bundle = sum_bundles([b for _, b in per_game])

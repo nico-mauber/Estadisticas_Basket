@@ -582,6 +582,7 @@ def team_profile(team_code: str, ctx: Context) -> dict | None:
         "totals": agg["totals"],
         "league": league,
         "league_meta": league_meta,
+        "extras_source": __import__("breakdown").derived_sources(sel),
         "game_log": game_log,
     }
 

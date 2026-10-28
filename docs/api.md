@@ -755,6 +755,12 @@ Response 200 (equipo): `types[]` (`transicion`, `early`, `media_cancha`: `posses
 
 Conjunto estándar y tabla: `GET /api/metrics/ptype?id=<equipo>:<tipo>&side=` y `GET /api/table/team_ptypes?team=<code>&side=` (mismo patrón que `origin`). Errores como en `/api/origins`.
 
+## GET `/api/team-insights/<team_code>` — NUEVO
+
+Fortalezas y debilidades del equipo contra su competencia. Auth: `login_required`. Query: `competition`, `last`. Response 200: `strengths[]` y `weaknesses[]` (`metric`, `label`, `fmt`, `value`, `percentile`, `text`; fortaleza = percentil ≥ 70, debilidad ≤ 30, hasta 5 por lado), `teams`, `games`, `low_sample`, `evaluated`, `entity`, `context`. 400 si no hay competencia.
+
+**Cambios (2026-10):** `GET /api/players/<team>`, `GET /api/lineup/<team>` y `GET /api/onoff/<team>/<jugador>` aceptan `?competition=` y solo usan los partidos de esa competencia. `GET /api/team/<code>` agrega `extras_source` (`oficial` / `calculado` por campo del desglose ofensivo). El conjunto estándar suma `ft_uso` (90 claves).
+
 ## GET `/api/second-chance` — NUEVO (A-04)
 
 Segunda oportunidad. Auth: `login_required`. Parámetros como `GET /api/origins` (`team` o `player`, `side=ataque|defensa` solo con `team`, contexto T-03).

@@ -51,7 +51,7 @@ GROUPS = [
     {"key": "tiro_valor", "label": "Tiro — valor",
      "metrics": ["ppt", "ppt_2", "ppt_3", "ppt_ft"]},
     {"key": "tiro_perfil", "label": "Tiro — perfil",
-     "metrics": ["fg3_uso", "fg2_uso", "ft_rate", "paint_fga_share", "mid_fga_share"]},
+     "metrics": ["fg3_uso", "fg2_uso", "ft_uso", "ft_rate", "paint_fga_share", "mid_fga_share"]},
     {"key": "balon", "label": "Balón",
      "metrics": ["ast", "tov", "ast_to", "as_pos", "ast_team_share", "ast_points", "pts_per_ast",
                  "as_pct", "to_pct"]},
@@ -141,6 +141,7 @@ _DEFS = [
     # ── tiro_perfil ──
     _md("fg3_uso", "Uso de triple", "tiro_perfil", "pct", "neutral", "rate", "fixed", rel_dist=False),
     _md("fg2_uso", "Uso de 2", "tiro_perfil", "pct", "neutral", "rate", "fixed", rel_dist=False),
+    _md("ft_uso", "Uso de TL", "tiro_perfil", "pct", "neutral", "rate", "fixed", rel_dist=False),
     _md("ft_rate", "FT Rate", "tiro_perfil", "dec2", "higher", "rate", "fixed"),
     _md("paint_fga_share", "% tiros en pintura", "tiro_perfil", "pct", "neutral", "rate", "fixed",
         rel_dist=False),
@@ -232,7 +233,7 @@ METRICS: dict[str, MetricDef] = {d.key: d for d in _DEFS}
 # El conjunto de claves debe coincidir EXACTAMENTE con las 89 de stats_engine.compute_standard.
 assert set(METRICS) == stats_engine.metrics_catalog_keys(), (
     "metrics_catalog.METRICS debe tener las mismas claves que stats_engine.metrics_catalog_keys()")
-assert len(METRICS) == 89, f"Se esperaban 89 claves, hay {len(METRICS)}"
+assert len(METRICS) == 90, f"Se esperaban 90 claves, hay {len(METRICS)}"
 assert len(GROUPS) == 12, f"Se esperaban 12 grupos, hay {len(GROUPS)}"
 
 _group_keys_seen: set = set()
@@ -622,14 +623,26 @@ def _attach_fichas(payload, entity_type, b0, ctx, base, *, prior_fn) -> None:
             payload["population"] = {"size": 0, "criterion": "", "context_label": "", "reason": "contexto_no_comparable"}
             return
         pop = population.population(entity_type, ctx.competition_id, ctx, variant=variant)
+        fallback = None
+        import config
+        if not pop.reason and pop.size < config.get("population.min_size"):
+            # Competencia joven (pocos partidos por equipo): ninguna entidad llega al mínimo de muestra y la
+            # ficha quedaba sin promedio, puesto ni percentil. Se compara contra todas las que tienen datos y
+            # se avisa; la muestra baja de cada una sigue marcada por su badge.
+            wide = population.population(entity_type, ctx.competition_id, ctx, variant=variant,
+                                         apply_thresholds=False)
+            if wide.size > pop.size:
+                pop, fallback = wide, "sin_umbral"
         rank_values = _ranking_values(b0, ctx, sample_mod=prior_fn)
         population.attach_fichas(payload["metrics"], entity_type, b0.entity_id, pop,
                                  rank_values=rank_values, base=base)
         payload["population"] = {
             "size": pop.size,
-            "criterion": pop.criterion,
+            "criterion": ("todos los equipos con partidos en la competencia (todavía pocos llegan al mínimo de muestra)"
+                          if fallback and entity_type == "team" else pop.criterion),
             "context_label": pop.context_label,
             "reason": pop.reason,
+            "fallback": fallback,
         }
     except Exception:
         import logging
