@@ -58,6 +58,7 @@ class Chance:
     band: str | None = None          # A-05: tramo del reloj de posesión del evento de decisión
     end_elapsed: int | None = None   # A-05: segundos de reloj de posesión del evento de decisión
     box: dict | None = None          # A-05: conteos propios de la oportunidad (tiros, libres, pérdidas)
+    end_player_id: int | None = None  # A-05: quien tiró, perdió el balón o ejecutó los libres que cierran la oportunidad
     turnover_kind: str | None = None  # A-05: pase, manejo, pasos, viol24, otras
 
 

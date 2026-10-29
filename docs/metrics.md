@@ -257,6 +257,12 @@ Cada rebote ofensivo propio (incluido el de equipo) abre una oportunidad nueva (
 
 **Fórmulas por tramo.** eFG% = (T2c + 1,5 × T3c) / tiros de campo del tramo; PPT = puntos de campo / tiros de campo; TS% = (puntos de campo + TLc) / (2 × (tiros de campo + 0,44 × TLi)); PPP = puntos de las oportunidades del tramo / oportunidades del tramo; TO% = pérdidas / oportunidades; violaciones de 24 s = pérdidas con subtipo `24sec` / oportunidades; reparto T2 / T3 / TL / pérdida = cómo termina cada oportunidad (suma 100 %). **Peso de los triples**: `share_of_band` = triples intentados / tiros del tramo; `share_of_team_3pa` = triples del tramo / triples del equipo; `pts_share` = puntos de triples del tramo / puntos de campo del equipo.
 
+**Jugador por tramo.** *Tiros* = tiros de campo del jugador en el tramo (reloj de 24 s); *termina* = oportunidades del tramo cuyo evento de decisión es suyo (último tiro, pérdida o primer tiro libre de la falta recibida); **USO% del tramo** = oportunidades que termina / oportunidades del equipo en el tramo (con la fila "Equipo / sin jugador" suman 100 %); **PPP personal** = puntos de las oportunidades que termina / oportunidades que termina; eFG%, PPT y TS% como en el equipo, con los tiros libres de las oportunidades que termina.
+
+**Matriz zona × tramo.** Los tiros de campo de posesiones completas (ambos relojes) por zona (11 zonas) y tramo; la suma de las zonas de cada tramo es igual a los tiros del tramo y la columna "Sin reloj" a los tiros sin reloj derivable. Los tiros sin coordenadas van a la fila "Sin zona".
+
+**Panel de decisión.** Siete preguntas con los números de la propia tabla de tramos: (1) TO%, pérdidas y reparto por tipo; (2) PPP y eFG% contra el promedio de la competencia en el mismo tramo (media de los equipos con valor, reloj de 24 s); (3) zona con más tiros por tramo; (4) cómo termina cada oportunidad y peso de la pintura; (5) quién termina más oportunidades por tramo; (6) PPP tardío menos temprano y % de las oportunidades de 24 s con tramo que llega al tardío; (7) la misma lectura en la vista Defensa.
+
 **Tipos de pérdida.** pase = `badpass`; manejo = `ballhandling`; pasos = `travel`; 24 segundos = `24sec`; otras = el resto de los subtipos y las pérdidas sin subtipo.
 
 ## Composición de los puntos (A-05)
