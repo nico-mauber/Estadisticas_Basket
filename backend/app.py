@@ -449,6 +449,23 @@ def possession_clock_route():
     import context as context_mod
     team = (request.args.get("team") or "").strip().upper()
     game = (request.args.get("game") or "").strip() or None
+    player = (request.args.get("player") or "").strip()
+    if player:
+        if not player.isdigit() or team:
+            return jsonify({"error": "Indicá un equipo o un jugador.", "code": "parametro_invalido"}), 400
+        card = identity.player_card(int(player))
+        if card is None:
+            return jsonify({"error": "No encontramos ese jugador.", "code": "no_encontrado"}), 404
+        try:
+            ctx = context_mod.parse_context(request.args, player_id=int(player))
+            out = possession_clock.player_clock(int(player), ctx.competition_id, ctx)
+        except ContextError as e:
+            return jsonify(e.payload()), e.status
+        out["entity"] = {"type": "player", "id": int(player), "name": card.get("display_name")}
+        if out["context"]["games_used"] == 0:
+            return jsonify({"error": "Este equipo no tiene play-by-play importado. Reimportá sus partidos.",
+                            "code": "sin_pbp"}), 404
+        return jsonify(out)
     if not team:
         return jsonify({"error": "Indicá un equipo.", "code": "parametro_invalido"}), 400
     side = request.args.get("side", "ataque")

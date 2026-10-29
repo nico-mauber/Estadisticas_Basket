@@ -14,11 +14,12 @@ sin tramo (`no_clock`), nunca como `temprano`.
 partido). `points_mix` descompone los puntos del equipo en triples, dobles y tiros libres y mide el peso de
 pérdidas y asistencias. Todo on-the-fly: nada se persiste.
 """
-from collections import Counter
+from collections import Counter, defaultdict
 
 import cache
 import config
 import context as context_mod
+import identity
 import possessions
 import repository
 import sample
@@ -81,7 +82,7 @@ def enrich_clock(poss, events, meta):
     idx, mc = meta["event_index"], meta["mclock_list"]
     for p in poss:
         for ch in p.chances:
-            ch.band = ch.end_elapsed = ch.box = ch.turnover_kind = None
+            ch.band = ch.end_elapsed = ch.box = ch.turnover_kind = ch.end_player_id = None
         for s in p.shots:
             s["band"], s["clock_start"] = None, None
         if p.incomplete or not p.chances:
@@ -108,6 +109,7 @@ def enrich_clock(poss, events, meta):
             if dec is None or dec["action_number"] not in idx:
                 continue
             ch.box["dec"] = _DEC_KIND.get(dec.get("action_type"))
+            ch.end_player_id = meta["name_to_id"].get((p.team, dec.get("player_name")))
             e = ch.start_clock - mc[idx[dec["action_number"]]]
             ch.end_elapsed = e if 0 <= e <= ch.shot_clock_start + 1 else None
             ch.band = band_of(ch.end_elapsed, ch.shot_clock_start, cuts)
@@ -261,6 +263,182 @@ def points_mix(rows):
     }
 
 
+# ── Jugador, matriz zona × tramo y panel de decisión (A-05, segunda entrega) ─────────────────────────────
+
+ZONE_LABELS = {
+    "restricted_area": "Pintura", "mid_left_close": "Media cerca (izq.)", "mid_right_close": "Media cerca (der.)",
+    "mid_left_far": "Media lejos (izq.)", "mid_right_far": "Media lejos (der.)", "mid_top": "Media frontal",
+    "left_corner_3": "Triple esquina (izq.)", "right_corner_3": "Triple esquina (der.)",
+    "left_wing_3": "Triple ala (izq.)", "right_wing_3": "Triple ala (der.)", "top_key_3": "Triple frontal",
+    "sin_zona": "Sin zona (sin coordenadas)",
+}
+MATRIX_BANDS = BANDS + ("sin_reloj",)
+
+
+def _pname(pid):
+    card = identity.player_card(pid) if pid is not None else None
+    return (card or {}).get("display_name") or f"jugador {pid}"
+
+
+def _index_players(chs, done_shots):
+    """Índices del reloj de 24 s por (jugador, tramo): tiros, oportunidades que termina y oportunidades del equipo."""
+    shots_by, fin_by, team_n = defaultdict(list), defaultdict(list), Counter()
+    for s in done_shots:
+        if s["band"] and (s["clock_start"] or 0) >= 24:
+            shots_by[(s["player_id"], s["band"])].append(s)
+    for p, ch in chs:
+        if ch.band and ch.shot_clock_start >= 24:
+            fin_by[(ch.end_player_id, ch.band)].append((p, ch))
+            team_n[ch.band] += 1
+    return shots_by, fin_by, team_n
+
+
+def _player_band(sh, fin, n_team):
+    """Métricas de un jugador en un tramo: sus tiros, las oportunidades que termina y su peso en las del equipo."""
+    fga, fgm = len(sh), sum(1 for s in sh if s["made"])
+    fgm3 = sum(1 for s in sh if s.get("three") and s["made"])
+    pts_fg = sum(s["pts"] for s in sh)
+    fta = sum((ch.box or {}).get("fta", 0) for _, ch in fin)
+    ftm = sum((ch.box or {}).get("ftm", 0) for _, ch in fin)
+    pts = sum(ch.pts for _, ch in fin)
+    return {
+        "shots": fga, "made": fgm,
+        "efg_pct": _m(_div(fgm + 0.5 * fgm3, fga)), "ppt": _m(_div(pts_fg, fga)),
+        "ts_pct": _m(_div(pts_fg + ftm, 2 * (fga + 0.44 * fta))),
+        "finished": len(fin), "uso_pct": _m(_div(len(fin), n_team)), "ppp_personal": _m(_div(pts, len(fin))),
+        "sample": sample.sample_level("origin", n=len(fin), unit="posesiones"),
+    }
+
+
+def _players_table(chs, done_shots):
+    """Plantel por tramo (reloj de 24 s) más la fila "Equipo / sin jugador". Σ finished por tramo = oportunidades del equipo."""
+    shots_by, fin_by, team_n = _index_players(chs, done_shots)
+    pids = sorted({k[0] for k in list(shots_by) + list(fin_by)} - {None})
+    rows = []
+    for pid in pids:
+        by_band = {b: _player_band(shots_by.get((pid, b), []), fin_by.get((pid, b), []), team_n[b]) for b in BANDS}
+        rows.append({"player_id": pid, "name": _pname(pid), "by_band": by_band,
+                     "finished": sum(v["finished"] for v in by_band.values()), "shots": sum(v["shots"] for v in by_band.values())})
+    rows.sort(key=lambda r: (-r["finished"], -r["shots"], r["player_id"]))
+    team_row = {"player_id": None, "name": "Equipo / sin jugador",
+                "by_band": {b: _player_band(shots_by.get((None, b), []), fin_by.get((None, b), []), team_n[b]) for b in BANDS}}
+    team_row["finished"] = sum(v["finished"] for v in team_row["by_band"].values())
+    return {"rows": rows, "team_row": team_row,
+            "totals": {b: {"chances": team_n[b],
+                           "finished": sum(r["by_band"][b]["finished"] for r in rows) + team_row["by_band"][b]["finished"]}
+                       for b in BANDS}}
+
+
+def _matrix(done_shots):
+    """Matriz zona × tramo (ambos relojes): intentos, FG%, eFG% y PPT por celda; Σ de cada tramo = tiros del tramo."""
+    import shot_zones
+    zones = list(shot_zones.ZONE_KEYS_11) + ["sin_zona"]
+    cells = {z: {b: {"attempts": 0, "made": 0, "made3": 0, "pts": 0} for b in MATRIX_BANDS} for z in zones}
+    for s in done_shots:
+        c = cells[s.get("zone") or "sin_zona"][s["band"] or "sin_reloj"]
+        c["attempts"] += 1
+        c["made"] += 1 if s["made"] else 0
+        c["made3"] += 1 if (s.get("three") and s["made"]) else 0
+        c["pts"] += s["pts"]
+    out = []
+    for z in zones:
+        row = {"key": z, "label": ZONE_LABELS[z], "bands": {}}
+        for b in MATRIX_BANDS:
+            c = cells[z][b]
+            n = c["attempts"]
+            row["bands"][b] = {"attempts": n, "made": c["made"], "fg_pct": _m(_div(c["made"], n)),
+                               "efg_pct": _m(_div(c["made"] + 0.5 * c["made3"], n)), "ppt": _m(_div(c["pts"], n)),
+                               "sample": sample.sample_level("zone", n=n, unit="intentos")}
+        out.append(row)
+    return {"zones": out, "bands": list(MATRIX_BANDS),
+            "totals": {b: sum(cells[z][b]["attempts"] for z in zones) for b in MATRIX_BANDS},
+            "has_coordinates": any(s.get("zone") for s in done_shots)}
+
+
+def _band_means(team_code, comp_id, ctx, side):
+    """PPP y eFG% por tramo (reloj de 24 s) de UN equipo: base del promedio de la competencia."""
+    mine, *_ = transition_mod._selection(team_code, comp_id, ctx, side)
+    complete = [p for p in mine if not p.incomplete]
+    chs = [(p, ch) for p in complete for ch in p.chances]
+    shots = [s for p in complete for s in p.shots]
+    out = {}
+    for b in BANDS:
+        bc = [ch for _, ch in chs if ch.band == b and ch.shot_clock_start >= 24]
+        bs = [s for s in shots if s["band"] == b and (s["clock_start"] or 0) >= 24]
+        fgm3 = sum(1 for s in bs if s.get("three") and s["made"])
+        out[b] = {"ppp": _div(sum(ch.pts for ch in bc), len(bc)),
+                  "efg_pct": _div(sum(1 for s in bs if s["made"]) + 0.5 * fgm3, len(bs))}
+    return out
+
+
+def _league_bands(comp_id, ctx, side):
+    """Promedio de la competencia por tramo: media de los equipos con valor (misma convención que T-01). None sin competencia."""
+    if comp_id is None:
+        return None
+    import dataclasses
+
+    def build():
+        cx = dataclasses.replace(ctx, on=(), off=())
+        codes = sorted({r["team_code"] for r in repository.team_game_rows(comp_id).values()})
+        per_team = [_band_means(c, comp_id, cx, side) for c in codes]
+        out = {}
+        for b in BANDS:
+            out[b] = {}
+            for k in ("ppp", "efg_pct"):
+                vals = [t[b][k] for t in per_team if t[b][k] is not None]
+                out[b][k] = {"avg": _div(sum(vals), len(vals)), "teams": len(vals)}
+        return out
+    return cache.memo("poss:clock_league", (comp_id, context_mod.context_key(ctx), side), build)
+
+
+def _decision(rows, players, league):
+    """Las siete preguntas de decisión, con los números de la propia tabla de tramos (sin recalcular)."""
+    r24 = {r["key"]: r["r24"] for r in rows}
+    tov = {b: sum(r24[b]["turnover_types"].values()) for b in BANDS}
+    tov_total = sum(tov.values())
+
+    def val(b, k):
+        return r24[b]["metrics"][k]["value"]
+
+    q2 = []
+    for b in BANDS:
+        row = {"band": b, "sample": r24[b]["sample"]}
+        for k in ("ppp", "efg_pct"):
+            avg = ((league or {}).get(b, {}).get(k) or {}).get("avg")
+            v = val(b, k)
+            row[k] = {"value": v, "avg": avg, "dist_avg": None if v is None or avg is None else round(v - avg, 4)}
+        q2.append(row)
+    ranked = [r for r in q2 if r["ppp"]["value"] is not None and r["sample"]["level"] != "baja"]
+    best = max(ranked, key=lambda r: r["ppp"]["value"])["band"] if ranked else None
+    chances_b = {b: r24[b]["chances"] for b in BANDS}
+    n_band = sum(chances_b.values())
+    ppp_t, ppp_e = val("tardio", "ppp"), val("temprano", "ppp")
+    top = {}
+    if players:
+        for b in BANDS:
+            cands = [r for r in players["rows"] if r["by_band"][b]["finished"] > 0]
+            cands.sort(key=lambda r: -r["by_band"][b]["finished"])
+            top[b] = [{"player_id": r["player_id"], "name": r["name"], "finished": r["by_band"][b]["finished"],
+                       "uso_pct": r["by_band"][b]["uso_pct"], "efg_pct": r["by_band"][b]["efg_pct"],
+                       "sample": r["by_band"][b]["sample"]} for r in cands[:3]]
+    return {
+        "q1_perdidas": {"to_pct": {b: val(b, "to_pct") for b in BANDS}, "turnovers": tov,
+                        "share_of_turnovers": {b: _div(tov[b], tov_total) for b in BANDS},
+                        "by_type": {b: r24[b]["turnover_types"] for b in BANDS}},
+        "q2_eficiencia": {"best_band": best, "rows": q2, "league": bool(league)},
+        "q3_zona_tramo": {"ref": "matrix"},
+        "q4_seleccion": [{"band": b, "mix": {k: v["value"] for k, v in r24[b]["mix"].items()},
+                          "paint_share": r24[b]["shape"]["paint_share"]["value"],
+                          "perimeter_share": r24[b]["shape"]["perimeter_share"]["value"]} for b in BANDS],
+        "q5_decide": {"top_by_band": top},
+        "q6_costo_tardio": {"ppp_tardio": _m(ppp_t), "ppp_temprano": _m(ppp_e),
+                            "diff": _m(None if ppp_t is None or ppp_e is None else round(ppp_t - ppp_e, 4)),
+                            "reach_tardio_share": _m(_div(chances_b["tardio"], n_band)),
+                            "chances": chances_b},
+        "q7_rival": {"ref": "side=defensa"},
+    }
+
+
 def _build(team_code, comp_id, ctx, side, game_id):
     mine, used, total, excluded, per_game = _selection(team_code, comp_id, ctx, side, game_id)
     complete = [p for p in mine if not p.incomplete]
@@ -292,6 +470,7 @@ def _build(team_code, comp_id, ctx, side, game_id):
     box = _box_rows(per_game, team_code, side)
     fga_team = _sum(box, "fga2") + _sum(box, "fga3")
     no_clock_ch = sum(1 for _, ch in chs if ch.band is None and (ch.box or {}).get("dec"))
+    players_tbl = _players_table(chs, done_shots) if side == "ataque" else None
     return {
         "side": side,
         "clock_source": {"kind": "derivado", "resolution_secs": 1, "note": SOURCE_NOTE},
@@ -304,9 +483,40 @@ def _build(team_code, comp_id, ctx, side, game_id):
                       "chances_24": sum(1 for _, ch in chs if ch.shot_clock_start >= 24),
                       "chances_14": sum(1 for _, ch in chs if ch.shot_clock_start < 24)},
         "points_mix": points_mix(box),
+        "matrix": _matrix(done_shots),
+        "players": players_tbl,
+        "decision": _decision(rows, players_tbl, _league_bands(comp_id, ctx, side) if not game_id else None),
         "summary": {"possessions": len(complete), "incomplete": len(mine) - len(complete), "shots": team["fga"]},
         "games_used": used, "games_total": total, "games_excluded": excluded,
     }
+
+
+def player_clock(player_id, comp_id, ctx):
+    """Tramos del reloj de posesión de UN jugador: sus tiros y las oportunidades que termina, con su peso en las del equipo."""
+    card = identity.player_card(player_id)
+    if card is None:
+        return None
+    pid = identity.canonical_id(player_id) or player_id
+
+    def build():
+        mine, used, total, excluded, _ = transition_mod._selection(card["team_code"], comp_id, ctx, "ataque")
+        complete = [p for p in mine if not p.incomplete]
+        chs = [(p, ch) for p in complete for ch in p.chances]
+        done_shots = [s for p in complete for s in p.shots]
+        shots_by, fin_by, team_n = _index_players(chs, done_shots)
+        by_band = {b: _player_band(shots_by.get((pid, b), []), fin_by.get((pid, b), []), team_n[b]) for b in BANDS}
+        cuts = _cuts()
+        return {"side": "ataque", "clock_source": {"kind": "derivado", "resolution_secs": 1, "note": SOURCE_NOTE},
+                "thresholds": {"early_max": cuts[0], "mid_max": cuts[1], "reset_secs": cuts[2]},
+                "by_band": by_band,
+                "bands": [{"key": b, "label": BAND_LABELS[b], "chances": team_n[b]} for b in BANDS],
+                "summary": {"shots": sum(v["shots"] for v in by_band.values()),
+                            "finished": sum(v["finished"] for v in by_band.values()),
+                            "possessions": len(complete)},
+                "games_used": used, "games_total": total, "games_excluded": excluded}
+    out = dict(cache.memo("poss:clock_player", (pid, comp_id, context_mod.context_key(ctx)), build))
+    out["context"] = transition_mod._echo(ctx, out.pop("games_used"), out.pop("games_total"), out.pop("games_excluded"))
+    return out
 
 
 def clock_report(team_code, comp_id, ctx, *, side="ataque", game_id=None):

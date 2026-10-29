@@ -1,6 +1,6 @@
 # Progress — A-05: Tramo de reloj de posesión
 
-> **Estado:** 🔶 Implementado en Equipo (ataque y defensa) y en Partido: tramos del reloj de posesión, reloj de 14 s aparte, conciliación contra el box oficial y composición de puntos. Faltan jugador, quinteto, panel de decisión de siete preguntas, matriz zona × tramo, filtros de contexto `clock` / `clock_start`, entidad `clock` (T-05) y tablas T-06.
+> **Estado:** 🔶 Implementado en Equipo (ataque y defensa), Partido y Jugador: tramos del reloj de posesión, reloj de 14 s aparte, conciliación contra el box oficial, composición de puntos, plantel por tramo, panel de decisión de siete preguntas y matriz zona × tramo. Faltan quinteto, el filtro del mapa de tiro por tramo, filtros de contexto `clock` / `clock_start`, entidad `clock` (T-05) y tablas T-06.
 > **Fecha:** 2026-10-27
 > **Origen del pedido:** el cliente marcó como urgente (a) cómo anota cada equipo, en equipo y en partido, con el peso de triples, dobles, tiros libres, pérdidas y asistencias, y (b) la segmentación por tramo del reloj (antes de 8 s, entre 8 y 16 s, más de 16 s) con el % de triples, su cantidad y su peso. Se implementó primero esa parte (partición (a) del plan §10 D-8).
 
@@ -12,10 +12,11 @@
 - [x] RF-5 · Por tramo: tiros, % de los tiros, eFG%, TS%, PPT, PPP, TO%, violaciones de 24 s, reparto T2/T3/TL/pérdida, **peso de los triples** (% de sus tiros, % de los triples del equipo, puntos)
 - [x] RF-6 · Conciliación: tiros de los tramos + sin reloj + posesiones incompletas = tiros del box oficial
 - [x] RF-7 · Versión defensiva (`side=defensa`)
-- [ ] RF-8 · Por jugador
+- [x] RF-8 · Por jugador (tiros, eFG%, PPT, TS%, USO% del tramo y PPP personal; tabla del plantel con fila "Equipo / sin jugador" y vista en Jugador)
 - [ ] RF-9 · Por quinteto
-- [ ] RF-10 · Panel de decisión de siete preguntas (las preguntas 1, 4 y 6 quedan cubiertas de hecho por las tablas: pérdidas por tramo y tipo, reparto T2/T3/TL, PPP por tramo)
-- [ ] RF-11 / RF-12 · Matriz zona × tramo y filtro del mapa de tiro
+- [x] RF-10 · Panel de decisión de siete preguntas, con promedio de la competencia por tramo en la pregunta 2
+- [x] RF-11 (parcial) · Matriz zona × tramo con intentos, FG%, eFG% y PPT por celda; falta percentil, tooltip de 7 datos de C-03 y exportación T-06
+- [ ] RF-12 · Filtro del mapa de tiro por tramo
 - [ ] RF-13 · Dimensiones de contexto `clock` / `clock_start`, entidad `clock` y tablas `team_clock` / `zone_clock_matrix`
 - [x] RF-15 · `clock.early_max` y `clock.mid_max` activadas en `CONFIG_SPEC`; cambiarlas por `PUT /api/settings` reasigna sin reiniciar
 - [x] RF-16 · Denominador 0 → `null` / `sin_intentos`; equipo sin pbp → 404 `sin_pbp`
@@ -35,7 +36,11 @@ Seed local (13 partidos): `a05_sim.py` 70/70 y `a05_browser.py` 47/47 (1280 y 36
 | CA-7 | ✅ | el reparto T2/T3/TL/pérdida suma 100 % en cada tramo |
 | CA-8 | 🔶 | los tipos de pérdida suman las pérdidas del tramo por construcción; sin test propio |
 | CA-9 | 🔶 | defensa y ataque concilian por separado con el box; el cruce A-defensa = B-ataque no se verificó |
-| CA-10..CA-14 | ❌ | jugador, quinteto, panel de decisión, matriz y filtro de mapa: fuera de esta partición |
+| CA-10 | ✅ | `a05b_sim.py`: Σ oportunidades que terminan los jugadores + equipo = oportunidades del equipo por tramo (ALB, COL, LAG); USO% suma 100 %; Σ tiros = tiros del equipo (24 s) |
+| CA-11 | ❌ | quinteto pendiente |
+| CA-12 | ✅ | reparto de pérdidas suma 100 %, diferencial = valor − promedio, % que llega al tardío = tardío / oportunidades |
+| CA-13 | 🔶 | Σ zonas de cada tramo = tiros del tramo y "sin reloj" = `no_clock`; falta tooltip de 7 datos y exportación |
+| CA-14 | ❌ | filtro del mapa de tiro por tramo pendiente |
 | CA-15 / CA-16 | ❌ | filtro de contexto y entidad `clock` pendientes |
 | CA-17 | ✅ | tramo sin tiros → `null` / `sin_intentos`, sin NaN; equipo sin pbp → 404 |
 | CA-19 | ✅ | prórrogas con el mismo criterio (reloj dentro del período) |
@@ -58,6 +63,7 @@ Seed local (13 partidos): `a05_sim.py` 70/70 y `a05_browser.py` 47/47 (1280 y 36
 - ✅ `docs/api.md` · ✅ `docs/metrics.md` · ✅ `docs/frontend.md` · ✅ `docs/architecture.md`
 
 ## Deuda / TODO
-- Segunda entrega: jugador, quinteto, panel de decisión, matriz zona × tramo, `clock` / `clock_start` en el contexto, entidad `clock`, tablas `team_clock` / `zone_clock_matrix`.
+- Quinteto (RF-9), filtro del mapa de tiro por tramo (RF-12), `clock` / `clock_start` en el contexto, entidad `clock`, tablas `team_clock` / `zone_clock_matrix`, percentil y tooltip de la matriz.
+- La atribución a jugador usa quien ejecuta el tiro, la pérdida o el primer tiro libre; en faltas recibidas es el tirador de libres (normalmente el que recibió la falta).
 - Vista de composición de puntos en Liga (comparar equipos) y en Preparar.
 - `t()` para el copy (F-21).
