@@ -2151,6 +2151,8 @@ function _applyPlayerData(main, data) {
       { mode: "player", params: { competition: _playerComp, ...contextParams() } });
     renderSecondChancePanel(document.getElementById("player-second-chance"), data.player_id,
       { mode: "player", params: { competition: _playerComp, ...contextParams() } });
+    renderClockPanel(document.getElementById("player-clock"), data.player_id,
+      { mode: "player", params: { competition: _playerComp, ...contextParams() } });
   }
 }
 
@@ -2300,6 +2302,7 @@ function _renderPlayerContent(main, data) {
       <div id="player-origins"></div>
       <div id="player-transition"></div>
       <div id="player-second-chance"></div>
+      <div id="player-clock"></div>
       <div class="card">
         <div class="card-title">Game log — ${playerName}</div>
         <div id="player-gamelog-dt"></div>

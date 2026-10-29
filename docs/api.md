@@ -777,6 +777,10 @@ Cada bloque `r24` / `r14` (`r14.tardio` = `{value: null, reason: "no_aplica"}`):
 
 `points_mix` (box oficial de los partidos usados; en defensa, el del rival): `pts`, `parts[]` (`t3`, `t2`, `tl`: `pts`, `share`, `made`, `attempts`, `pct`, `attempts_share`), `reconciled`, `possessions`, `ppp`, `turnovers {count, per_game, poss_share, est_points_lost}`, `assists {count, per_game, fgm_assisted_share, ast_points, ast_points_share, linked}` (`ast_points` `null` con `no_registrado` / `sin_pbp` si falta el vínculo de A-12) y `official_origin {second_chance, fast_break, from_turnovers, paint}`.
 
+**Segunda entrega (2026-10).** Con `side=ataque` o `defensa` el payload suma `matrix` (zona × tramo: `zones[]` con `bands.{temprano,medio,tardio,sin_reloj}` = `attempts`, `made`, `fg_pct`, `efg_pct`, `ppt`, `sample`; `totals` por tramo; `has_coordinates`), `decision` (siete preguntas: `q1_perdidas`, `q2_eficiencia` con el promedio de la competencia por tramo y el diferencial, `q3_zona_tramo`, `q4_seleccion`, `q5_decide`, `q6_costo_tardio`, `q7_rival`) y, solo con `side=ataque`, `players` (`rows[]` por jugador con `by_band` = `shots`, `efg_pct`, `ppt`, `ts_pct`, `finished`, `uso_pct`, `ppp_personal`, `sample`; `team_row` "Equipo / sin jugador"; `totals`). Con `game=` el promedio de la competencia no aplica (`q2_eficiencia.league = false`).
+
+`GET /api/possession-clock?player=<player_id>` (sin `team`): los mismos datos de UN jugador: `by_band` (reloj de 24 s), `bands[].chances` (oportunidades del equipo en el tramo), `summary`, `clock_source`, `context`. 400 si se pasan `player` y `team`; 404 `no_encontrado` si la ficha no existe; 404 `sin_pbp` sin partidos con jugada a jugada.
+
 Errores: 400 `parametro_invalido` ("Indicá un equipo.", "El lado debe ser ataque o defensa."), 400 `contexto_invalido`, 404 `no_encontrado`, 404 `sin_pbp`. Cortes configurables: `clock.early_max` (8) y `clock.mid_max` (16); `clock.reset_secs` (14).
 
 ## GET `/api/game/<game_id>/matchups` — NUEVO (F-07)
