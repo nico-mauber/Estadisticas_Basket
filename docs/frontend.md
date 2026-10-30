@@ -231,6 +231,11 @@ neutra si falta cualquiera de los dos lados. Ver `sdd/specs/12-nulos-orden-color
 ### Análisis del equipo y correcciones de Equipo / Liga (2026-10)
 `components/team-insights.js` → `renderTeamInsights(el, team, {params})`: card "Análisis del equipo" en Equipo (`#team-insights`), fortalezas y "para mejorar" con el percentil de cada métrica en la competencia. El selector de jugador, el picker de combinaciones, la barra de contexto (con/sin jugador) y las llamadas a `api.lineup` / `api.onoff` usan la competencia elegida y se recargan al cambiarla; el mapa de tiro del equipo respeta la competencia y "últimos N". La card Tiro suma Uso 2P y Uso TL; el desglose ofensivo avisa cuando está calculado. En Liga, cada tarjeta es desplegable (`_makeCollapsible`: botón ▾/▸ en el título, estado recordado en `sessionStorage`) y el mapa de liga ofrece "Uso de 3P / eFG%" y "Uso de 2P / Uso de TL"; el ranking suma Uso de 2 y Uso de TL. `sw.js` v49.
 
+### Pestaña Equipo reorganizada y listas extensibles (2026-10)
+La vista Equipo sigue el boceto del cliente: grilla de 2 columnas (`.team-grid`; 1 columna bajo 768 px) con, de arriba abajo, Mapa de tiro | Perfil de equipo; Evolución por partido | Récord + Four Factors; Eficiencia | Tiro; Rebotes | Defensa + Desglose ofensivo; y el Conjunto estándar a ancho completo, desplegable (`_makeCollapsible(card, key, defaultOpen)`, arranca plegado y recuerda el estado en `sessionStorage`). El mapa de tiro del equipo (`#team-teamshot`) vive dentro de la grilla. La barra "Filtros" de contexto queda arriba, antes de la grilla. Debajo siguen el análisis del equipo, plantel, quintetos, tramos y los paneles de posesión.
+
+`createDataTable` / `mountTable` aceptan `collapsedRows`: la tabla arranca con las primeras N filas y un botón "Ver todos (N)"; extendida ofrece "Ver menos". Orden, exportación y clic de fila no cambian. Se usa con 5 filas en Plantel, Todos los quintetos, Quintetos en cierres y ON/OFF del plantel.
+
 ## Shot chart (`components/shot-chart.js`, C-03)
 
 SVG de cancha clara estilo "El Metro", extraído de `app.js` a `components/shot-chart.js`. Consume `GET /api/shot-zones` vía `api.shotZones(params)`.
