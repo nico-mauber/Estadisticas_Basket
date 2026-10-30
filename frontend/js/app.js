@@ -1109,7 +1109,7 @@ const LEAGUE_MAPS = [
 
 // Tablas y gráficos desplegables: el título lleva un botón ▾ y el resto de la card se oculta o muestra. El estado
 // se recuerda por título mientras dura la sesión.
-function _makeCollapsible(card, key) {
+function _makeCollapsible(card, key, defaultOpen = true) {
   if (!card || card.dataset.collapsible) return;
   const title = card.querySelector(".card-title");
   if (!title) return;
@@ -1119,8 +1119,11 @@ function _makeCollapsible(card, key) {
   body.className = "cd-body";
   while (header.nextSibling) body.appendChild(header.nextSibling);
   card.appendChild(body);
-  let open = true;
-  try { open = sessionStorage.getItem(`sb.cd.${key}`) !== "0"; } catch { /* sin almacenamiento */ }
+  let open = defaultOpen;
+  try {
+    const saved = sessionStorage.getItem(`sb.cd.${key}`);
+    if (saved != null) open = saved === "1";
+  } catch { /* sin almacenamiento */ }
   const btn = document.createElement("button");
   btn.type = "button";
   btn.className = "cd-toggle";
@@ -1395,18 +1398,19 @@ function _renderTeamContent(main, data) {
   // el filtro de últimos N no lo altera (C-02 RF-1). "Todas": `Ø —` con razón `sin_universo`.
   const lg  = data.league;
   const radarOk = lg?.oer?.avg != null;
-  const charts = !data.game_log.length ? "" : `
-      <div class="chart-grid">
+  const hasGames = data.game_log.length > 0;
+  const radarCard = `
         <div class="card">
           <div class="card-title">Perfil de equipo</div>
-          ${radarOk ? '<div class="radar-wrap"><canvas id="chart-radar"></canvas></div>'
-                    : `<p class="empty">${_radarMsg(data)}</p>`}
-        </div>
+          ${!hasGames ? '<p class="empty">Sin partidos en la selección.</p>'
+            : radarOk ? '<div class="radar-wrap"><canvas id="chart-radar"></canvas></div>'
+            : `<p class="empty">${_radarMsg(data)}</p>`}
+        </div>`;
+  const evoCard = `
         <div class="card">
           <div class="card-title">Evolución por partido</div>
-          <canvas id="chart-evo" height="200"></canvas>
-        </div>
-      </div>`;
+          ${hasGames ? '<canvas id="chart-evo" height="200"></canvas>' : '<p class="empty">Sin partidos en la selección.</p>'}
+        </div>`;
 
   // Definición de las cards con ficha (T-01): etiqueta, clave (legada o canónica),
   // valor promedio y display de respaldo para cuando no hay conjunto estándar.
@@ -1441,27 +1445,46 @@ function _renderTeamContent(main, data) {
       extra: _extrasNote(data) },
   ];
 
-  main.innerHTML = `
-    ${_selectionNote(data, ["equipo", "equipos"])}
-    ${charts}
-    ${_recordCard(data.record, data.team_name)}
-    ${TEAM_CARD_GROUPS.map((g, i) => `
+  const groupCard = i => {
+    const g = TEAM_CARD_GROUPS[i];
+    return `
     <div class="card">
       <div class="card-title">${g.title}</div>
       <div class="stat-grid metric-card-grid" data-mc-group="${i}">${_fichaGridHTML(g.metrics, "team", null, data.team_code)}</div>
       ${g.trailing ? `<div class="stat-grid">${g.trailing}</div>` : ""}
       ${g.extra || ""}
-    </div>${i === 0 ? _fourFactorsCard(av, data.team_name) : ""}`).join("")}
-    <div class="card">
-      <div class="card-title">Conjunto estándar</div>
-      <div id="team-standard-panel"></div>
+    </div>`;
+  };
+
+  // Distribución de la pestaña (boceto del cliente, 2 columnas; 1 en pantallas chicas):
+  //   Mapa de tiro        | Perfil de equipo
+  //   Evolución / partido | Récord + Four Factors
+  //   Eficiencia          | Tiro
+  //   Rebotes             | Defensa + Desglose ofensivo
+  //   Conjunto estándar (desplegable, ancho completo)
+  main.innerHTML = `
+    ${_selectionNote(data, ["equipo", "equipos"])}
+    <div class="team-grid">
+      <div id="team-teamshot"></div>
+      ${radarCard}
+      ${evoCard}
+      <div class="tg-stack">${_recordCard(data.record, data.team_name)}${_fourFactorsCard(av, data.team_name)}</div>
+      ${groupCard(0)}
+      ${groupCard(1)}
+      ${groupCard(2)}
+      <div class="tg-stack">${groupCard(3)}${groupCard(4)}</div>
+      <div class="card tg-full" id="team-standard-card">
+        <div class="card-title">Conjunto estándar</div>
+        <div id="team-standard-panel"></div>
+      </div>
     </div>
     <div class="card">
       <div class="card-title">Game log</div>
       <div id="team-gamelog-dt"></div>
     </div>`;
+  _makeCollapsible(main.querySelector("#team-standard-card"), "equipo-estandar", false);
 
-  if (data.game_log.length) {
+  if (hasGames) {
     if (radarOk) drawRadar("chart-radar", av, lg, data.team_name);
     drawEvolution("chart-evo", data.game_log, lg?.oer?.avg);
   }
@@ -1609,6 +1632,7 @@ function _renderTeamRoster(teamCode) {
     () => api.table("team_roster", { team: teamCode, ...contextParams(), competition: _teamComp, last: _teamLastN || null, base: getBase() }),
     {
       tableId: "team_roster",
+      collapsedRows: 5,   // lista corta que se extiende con "Ver todos"
       onRowClick: (row, payload) => {
         const i = payload.columns.findIndex(c => c.key === "_name");
         const name = i >= 0 ? row.values[i] : "";
@@ -2595,7 +2619,6 @@ function renderApp() {
             <select id="team-comp" class="map-select"></select>
           </span>
         </div>
-        <div id="team-teamshot"></div>
         <div id="team-shotmap"></div>
         <div id="team-onoff"></div>
         <div class="card" id="team-lineup-card" style="display:none">
