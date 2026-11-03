@@ -13,6 +13,7 @@ const STATIC = [
   "/js/core/base.js",
   "/js/core/context.js",
   "/js/components/context-bar.js",
+  "/js/components/context-header.js",
   "/js/components/period-block.js",
   "/js/components/origin-panel.js",
   "/js/components/transition-panel.js",

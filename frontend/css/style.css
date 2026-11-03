@@ -1658,3 +1658,24 @@ tbody tr.fuera-poblacion { opacity: .6; }
   .team-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-4); margin-bottom: var(--sp-4); }
   .tg-stack { gap: var(--sp-4); }
 }
+
+/* ── Cabecera de contexto y filtros rápidos (F-19) ── */
+.chdr-host { position: sticky; top: var(--header-h); z-index: 30; }
+.chdr { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 8px 12px; margin-bottom: var(--sp-3);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, .25); }
+.chdr-top { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; }
+.chdr-name { font-size: 16px; }
+.chdr-rec { font-weight: 700; color: var(--accent); }
+.chdr-margin, .chdr-n { font-size: 13px; color: var(--muted); }
+.chdr-n-zero { color: #d6504a; font-weight: 700; }
+.chdr-clear { margin-left: auto; }
+.chdr-label { font-size: 12px; margin-top: 2px; }
+.chdr-chips { display: flex; gap: 6px 18px; margin-top: 6px; overflow-x: auto; padding-bottom: 4px; scrollbar-width: thin; }
+.chdr-group { display: inline-flex; align-items: center; gap: 6px; flex: none; }
+.chdr-group > em { font-style: normal; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.chdr-chip { white-space: nowrap; padding: 4px 10px; font-size: 12px; }
+.chdr-sec { font-size: 12px; margin-top: 4px; }
+.chdr-warn { margin-top: 6px; font-weight: 700; color: #d6504a; }
+.chdr-notice { margin-top: 6px; padding: 4px 10px; border-radius: 6px; background: var(--accent); color: #fff; font-weight: 700; font-size: 13px; display: inline-block; }
+.chdr-notice[hidden] { display: none; }
+@media (max-width: 767px) { .chdr { padding: 6px 10px; } .chdr-name { font-size: 14px; } .chdr-label { font-size: 11px; } }

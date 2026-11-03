@@ -100,6 +100,7 @@ export const api = {
   playerProfile: (id, params = {}) => apiFetch(`/api/player-profile/${encodeURIComponent(id)}${qs(params)}`),
   updatePlayerProfile: (id, body) => send(`/api/player-profile/${encodeURIComponent(id)}`, "PUT", body),
   contextOptions: (params = {}) => apiFetch(`/api/context/options${qs(params)}`),
+  contextSummary: (params = {}) => apiFetch(`/api/context/summary${qs(params)}`),
   deleteGames:   (ids) => send("/api/games", "DELETE", { game_ids: ids }),
   seed:          ()   => apiFetch("/api/seed", { method: "POST" }),
   // Datos: competencias, calidad y reproceso (F-11)

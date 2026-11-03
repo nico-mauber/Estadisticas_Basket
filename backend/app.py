@@ -422,6 +422,42 @@ def second_chance_route():
     return jsonify(out)
 
 
+@app.route("/api/context/summary")
+@login_required
+def context_summary_route():
+    """Cabecera de contexto (F-19): récord, diferencia media, partidos incluidos y badge de muestra de la selección activa.
+    `?entity=team|player|competition&id=…` más el contexto de T-03 (`competition`, `last`, `venue`, `opponent`, …)."""
+    import context_summary
+    entity = (request.args.get("entity") or "").strip()
+    ident = (request.args.get("id") or "").strip()
+    if entity not in ("team", "player", "competition"):
+        return jsonify({"error": "El tipo de entidad debe ser team, player o competition.", "code": "parametro_invalido"}), 400
+    if entity == "player" and not ident.isdigit():
+        return jsonify({"error": "Indicá el id del jugador.", "code": "parametro_invalido"}), 400
+    if entity == "team" and not ident:
+        return jsonify({"error": "Indicá el equipo.", "code": "parametro_invalido"}), 400
+    try:
+        if entity == "team":
+            code = ident.upper()
+            ctx = context.parse_context(request.args, team_code=code)
+            out = context_summary.team_summary(code, ctx)
+        elif entity == "player":
+            pid = identity.canonical_id(int(ident))
+            ctx = context.parse_context(request.args, player_id=pid)
+            out = context_summary.player_summary(pid, ctx) if pid is not None else None
+        else:
+            ctx = context.parse_context(request.args)
+            out = context_summary.competition_summary(ctx.competition_id, ctx)
+    except ContextError as e:
+        return jsonify(e.payload()), e.status
+    except CompetitionError as e:
+        return jsonify({"error": str(e), "code": "competencia_inexistente"}), e.status
+    if out is None:
+        return jsonify({"error": "No encontramos esa entidad.", "code": "no_encontrado"}), 404
+    out["label"] = out["context"].get("label")
+    return jsonify(out)
+
+
 @app.route("/api/team-insights/<team_code>")
 @login_required
 def team_insights_route(team_code: str):
