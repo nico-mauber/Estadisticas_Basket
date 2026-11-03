@@ -37,7 +37,12 @@ frontend/
 
 ## Vistas (SPA)
 
-La navegación es por `#hash` o botones de tab. No hay routing del servidor.
+La navegación es por dirección con `#hash` (X-01): `#/<sección>[/<id>][/<pestaña>]`. No hay routing del servidor.
+
+### Direcciones, pestañas y barra de navegación (X-01)
+- **Direcciones** (`core/router.js`): `#/liga/ranking`, `#/equipo/<code>/tiro`, `#/jugador/<player_id>/gamelog`, `#/datos/calidad`, `#/comparar/jugadores`, `#/explorar/jugadores`, `#/preparar`, `#/partido/<game_id>`, `#/configuracion`. Los filtros viajan en la query de la dirección (`?competition=&last=` de la vista, más el contexto global de T-03: `venue`, `opponent`, `rest`, `quarter`, `score`, `on`, `off`). Abrir o recargar una dirección reconstruye la vista; Atrás y Adelante recorren secciones, entidades y pestañas (un cambio solo de filtros reemplaza el paso del historial). Un hash plano viejo (`#search`, `#team`, …) redirige a su sección nueva. Una dirección inválida avisa ("Esa sección no existe o todavía no está disponible.", "No encontramos ese equipo.", "No encontramos ese jugador.", "Esa pestaña todavía no está disponible.") y abre la sección inicial o la pestaña por defecto. Sin dirección abre **Datos** si la base no tiene partidos y **Liga › Tabla** si los tiene.
+- **Pestañas** (`components/tabs.js`): fila desplazable en móvil con la activa visible. Los bloques de cada sección llevan `data-tabs="<pestaña> …"` (`*` = siempre) y `applyTabs` oculta los que no son de la pestaña activa; un `MutationObserver` (`watchTabs`) lo reaplica cuando la vista vuelve a dibujar. **Equipo:** Resumen (plan de juego, grilla de estadísticas, análisis), Plantel, Tiro (mapa de un jugador), Posesión (origen, transición, segunda oportunidad, reloj), Quintetos (combinaciones, quintetos, ON/OFF), Momentos (tramos del partido y cierres) y Game log. **Jugador:** Resumen, Tiro, Posesión y Game log. **Liga:** Tabla, Ranking y Mapa. **Datos** (Importar, Calidad de datos, Competencias) y **Comparar** (Equipos, Jugadores) mantienen sus pestañas y ahora tienen dirección. Los botones "Ver mapa de tiro", "Ver ON/OFF" y "Analizar combinación" abren la pestaña que corresponde.
+- **Barra:** Datos, Liga, Equipo, Jugador, Comparar, Explorar (antes Buscar) y Preparar; el engranaje del encabezado abre Configuración. En pantallas de menos de 768 px la barra inferior muestra Liga, Equipo, Jugador y Comparar y un botón **Más** que abre una hoja con Datos, Explorar, Preparar y Configuración. Partido y Mi equipo no tienen botón: Partido se abre desde el catálogo y el análisis.
 
 | Vista | ID sección | Descripción |
 |-------|-----------|-------------|
@@ -300,7 +305,7 @@ cache-first no guarda respuestas nuevas, así que un módulo fuera de la lista r
 
 ## Responsive / Mobile
 
-- Nav inferior fijo en mobile (`position: fixed; bottom: 0`)
+- Nav inferior fijo en mobile (`position: fixed; bottom: 0`) con cuatro secciones y "Más" (X-01)
 - Nav superior en desktop
 - CSS custom properties para dark mode
 - Breakpoint principal: `768px`
