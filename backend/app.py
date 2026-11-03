@@ -476,6 +476,29 @@ def team_insights_route(team_code: str):
     return jsonify(out)
 
 
+@app.route("/api/game-plan")
+@login_required
+def game_plan_route():
+    """Plan de juego (F-17): ventajas y vulnerabilidades del equipo contra una referencia.
+    `?team=<code>`, `reference=competencia|rival|periodo_anterior` (+ `rival=<code>`) y contexto de T-03."""
+    import phrases
+    team = (request.args.get("team") or "").strip().upper()
+    if not team:
+        return jsonify({"error": "Falta el parámetro team", "code": "parametro_invalido"}), 400
+    reference = (request.args.get("reference") or "competencia").strip()
+    try:
+        if not any(r["team_code"] == team for r in repository.team_game_rows(None).values()):
+            return jsonify({"error": "Equipo no encontrado", "code": "no_encontrado"}), 404
+        ctx = context.parse_context(request.args, team_code=team, event_level=True)
+        out = phrases.game_plan("team", team, reference=reference, rival=request.args.get("rival"),
+                                comp_id=ctx.competition_id, ctx=ctx)
+    except ContextError as e:
+        return jsonify(e.payload()), e.status
+    except phrases.PhraseError as e:
+        return jsonify(e.payload()), e.status
+    return jsonify(out)
+
+
 @app.route("/api/possession-clock")
 @login_required
 def possession_clock_route():

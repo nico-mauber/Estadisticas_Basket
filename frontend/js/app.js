@@ -23,6 +23,7 @@ import { renderTransitionPanel } from "./components/transition-panel.js";
 import { renderSecondChancePanel } from "./components/second-chance-panel.js";
 import { renderClockPanel } from "./components/clock-panel.js";
 import { renderTeamInsights } from "./components/team-insights.js";
+import { renderGamePlan } from "./components/game-plan.js";
 import { mountContextHeader } from "./components/context-header.js";
 import { renderLineupsBlock } from "./components/lineups-block.js";
 import { renderComparePlayers, comparePlayersFromUrl } from "./components/compare-players.js";
@@ -1695,6 +1696,7 @@ function _applyTeamData(main, data) {
   renderTransitionPanel(document.getElementById("team-transition"), data.team_code, { mode: "team", params: _teamParams() });
   renderSecondChancePanel(document.getElementById("team-second-chance"), data.team_code, { mode: "team", params: _teamParams() });
   renderClockPanel(document.getElementById("team-clock"), data.team_code, { mode: "team", params: _teamParams() });
+  renderGamePlan(document.getElementById("team-gameplan"), data.team_code, { params: _teamParams() });
   renderTeamInsights(document.getElementById("team-insights"), data.team_code, { params: _teamParams() });
   renderTeamShotmapTeam(data.team_code);   // mapa de tiro del equipo (Feature 10), de la selección activa
   _renderTeamRoster(data.team_code);
@@ -2647,6 +2649,7 @@ function renderApp() {
           <button class="btn btn-ghost" id="btn-analyze-lineup" style="margin-top:12px">Analizar combinación</button>
         </div>
         <div id="team-lineup"></div>
+        <div id="team-gameplan"></div>
         <div id="team-main"></div>
         <div id="team-insights"></div>
         <div id="team-roster"></div>

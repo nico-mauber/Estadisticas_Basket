@@ -761,6 +761,21 @@ Cabecera de contexto: cómo quedó la selección activa de una entidad. Auth: `l
 
 Response 200: `entity {type, id, name}`, `label` (etiqueta legible de los filtros aplicados), `record` ("V-D"; `null` en competencia), `wins`, `losses`, `avg_margin` (diferencia media de puntos con 1 decimal; `null` sin partidos), `games` (N: partidos de la selección), `games_total` (M: partidos de la entidad en la competencia **sin ningún otro filtro**), `sample` (badge de T-02: partidos para equipo, minutos para jugador) y `context` (eco de T-03 con `games_excluded` e `ignored`). Récord y diferencia salen del resultado final: victoria = puntos propios > puntos del rival; en un jugador cuentan solo los partidos que jugó. Errores: 400 `parametro_invalido` (tipo o id inválidos), 400 `contexto_invalido`, 400 `competencia_inexistente`, 404 `no_encontrado`.
 
+## GET `/api/game-plan` — NUEVO (F-17)
+
+Plan de juego de un equipo: las métricas donde está mejor y peor que una referencia, con la frase de plantilla de cada una. Auth: `login_required`. Query:
+- `team` (obligatorio): código del equipo.
+- `reference`: `competencia` (por defecto, promedio de la competencia), `rival` (con `rival=<código>`, otro equipo de la misma competencia) o `periodo_anterior` (el propio equipo antes de los últimos N; exige `last`). `rival_proximo` se reconoce pero se rechaza hasta que exista el calendario (F-12).
+- Contexto de T-03 (`competition`, `last`, `venue`, `opponent`, `rest`, `quarter`, `score`, `on`, `off`).
+
+Response 200: `team {code, name}`, `reference {type, label, rival}`, `advantages[]`, `risks[]`, `items[]` (ventajas + riesgos), `sample {own, ref}` (badges de T-02), `sample_warning`, `reason`, `rule {items_min, items_max, min_z, order: "abs_z", metrics_evaluated, metrics_scored}`, `population {size, competition_id}`, `context` (eco de T-03), `mode` y `catalog_version`.
+
+Ítem: `metric`, `label`, `group`, `fmt`, `family`, `direction` (`ventaja` | `riesgo`), `icon` (`↑` | `↓`), `delta` (orientado: positivo = mejor que la referencia, también en las de "menos es mejor"), `delta_raw` (propio − referencia, sin orientar), `delta_rel`, `own`, `ref`, `percentile`, `rank`, `rank_total` (la ficha de T-01 del equipo en esa métrica), `z` (diferencia orientada / desvío poblacional), `minor` (diferencia menor que completa el mínimo), `template_id` y `text`. Con `reference=competencia`, `own`, `ref`, `percentile` y `delta` coinciden con `value`, `avg`, `percentile` y `dist_avg` de la ficha en `GET /api/metrics/team`.
+
+Sin ítems el servicio responde 200 con las listas vacías y `reason`: `muestra_baja`, `contexto_no_comparable` (con/sin jugador), `sin_universo` (todas las competencias), `poblacion_insuficiente`, `sin_datos`, `rival_sin_datos`, `periodo_anterior_insuficiente` o `sin_diferencias`.
+
+Errores: 400 `parametro_invalido` (falta `team`, referencia desconocida, falta `rival` o es el propio equipo, `periodo_anterior` sin `last`), 400 `referencia_no_disponible` (`rival_proximo`), 400 `contexto_invalido`, 400 `competencia_inexistente`, 404 `no_encontrado` ("Equipo no encontrado" o "Rival no encontrado"), 500 `plantillas_invalidas`.
+
 ## GET `/api/team-insights/<team_code>` — NUEVO
 
 Fortalezas y debilidades del equipo contra su competencia. Auth: `login_required`. Query: `competition`, `last`. Response 200: `strengths[]` y `weaknesses[]` (`metric`, `label`, `fmt`, `value`, `percentile`, `text`; fortaleza = percentil ≥ 70, debilidad ≤ 30, hasta 5 por lado), `teams`, `games`, `low_sample`, `evaluated`, `entity`, `context`. 400 si no hay competencia.

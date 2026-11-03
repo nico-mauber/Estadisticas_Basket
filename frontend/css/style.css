@@ -1679,3 +1679,29 @@ tbody tr.fuera-poblacion { opacity: .6; }
 .chdr-notice { margin-top: 6px; padding: 4px 10px; border-radius: 6px; background: var(--accent); color: #fff; font-weight: 700; font-size: 13px; display: inline-block; }
 .chdr-notice[hidden] { display: none; }
 @media (max-width: 767px) { .chdr { padding: 6px 10px; } .chdr-name { font-size: 14px; } .chdr-label { font-size: 11px; } }
+
+/* ── Plan de juego (F-17) ── */
+.gp-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.gp-wrap[hidden] { display: none; }
+.gp-controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; margin-bottom: 8px; }
+.gp-lbl { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+.gp-meta { font-size: 12px; margin-bottom: 10px; display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
+.gp-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.gp-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.gp-item { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto auto; grid-template-areas: "ico metric delta pct" ". vals vals vals" ". text text text";
+  gap: 2px 8px; align-items: baseline; padding: 8px 10px; border-radius: 8px; border-left: 3px solid var(--border); background: var(--bg-card-2, rgba(127,127,127,.06)); }
+.gp-pos { border-left-color: #22a06b; }
+.gp-neg { border-left-color: #d6504a; }
+.gp-minor { opacity: .72; }
+.gp-ico { grid-area: ico; font-weight: 700; }
+.gp-pos .gp-ico { color: #22a06b; }
+.gp-neg .gp-ico { color: #d6504a; }
+.gp-metric { grid-area: metric; font-weight: 600; }
+.gp-delta { grid-area: delta; font-weight: 700; white-space: nowrap; }
+.gp-delta small { font-weight: 400; color: var(--muted); }
+.gp-vals { grid-area: vals; font-size: 13px; color: var(--muted); }
+.gp-vals em { font-style: normal; opacity: .7; }
+.gp-pct { grid-area: pct; flex: none; min-width: 40px; text-align: center; font-size: 12px; font-weight: 700; padding: 2px 6px; border-radius: 6px; color: #fff; }
+.gp-text { grid-area: text; font-size: 13px; white-space: normal; overflow-wrap: anywhere; }
+.gp-err, .gp-warn { font-size: 12px; }
+@media (max-width: 767px) { .gp-cols { grid-template-columns: 1fr; } .gp-controls { flex-direction: column; align-items: stretch; } .gp-controls select { width: 100%; } }

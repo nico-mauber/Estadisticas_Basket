@@ -94,6 +94,7 @@ export const api = {
   secondChance:  (params = {}) => apiFetch(`/api/second-chance${qs(params)}`),
   teamInsights:  (code, params = {}) => apiFetch(`/api/team-insights/${encodeURIComponent(code)}${qs(params)}`),
   possessionClock: (params = {}) => apiFetch(`/api/possession-clock${qs(params)}`),
+  gamePlan:      (params = {}) => apiFetch(`/api/game-plan${qs(params)}`),
   transition:    (params = {}) => apiFetch(`/api/transition${qs(params)}`),
   origins:       (params = {}) => apiFetch(`/api/origins${qs(params)}`),
   periods:       (code, params = {}) => apiFetch(`/api/periods/${encodeURIComponent(code)}${qs(params)}`),

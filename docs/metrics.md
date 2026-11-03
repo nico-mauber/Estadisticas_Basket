@@ -486,3 +486,14 @@ El promedio de la tabla de **Liga** pasa a ser el cociente de totales (pooled) p
 ficha (ver tabla antes/después en el `progress.md` de T-01; cambia notablemente TO% = PER/POS, DA-04).
 
 Ver `sdd/specs/v2/fase-1-confiabilidad/15-T-01-ficha-de-metrica/` y `docs/api.md` §Ficha de métrica.
+
+## Plan de juego (F-17)
+
+El plan compara el valor del equipo con una referencia y elige las diferencias más marcadas. Solo usa métricas de tasa y eficiencia (`base_mode = fixed`) de dirección no neutral: OER, DER, Net Rating, eFG%, TS%, PPT, FG2%, FG3%, FT%, FT Rate, TO%, OR%, DR%, AS/PER y AS%. Los conteos y volúmenes no tienen una referencia comparable entre bases.
+
+- **Diferencia orientada:** `delta = s · (propio − referencia)` con `s = +1` si la métrica es "más es mejor" y `−1` si es "menos es mejor" (DER, TO%). Positivo siempre es mejor que la referencia. Con la referencia "Ø competencia" es la distancia al promedio de la ficha de T-01.
+- **Puntaje `z`:** `z = delta / σ`, con `σ` el desvío estándar poblacional de esa métrica entre los equipos de la población (misma competencia y mismo contexto). Las diferencias de métricas distintas están en unidades distintas; `z` es comparable y ordena los ítems. Con menos de 2 valores o `σ = 0` la métrica no se puntúa.
+- **Selección:** por columna entran hasta `gameplan.items_max` ítems con `|z| ≥ gameplan.min_z`, de mayor a menor; si hay menos que `gameplan.items_min`, se completan con las siguientes diferencias del mismo signo, marcadas como menores. No se repiten dos métricas de la misma familia en una columna (eFG%, TS% y PPT son "tiro"; AS/PER y AS% son "circulación").
+- **Referencias:** el promedio de la competencia (media de los equipos de la población), un rival (su valor en la misma población) o el propio equipo en los partidos anteriores a los últimos N (valor agregado de esos partidos, no un promedio de tasas).
+- **Nulos:** una métrica sin valor propio o de referencia no entra en el plan; nunca se reemplaza por 0.
+- **Muestra baja:** el equipo con muestra baja (T-02) no recibe plan en el panel; en el modo `matchup` de F-03 se calcula y se advierte.
