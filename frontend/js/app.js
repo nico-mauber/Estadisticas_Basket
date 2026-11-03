@@ -23,6 +23,8 @@ import { renderTransitionPanel } from "./components/transition-panel.js";
 import { renderSecondChancePanel } from "./components/second-chance-panel.js";
 import { renderClockPanel } from "./components/clock-panel.js";
 import { renderTeamInsights } from "./components/team-insights.js";
+import { renderGamePlan } from "./components/game-plan.js";
+import { mountContextHeader } from "./components/context-header.js";
 import { renderLineupsBlock } from "./components/lineups-block.js";
 import { renderComparePlayers, comparePlayersFromUrl } from "./components/compare-players.js";
 import { renderPlayerHeader } from "./components/player-header.js";
@@ -1672,7 +1674,7 @@ function _applyTeamData(main, data) {
   _teamLastN = data.context.applied.last || 0;
   const pills = document.getElementById("team-filter-pills");
   if (pills) {
-    pills.style.display = data.context.games_total > 3 ? "" : "none";
+    pills.style.display = "none";   // los chips de período de la cabecera (F-19) reemplazan a estas pills
     pills.querySelectorAll(".filter-pill").forEach(p => p.classList.toggle("active", Number(p.dataset.n) === _teamLastN));
   }
   const compWrap = document.getElementById("team-comp-wrap");
@@ -1683,11 +1685,18 @@ function _applyTeamData(main, data) {
   }
   _renderTeamContent(main, data);
   _mountCtxBar(main, _teamComp, () => _reloadTeam(), data.team_code);
+  mountContextHeader(document.getElementById("team-ctx-header"), {
+    entity: "team", id: data.team_code, competition: _teamComp, last: _teamLastN, excludeTeam: data.team_code,
+    onLast: n => { _teamLastN = n; _reloadTeam(); },
+    onChange: () => _reloadTeam(),
+    onClear: () => { clearContext(); _teamLastN = 0; _reloadTeam(); },
+  });
   _renderTeamPeriods(data.team_code, data.team_name);
   renderOriginPanel(document.getElementById("team-origins"), data.team_code, { mode: "team", params: _teamParams() });
   renderTransitionPanel(document.getElementById("team-transition"), data.team_code, { mode: "team", params: _teamParams() });
   renderSecondChancePanel(document.getElementById("team-second-chance"), data.team_code, { mode: "team", params: _teamParams() });
   renderClockPanel(document.getElementById("team-clock"), data.team_code, { mode: "team", params: _teamParams() });
+  renderGamePlan(document.getElementById("team-gameplan"), data.team_code, { params: _teamParams() });
   renderTeamInsights(document.getElementById("team-insights"), data.team_code, { params: _teamParams() });
   renderTeamShotmapTeam(data.team_code);   // mapa de tiro del equipo (Feature 10), de la selección activa
   _renderTeamRoster(data.team_code);
@@ -2136,11 +2145,15 @@ let _playerData = null;
 let _playerComp = null;   // id de competencia (string) o "all"; null = la elige el servidor
 let _playerCtx  = { teamCode: "", playerName: "" };
 let _playerReq  = 0;      // descarta respuestas viejas
+let _playerLastN = 0;     // 0 = todos los partidos (chips de período de la cabecera, F-19)
+// Parámetros de la selección activa del jugador: competencia, últimos N y contexto global
+const _playerParams = () => ({ competition: _playerComp, last: _playerLastN || null, ...contextParams() });
 
 async function renderPlayer(teamCode, playerName, playerId = null) {
   const main = document.getElementById("player-main");
   main.innerHTML = '<p class="empty"><span class="spinner"></span>Cargando...</p>';
   _playerComp = null;   // sin competencia: la del partido más reciente del jugador (RF-6)
+  _playerLastN = 0;
   _playerCtx  = { teamCode, playerName };
   const req = ++_playerReq;
 
@@ -2157,26 +2170,33 @@ async function renderPlayer(teamCode, playerName, playerId = null) {
 function _applyPlayerData(main, data) {
   _playerData = data;
   _playerComp = String(data.context.competition.id ?? "all");
+  _playerLastN = data.context.applied?.last || 0;
   _playerCtx  = { teamCode: data.team_code, playerName: data.player };   // grafía de la ficha
   _renderPlayerContent(main, data);
   // RF-1: la identidad se dibuja antes que cualquier card de métricas.
   if (data.player_id != null) {
     renderPlayerHeader(document.getElementById("player-identity"), data.player_id, {
-      params: { competition: _playerComp, ...contextParams() },
+      params: _playerParams(),
       onSaved: () => toast("Ficha actualizada"),
     });
   }
   _mountCtxBar(main, _playerComp, _reloadPlayer);
+  mountContextHeader(document.getElementById("player-ctx-header"), {
+    entity: "player", id: data.player_id, competition: _playerComp, last: _playerLastN, excludeTeam: data.team_code,
+    onLast: n => { _playerLastN = n; _reloadPlayer(); },
+    onChange: () => _reloadPlayer(),
+    onClear: () => { clearContext(); _playerLastN = 0; _reloadPlayer(); },
+  });
   _loadPlayerStandard(data.player_id);
   if (data.player_id != null) {
     renderOriginPanel(document.getElementById("player-origins"), data.player_id,
-      { mode: "player", params: { competition: _playerComp, ...contextParams() } });
+      { mode: "player", params: _playerParams() });
     renderTransitionPanel(document.getElementById("player-transition"), data.player_id,
-      { mode: "player", params: { competition: _playerComp, ...contextParams() } });
+      { mode: "player", params: _playerParams() });
     renderSecondChancePanel(document.getElementById("player-second-chance"), data.player_id,
-      { mode: "player", params: { competition: _playerComp, ...contextParams() } });
+      { mode: "player", params: _playerParams() });
     renderClockPanel(document.getElementById("player-clock"), data.player_id,
-      { mode: "player", params: { competition: _playerComp, ...contextParams() } });
+      { mode: "player", params: _playerParams() });
   }
 }
 
@@ -2191,7 +2211,7 @@ async function _loadPlayerStandard(playerId) {
   if (!el) return;
   const req = ++_playerStdReq;
   renderStandardPanel(el, null, { layout: "grid", base: getBase() });
-  const ctxQuery = { competition: _playerComp, ...contextParams() };
+  const ctxQuery = _playerParams();
   try {
     await loadCatalog();
     const fichaStd = await api.metrics("player", { id: playerId, ...ctxQuery, base: "partido" });
@@ -2223,14 +2243,14 @@ async function _reloadPlayer() {
   main.innerHTML = '<p class="empty"><span class="spinner"></span>Cargando...</p>';
   let data;
   try {
-    data = await api.playerById(id, { competition: _playerComp, ...contextParams() });
+    data = await api.playerById(id, _playerParams());
   } catch (e) {
     if (req !== _playerReq) return;
     toast(e.message, "err");
     try {
       // competencia inexistente o sin publicar: volver a la por defecto; otro error: conservar la anterior
       data = /competencia/i.test(e.message) ? await api.playerById(id)
-           : dropInvalid(e) ? await api.playerById(id, { competition: _playerComp, ...contextParams() }) : _playerData;
+           : dropInvalid(e) ? await api.playerById(id, _playerParams()) : _playerData;
     } catch (e2) {
       if (req === _playerReq) main.innerHTML = `<p class="empty below-avg">${e2.message}</p>`;
       return;
@@ -2364,7 +2384,7 @@ function _loadPlayerGameLog(playerId) {
   if (!el || playerId == null) return;
   const compParam = (_playerComp && _playerComp !== "all") ? _playerComp : null;
   mountTable(el,
-    () => api.table("player_game_log", { player_id: playerId, competition: compParam, ...contextParams(), base: getBase() }),
+    () => api.table("player_game_log", { player_id: playerId, competition: compParam, last: _playerLastN || null, ...contextParams(), base: getBase() }),
     { tableId: "player_game_log" });
 }
 
@@ -2619,6 +2639,7 @@ function renderApp() {
             <select id="team-comp" class="map-select"></select>
           </span>
         </div>
+        <div id="team-ctx-header" class="chdr-host"></div>
         <div id="team-shotmap"></div>
         <div id="team-onoff"></div>
         <div class="card" id="team-lineup-card" style="display:none">
@@ -2628,6 +2649,7 @@ function renderApp() {
           <button class="btn btn-ghost" id="btn-analyze-lineup" style="margin-top:12px">Analizar combinación</button>
         </div>
         <div id="team-lineup"></div>
+        <div id="team-gameplan"></div>
         <div id="team-main"></div>
         <div id="team-insights"></div>
         <div id="team-roster"></div>
@@ -2663,6 +2685,7 @@ function renderApp() {
 
       <!-- Player -->
       <div class="section" id="sec-player">
+        <div id="player-ctx-header" class="chdr-host"></div>
         <div id="player-main"><p class="empty">Selecciona un jugador desde la vista de equipo.</p></div>
       </div>
 
