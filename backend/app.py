@@ -601,6 +601,33 @@ def trends_route():
     return jsonify(out)
 
 
+@app.route("/api/cross")
+@login_required
+def cross_route():
+    """Contextos cruzados (A-06): `?team=&dim_x=&dim_y=&metric=` más `side` (ataque|defensa), `limit` (3 a 30, para quinteto, jugador y
+    finalizador), `color` (competencia|matriz) y el contexto de T-03. Matriz de la métrica por celda con muestra, ajuste, percentil,
+    totales y la verificación de cuadre."""
+    import cross_context
+    team = (request.args.get("team") or "").strip().upper()
+    if not team:
+        return jsonify({"error": "Elegí un equipo y dos dimensiones.", "code": "parametro_invalido"}), 400
+    try:
+        limit = int(request.args["limit"]) if (request.args.get("limit") or "").strip() else cross_context.LIMIT_DEFAULT
+    except ValueError:
+        return jsonify({"error": "El límite debe ser un entero.", "code": "parametro_invalido"}), 400
+    try:
+        ctx = context.parse_context(request.args, team_code=team)
+        out = cross_context.cross_matrix(team, ctx.competition_id, ctx, dim_x=(request.args.get("dim_x") or "").strip(),
+                                         dim_y=(request.args.get("dim_y") or "").strip(), metric=(request.args.get("metric") or "ppp").strip(),
+                                         side=(request.args.get("side") or "ataque").strip(), limit=limit,
+                                         color=(request.args.get("color") or "").strip() or None)
+    except ContextError as e:
+        return jsonify(e.payload()), e.status
+    except cross_context.CrossError as e:
+        return jsonify(e.payload()), e.status
+    return jsonify(out)
+
+
 @app.route("/api/similar/<int:player_id>")
 @login_required
 def similar_route(player_id: int):

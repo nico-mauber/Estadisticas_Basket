@@ -29,6 +29,7 @@ import { renderInsights } from "./components/insights-panel.js";
 import { renderSimilar } from "./components/similar-panel.js";
 import { renderTrends } from "./components/trends-panel.js";
 import { renderLineupSearch } from "./components/lineup-search.js";
+import { renderCross } from "./components/cross-panel.js";
 import { renderSavedQueries, saveQueryDialog } from "./components/saved-queries.js";
 import { renderCompareLineups, lineupsFromUrl } from "./components/compare-lineups.js";
 import { renderLeaders, renderCompetitionProfile } from "./components/leaders-panel.js";
@@ -560,6 +561,9 @@ async function applyRoute({ initial = false } = {}) {
         _searchTab = t;
         const fromUrl = _searchParamsFromUrl();
         if (t === "quintetos" && Object.keys(fromUrl).length) _searchInit = fromUrl;
+        if (t === "contextos" && !fromUrl.team && (fromUrl.competition || fromUrl.last)) _cross = { ..._cross, competition: fromUrl.competition || "", last: fromUrl.last || "" };
+        if (t === "contextos" && fromUrl.team) _cross = { team: fromUrl.team.toUpperCase(), side: fromUrl.side || "ataque", dimX: fromUrl.dim_x || "tramo", dimY: fromUrl.dim_y || "origen",
+                                                          metric: fromUrl.metric || "ppp", limit: Number(fromUrl.limit) || 8, color: fromUrl.color || "", competition: fromUrl.competition || "", last: fromUrl.last || "" };
         setSection("search", { sync: false });
         await renderSearch();
         break;
@@ -2718,13 +2722,14 @@ function _playerCompLabel() {
 }
 
 // ── Explorar (X-01, F-10): pestañas Jugadores · Quintetos · Consultas ───────────
-const SEARCH_TABS = [["jugadores", "Jugadores"], ["quintetos", "Quintetos"], ["consultas", "Consultas"]];
+const SEARCH_TABS = [["jugadores", "Jugadores"], ["quintetos", "Quintetos"], ["contextos", "Contextos"], ["consultas", "Consultas"]];
+let _cross = { team: "", side: "ataque", dimX: "tramo", dimY: "origen", metric: "ppp", limit: 8, color: "", competition: "", last: "" };   // A-06
 let _searchTab = "jugadores";
 let _searchInit = null;          // parámetros a restaurar al abrir la pestaña (consulta guardada o dirección)
 let _searchStale = false;        // la consulta que se abre se guardó con otros datos o configuración
 let _searchLastParams = null;    // última búsqueda de quintetos (la pestaña la recuerda al volver)
 let _searchKeys = new Set();     // claves de la búsqueda que hoy están en la dirección
-const _SEARCH_URL_KEYS = /^(competition|team|include|exclude|min_poss|adjusted|last|(min|max)\..+)$/;
+const _SEARCH_URL_KEYS = /^(competition|team|include|exclude|min_poss|adjusted|last|side|dim_x|dim_y|metric|limit|color|(min|max)\..+)$/;
 
 function _searchParamsFromUrl() {
   const out = {};
@@ -2737,6 +2742,9 @@ function _searchUrlQuery(section) {
   const q = {};
   if (section === "search" && _searchTab === "quintetos" && _searchLastParams)
     for (const [k, v] of Object.entries(_searchLastParams)) if (_SEARCH_URL_KEYS.test(k)) q[k] = v;
+  if (section === "search" && _searchTab === "contextos" && _cross.team)
+    Object.assign(q, { competition: _cross.competition, last: _cross.last, team: _cross.team, side: _cross.side, dim_x: _cross.dimX, dim_y: _cross.dimY,
+                       metric: _cross.metric, limit: _cross.limit === 8 ? "" : _cross.limit, color: _cross.color });
   const current = new Set(Object.keys(q));
   for (const k of _searchKeys) if (!current.has(k)) q[k] = null;
   _searchKeys = current;
@@ -2758,6 +2766,12 @@ async function renderSearch() {
       initial, stale,
       onState: p => { _searchLastParams = p; syncRoute(); },
       onSave: p => saveQueryDialog({ kind: "quintetos", params: p, notify: toast }),
+    });
+  }
+  if (_searchTab === "contextos") {
+    return renderCross(main, {
+      ..._cross, params: { competition: _cross.competition || null, last: _cross.last || null, ...contextParams() },
+      onChange: s => { _cross = { ..._cross, ...s }; renderSearch(); syncRoute(); },
     });
   }
   if (_searchTab === "consultas") return renderSavedQueries(main, { onRun: openSavedQuery, notify: toast });

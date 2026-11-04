@@ -1816,3 +1816,23 @@ input.ld-min, .tr-controls input { background: var(--surface2); color: var(--tex
   .sq-item { flex-direction: column; align-items: stretch; }
   .sq-actions .btn { flex: 1; }
 }
+
+/* ── Contextos cruzados (A-06) ── */
+.cx-controls { align-items: flex-end; }
+.cx-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; }
+.cx-scroll { overflow-x: auto; max-width: 100%; }
+.cx-table { border-collapse: separate; border-spacing: 2px; width: 100%; min-width: 480px; }
+.cx-table th { font-size: 12px; font-weight: 600; padding: 6px 8px; text-align: center; color: var(--muted); }
+.cx-table .cx-row-h, .cx-table tfoot th { text-align: left; position: sticky; left: 0; background: var(--surface); z-index: 1; color: var(--text); white-space: nowrap; }
+.cx-corner { text-align: left !important; font-size: 11px !important; }
+.cx-cell, .cx-total { text-align: center; padding: 8px 6px; border-radius: 6px; background: var(--surface2); min-width: 64px; }
+.cx-cell[data-i] { cursor: pointer; }
+.cx-cell.sel { outline: 2px solid var(--accent); }
+.cx-empty { color: var(--muted); }
+.cx-low { color: var(--muted); background: var(--surface2) !important; }
+.cx-val { font-weight: 700; font-size: 14px; }
+.cx-n { font-size: 11px; color: var(--muted); }
+.cx-badge { font-size: 10px; border: 1px dashed var(--muted); border-radius: 999px; padding: 0 5px; }
+.cx-foot th, .cx-total { font-weight: 600; }
+.cx-legend, .cx-check { font-size: 13px; margin: 8px 0 0; }
+.cx-detail-table td.num { text-align: right; font-weight: 600; }
