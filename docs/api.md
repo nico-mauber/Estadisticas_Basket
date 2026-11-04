@@ -761,6 +761,14 @@ Cabecera de contexto: cómo quedó la selección activa de una entidad. Auth: `l
 
 Response 200: `entity {type, id, name}`, `label` (etiqueta legible de los filtros aplicados), `record` ("V-D"; `null` en competencia), `wins`, `losses`, `avg_margin` (diferencia media de puntos con 1 decimal; `null` sin partidos), `games` (N: partidos de la selección), `games_total` (M: partidos de la entidad en la competencia **sin ningún otro filtro**), `sample` (badge de T-02: partidos para equipo, minutos para jugador) y `context` (eco de T-03 con `games_excluded` e `ignored`). Récord y diferencia salen del resultado final: victoria = puntos propios > puntos del rival; en un jugador cuentan solo los partidos que jugó. Errores: 400 `parametro_invalido` (tipo o id inválidos), 400 `contexto_invalido`, 400 `competencia_inexistente`, 404 `no_encontrado`.
 
+## GET `/api/insights` — NUEVO (A-10)
+
+Insights automáticos de un equipo o un jugador. Auth: `login_required`. Query: `entity=team|player`, `id` (código de equipo o `player_id`) y el contexto de T-03.
+
+Response 200: `entity {type, id, name}`, `items[]`, `reason`, `rule {low_pct, high_pct, min_items, max_items}`, `sample` (badge de T-02), `population {size, competition_id}` y `context` (eco de T-03). Cada ítem: `metric`, `label`, `fmt`, `direction`, `when` (`extremo_alto` | `extremo_bajo`), `tone` (`alto` | `bajo`), `good` (`true` si es bueno, `false` si es malo, `null` en las neutrales), `percentile`, `value`, `avg`, `rank`, `rank_total`, `family`, `template_id` y `text` (plantilla fija con valor, promedio y percentil: los de la ficha de la misma métrica).
+
+Una métrica dispara una frase solo si su percentil es ≤ `insights.low_pct` (10) o ≥ `insights.high_pct` (90); se emite como máximo una frase por familia (`insight_families` de `rules.json`) y hasta `insights.max_items`. Si hay menos extremos que `insights.min_items` se devuelven solo los que hay (`reason: "sin_extremos"` si ninguno). Sin ítems: `muestra_baja`, `contexto_no_comparable`, `sin_universo`, `poblacion_insuficiente` o `sin_datos`. Errores: 400 `parametro_invalido`, 404 `no_encontrado`, 400 `contexto_invalido`.
+
 ## GET `/api/rival-comparison` — NUEVO (F-20)
 
 Enfrentamiento directo de un equipo. Auth: `login_required`. Query: `team` (obligatorio), `rival` (opcional) y el contexto de T-03 (el filtro `opponent` se ignora: el rival se elige con `rival`).

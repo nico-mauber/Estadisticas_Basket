@@ -2,65 +2,341 @@
   "lang": "es",
   "version": 1,
   "templates": [
-    {"id": "ventaja_oer", "metric": "oer", "when": "ventaja", "entities": ["team"],
-     "text": "Ataque eficiente: sostené las situaciones que mejor te generan puntos"},
-    {"id": "riesgo_oer", "metric": "oer", "when": "riesgo", "entities": ["team"],
-     "text": "Ataque poco eficiente: buscá tiros de mejor calidad antes que más volumen"},
-    {"id": "ventaja_der", "metric": "der", "when": "ventaja", "entities": ["team"],
-     "text": "Defensa sólida: mantené la presión y el cierre de los tiros del rival"},
-    {"id": "riesgo_der", "metric": "der", "when": "riesgo", "entities": ["team"],
-     "text": "Defensa vulnerable: ajustá la cobertura para limitar los tiros cómodos del rival"},
-    {"id": "ventaja_net_rating", "metric": "net_rating", "when": "ventaja", "entities": ["team"],
-     "text": "Saldo de eficiencia a favor: cuidá las rotaciones que lo sostienen"},
-    {"id": "riesgo_net_rating", "metric": "net_rating", "when": "riesgo", "entities": ["team"],
-     "text": "Saldo de eficiencia en contra: revisá las rotaciones que más lo castigan"},
-    {"id": "ventaja_efg_pct", "metric": "efg_pct", "when": "ventaja", "entities": ["team"],
-     "text": "Ventaja en tiro: buscá volumen en medio campo"},
-    {"id": "riesgo_efg_pct", "metric": "efg_pct", "when": "riesgo", "entities": ["team"],
-     "text": "Tiro poco efectivo: priorizá los tiros de mejor calidad y los ataques al aro"},
-    {"id": "ventaja_ts_pct", "metric": "ts_pct", "when": "ventaja", "entities": ["team"],
-     "text": "Anotás con eficiencia total: mantené la mezcla de tiros y la llegada a la línea"},
-    {"id": "riesgo_ts_pct", "metric": "ts_pct", "when": "riesgo", "entities": ["team"],
-     "text": "Eficiencia total baja: sumá tiros libres y evitá los tiros de baja calidad"},
-    {"id": "ventaja_ppt", "metric": "ppt", "when": "ventaja", "entities": ["team"],
-     "text": "Cada tiro de campo rinde: mantené el volumen de los tiros de mayor valor"},
-    {"id": "riesgo_ppt", "metric": "ppt", "when": "riesgo", "entities": ["team"],
-     "text": "Cada tiro de campo rinde poco: reemplazá los tiros de bajo valor por mejores opciones"},
-    {"id": "ventaja_fg2_pct", "metric": "fg2_pct", "when": "ventaja", "entities": ["team"],
-     "text": "Eficaz en el tiro de dos puntos: atacá el aro y la pintura"},
-    {"id": "riesgo_fg2_pct", "metric": "fg2_pct", "when": "riesgo", "entities": ["team"],
-     "text": "Poco efectivo en el tiro de dos puntos: mejorá la selección de tiros cerca del aro"},
-    {"id": "ventaja_fg3_pct", "metric": "fg3_pct", "when": "ventaja", "entities": ["team"],
-     "text": "Triple confiable: generá ventajas para abrir tiros de tres puntos"},
-    {"id": "riesgo_fg3_pct", "metric": "fg3_pct", "when": "riesgo", "entities": ["team"],
-     "text": "Triple poco confiable: limitá los triples forzados y buscá solo los abiertos"},
-    {"id": "ventaja_ft_pct", "metric": "ft_pct", "when": "ventaja", "entities": ["team"],
-     "text": "Buen porcentaje en libres: forzá faltas y cerrá los partidos desde la línea"},
-    {"id": "riesgo_ft_pct", "metric": "ft_pct", "when": "riesgo", "entities": ["team"],
-     "text": "Libres poco confiables: no dependas de la línea para cerrar los partidos"},
-    {"id": "ventaja_ft_rate", "metric": "ft_rate", "when": "ventaja", "entities": ["team"],
-     "text": "Llegás seguido a la línea: seguí atacando el aro para provocar faltas"},
-    {"id": "riesgo_ft_rate", "metric": "ft_rate", "when": "riesgo", "entities": ["team"],
-     "text": "Llegás poco a la línea: atacá más el aro para provocar faltas"},
-    {"id": "ventaja_to_pct", "metric": "to_pct", "when": "ventaja", "entities": ["team"],
-     "text": "Cuidás el balón: sostené la circulación sin apuro"},
-    {"id": "riesgo_to_pct", "metric": "to_pct", "when": "riesgo", "entities": ["team"],
-     "text": "Perdés demasiados balones: simplificá las decisiones y asegurá el pase"},
-    {"id": "ventaja_or_pct", "metric": "or_pct", "when": "ventaja", "entities": ["team"],
-     "text": "Dominás el rebote ofensivo: mandá hombres al rebote para ganar segundas oportunidades"},
-    {"id": "riesgo_or_pct", "metric": "or_pct", "when": "riesgo", "entities": ["team"],
-     "text": "Poco rebote ofensivo: definí cuántos jugadores mandar al rebote según el rival"},
-    {"id": "ventaja_dr_pct", "metric": "dr_pct", "when": "ventaja", "entities": ["team"],
-     "text": "Cerrás bien el rebote defensivo: aprovechalo para salir a correr"},
-    {"id": "riesgo_dr_pct", "metric": "dr_pct", "when": "riesgo", "entities": ["team"],
-     "text": "Cedés rebotes defensivos: reforzá el bloqueo para evitar segundas oportunidades rivales"},
-    {"id": "ventaja_ast_to", "metric": "ast_to", "when": "ventaja", "entities": ["team"],
-     "text": "Circulación ordenada, más asistencias que pérdidas: seguí moviendo el balón"},
-    {"id": "riesgo_ast_to", "metric": "ast_to", "when": "riesgo", "entities": ["team"],
-     "text": "Más pérdidas que asistencias: bajá el riesgo en los pases"},
-    {"id": "ventaja_as_pct", "metric": "as_pct", "when": "ventaja", "entities": ["team"],
-     "text": "Buena parte de las canastas nacen de pase: mantené el movimiento de balón"},
-    {"id": "riesgo_as_pct", "metric": "as_pct", "when": "riesgo", "entities": ["team"],
-     "text": "Pocas canastas nacen de pase: buscá más pases antes del tiro"}
+    {
+      "id": "ventaja_oer",
+      "metric": "oer",
+      "when": "ventaja",
+      "entities": [
+        "team"
+      ],
+      "text": "Ataque eficiente: sostené las situaciones que mejor te generan puntos"
+    },
+    {
+      "id": "riesgo_oer",
+      "metric": "oer",
+      "when": "riesgo",
+      "entities": [
+        "team"
+      ],
+      "text": "Ataque poco eficiente: buscá tiros de mejor calidad antes que más volumen"
+    },
+    {
+      "id": "ventaja_der",
+      "metric": "der",
+      "when": "ventaja",
+      "entities": [
+        "team"
+      ],
+      "text": "Defensa sólida: mantené la presión y el cierre de los tiros del rival"
+    },
+    {
+      "id": "riesgo_der",
+      "metric": "der",
+      "when": "riesgo",
+      "entities": [
+        "team"
+      ],
+      "text": "Defensa vulnerable: ajustá la cobertura para limitar los tiros cómodos del rival"
+    },
+    {
+      "id": "ventaja_net_rating",
+      "metric": "net_rating",
+      "when": "ventaja",
+      "entities": [
+        "team"
+      ],
+      "text": "Saldo de eficiencia a favor: cuidá las rotaciones que lo sostienen"
+    },
+    {
+      "id": "riesgo_net_rating",
+      "metric": "net_rating",
+      "when": "riesgo",
+      "entities": [
+        "team"
+      ],
+      "text": "Saldo de eficiencia en contra: revisá las rotaciones que más lo castigan"
+    },
+    {
+      "id": "ventaja_efg_pct",
+      "metric": "efg_pct",
+      "when": "ventaja",
+      "entities": [
+        "team"
+      ],
+      "text": "Ventaja en tiro: buscá volumen en medio campo"
+    },
+    {
+      "id": "riesgo_efg_pct",
+      "metric": "efg_pct",
+      "when": "riesgo",
+      "entities": [
+        "team"
+      ],
+      "text": "Tiro poco efectivo: priorizá los tiros de mejor calidad y los ataques al aro"
+    },
+    {
+      "id": "ventaja_ts_pct",
+      "metric": "ts_pct",
+      "when": "ventaja",
+      "entities": [
+        "team"
+      ],
+      "text": "Anotás con eficiencia total: mantené la mezcla de tiros y la llegada a la línea"
+    },
+    {
+      "id": "riesgo_ts_pct",
+      "metric": "ts_pct",
+      "when": "riesgo",
+      "entities": [
+        "team"
+      ],
+      "text": "Eficiencia total baja: sumá tiros libres y evitá los tiros de baja calidad"
+    },
+    {
+      "id": "ventaja_ppt",
+      "metric": "ppt",
+      "when": "ventaja",
+      "entities": [
+        "team"
+      ],
+      "text": "Cada tiro de campo rinde: mantené el volumen de los tiros de mayor valor"
+    },
+    {
+      "id": "riesgo_ppt",
+      "metric": "ppt",
+      "when": "riesgo",
+      "entities": [
+        "team"
+      ],
+      "text": "Cada tiro de campo rinde poco: reemplazá los tiros de bajo valor por mejores opciones"
+    },
+    {
+      "id": "ventaja_fg2_pct",
+      "metric": "fg2_pct",
+      "when": "ventaja",
+      "entities": [
+        "team"
+      ],
+      "text": "Eficaz en el tiro de dos puntos: atacá el aro y la pintura"
+    },
+    {
+      "id": "riesgo_fg2_pct",
+      "metric": "fg2_pct",
+      "when": "riesgo",
+      "entities": [
+        "team"
+      ],
+      "text": "Poco efectivo en el tiro de dos puntos: mejorá la selección de tiros cerca del aro"
+    },
+    {
+      "id": "ventaja_fg3_pct",
+      "metric": "fg3_pct",
+      "when": "ventaja",
+      "entities": [
+        "team"
+      ],
+      "text": "Triple confiable: generá ventajas para abrir tiros de tres puntos"
+    },
+    {
+      "id": "riesgo_fg3_pct",
+      "metric": "fg3_pct",
+      "when": "riesgo",
+      "entities": [
+        "team"
+      ],
+      "text": "Triple poco confiable: limitá los triples forzados y buscá solo los abiertos"
+    },
+    {
+      "id": "ventaja_ft_pct",
+      "metric": "ft_pct",
+      "when": "ventaja",
+      "entities": [
+        "team"
+      ],
+      "text": "Buen porcentaje en libres: forzá faltas y cerrá los partidos desde la línea"
+    },
+    {
+      "id": "riesgo_ft_pct",
+      "metric": "ft_pct",
+      "when": "riesgo",
+      "entities": [
+        "team"
+      ],
+      "text": "Libres poco confiables: no dependas de la línea para cerrar los partidos"
+    },
+    {
+      "id": "ventaja_ft_rate",
+      "metric": "ft_rate",
+      "when": "ventaja",
+      "entities": [
+        "team"
+      ],
+      "text": "Llegás seguido a la línea: seguí atacando el aro para provocar faltas"
+    },
+    {
+      "id": "riesgo_ft_rate",
+      "metric": "ft_rate",
+      "when": "riesgo",
+      "entities": [
+        "team"
+      ],
+      "text": "Llegás poco a la línea: atacá más el aro para provocar faltas"
+    },
+    {
+      "id": "ventaja_to_pct",
+      "metric": "to_pct",
+      "when": "ventaja",
+      "entities": [
+        "team"
+      ],
+      "text": "Cuidás el balón: sostené la circulación sin apuro"
+    },
+    {
+      "id": "riesgo_to_pct",
+      "metric": "to_pct",
+      "when": "riesgo",
+      "entities": [
+        "team"
+      ],
+      "text": "Perdés demasiados balones: simplificá las decisiones y asegurá el pase"
+    },
+    {
+      "id": "ventaja_or_pct",
+      "metric": "or_pct",
+      "when": "ventaja",
+      "entities": [
+        "team"
+      ],
+      "text": "Dominás el rebote ofensivo: mandá hombres al rebote para ganar segundas oportunidades"
+    },
+    {
+      "id": "riesgo_or_pct",
+      "metric": "or_pct",
+      "when": "riesgo",
+      "entities": [
+        "team"
+      ],
+      "text": "Poco rebote ofensivo: definí cuántos jugadores mandar al rebote según el rival"
+    },
+    {
+      "id": "ventaja_dr_pct",
+      "metric": "dr_pct",
+      "when": "ventaja",
+      "entities": [
+        "team"
+      ],
+      "text": "Cerrás bien el rebote defensivo: aprovechalo para salir a correr"
+    },
+    {
+      "id": "riesgo_dr_pct",
+      "metric": "dr_pct",
+      "when": "riesgo",
+      "entities": [
+        "team"
+      ],
+      "text": "Cedés rebotes defensivos: reforzá el bloqueo para evitar segundas oportunidades rivales"
+    },
+    {
+      "id": "ventaja_ast_to",
+      "metric": "ast_to",
+      "when": "ventaja",
+      "entities": [
+        "team"
+      ],
+      "text": "Circulación ordenada, más asistencias que pérdidas: seguí moviendo el balón"
+    },
+    {
+      "id": "riesgo_ast_to",
+      "metric": "ast_to",
+      "when": "riesgo",
+      "entities": [
+        "team"
+      ],
+      "text": "Más pérdidas que asistencias: bajá el riesgo en los pases"
+    },
+    {
+      "id": "ventaja_as_pct",
+      "metric": "as_pct",
+      "when": "ventaja",
+      "entities": [
+        "team"
+      ],
+      "text": "Buena parte de las canastas nacen de pase: mantené el movimiento de balón"
+    },
+    {
+      "id": "riesgo_as_pct",
+      "metric": "as_pct",
+      "when": "riesgo",
+      "entities": [
+        "team"
+      ],
+      "text": "Pocas canastas nacen de pase: buscá más pases antes del tiro"
+    },
+    {
+      "id": "insight_alto_higher",
+      "metric": "*",
+      "direction": "higher",
+      "when": "extremo_alto",
+      "entities": [
+        "team",
+        "player"
+      ],
+      "text": "{entidad} está en el percentil {p} de {metrica} de la competencia ({valor} frente a {media} de promedio)"
+    },
+    {
+      "id": "insight_bajo_higher",
+      "metric": "*",
+      "direction": "higher",
+      "when": "extremo_bajo",
+      "entities": [
+        "team",
+        "player"
+      ],
+      "text": "{entidad} está en el percentil {p} de {metrica} de la competencia ({valor} frente a {media} de promedio)"
+    },
+    {
+      "id": "insight_alto_lower",
+      "metric": "*",
+      "direction": "lower",
+      "when": "extremo_alto",
+      "entities": [
+        "team",
+        "player"
+      ],
+      "text": "{entidad} es de los mejores en {metrica}, con percentil {p}: {valor} frente a {media} de promedio (menos es mejor)"
+    },
+    {
+      "id": "insight_bajo_lower",
+      "metric": "*",
+      "direction": "lower",
+      "when": "extremo_bajo",
+      "entities": [
+        "team",
+        "player"
+      ],
+      "text": "{entidad} es de los peores en {metrica}, con percentil {p}: {valor} frente a {media} de promedio (menos es mejor)"
+    },
+    {
+      "id": "insight_alto_neutral",
+      "metric": "*",
+      "direction": "neutral",
+      "when": "extremo_alto",
+      "entities": [
+        "team",
+        "player"
+      ],
+      "text": "{entidad} tiene de los valores más altos de {metrica} de la competencia: {valor} frente a {media} de promedio"
+    },
+    {
+      "id": "insight_bajo_neutral",
+      "metric": "*",
+      "direction": "neutral",
+      "when": "extremo_bajo",
+      "entities": [
+        "team",
+        "player"
+      ],
+      "text": "{entidad} tiene de los valores más bajos de {metrica} de la competencia: {valor} frente a {media} de promedio"
+    }
   ]
 }

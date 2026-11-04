@@ -552,6 +552,38 @@ def competition_profile_route():
     return jsonify(cp.profile(ctx.competition_id, ctx))
 
 
+@app.route("/api/insights")
+@login_required
+def insights_route():
+    """Insights automáticos (A-10): frases de plantilla fija sobre los percentiles extremos de un equipo o un jugador.
+    `?entity=team|player&id=<código o player_id>` más el contexto de T-03."""
+    import phrases
+    entity = (request.args.get("entity") or "").strip()
+    ident = (request.args.get("id") or "").strip()
+    if entity not in ("team", "player") or not ident:
+        return jsonify({"error": "Indicá entity (team o player) e id.", "code": "parametro_invalido"}), 400
+    try:
+        if entity == "team":
+            code = ident.upper()
+            if not any(r["team_code"] == code for r in repository.team_game_rows(None).values()):
+                return jsonify({"error": "Equipo no encontrado", "code": "no_encontrado"}), 404
+            ctx = context.parse_context(request.args, team_code=code, event_level=True)
+            out = phrases.insights("team", code, comp_id=ctx.competition_id, ctx=ctx)
+        else:
+            if not ident.isdigit():
+                return jsonify({"error": "Indicá el id del jugador.", "code": "parametro_invalido"}), 400
+            pid = identity.canonical_id(int(ident))
+            if pid is None or identity.player_card(pid) is None:
+                return jsonify({"error": "Jugador no encontrado", "code": "no_encontrado"}), 404
+            ctx = context.parse_context(request.args, player_id=pid)
+            out = phrases.insights("player", pid, comp_id=ctx.competition_id, ctx=ctx)
+    except ContextError as e:
+        return jsonify(e.payload()), e.status
+    except phrases.PhraseError as e:
+        return jsonify(e.payload()), e.status
+    return jsonify(out)
+
+
 @app.route("/api/rival-comparison")
 @login_required
 def rival_comparison_route():

@@ -1,58 +1,30 @@
-# Progress — A-10: Insights automáticos en texto
+# Progress — A-10: Insights automáticos
 
-> **Estado:** ⬜ No iniciado
+> **Estado:** 🔶 Implementado para equipo y jugador (`GET /api/insights`, bloque "Insights" en Equipo › Resumen y en Jugador). Falta el "cambio brusco de rendimiento" que consume Mi equipo (F-12).
+> **Fecha:** 2026-11-04
 
-## Estado de tareas
-- [ ] T-A1 · activar `insights.*` en `config.py`
-- [ ] T-A2 · sección `insights` en `rules.json`
-- [ ] T-A3 · 8 plantillas nuevas en `es.json`
-- [ ] T-B1 · validación ampliada de plantillas
-- [ ] T-B2 · `score_candidates` público
-- [ ] T-B3 · `insights.py` (`insights_payload`, coherencia)
-- [ ] T-B4 · `sudden_changes`
-- [ ] T-B5 · caché y eco de contexto
-- [ ] T-B6 · ruta `GET /api/insights`
-- [ ] T-C1 · `api.insights`
-- [ ] T-D1 · `renderInsights`
-- [ ] T-D2 · bloque en Equipo › Resumen
-- [ ] T-D3 · bloque en Jugador › Resumen
-- [ ] T-D4 · CSS
-- [ ] T-E1 · errores y offline
-- [ ] T-E2 · `sw.js`
-- [ ] T-F1 … T-F19 · verificación
+## Qué se hizo
+- `phrases.insights` y seis plantillas genéricas (alto y bajo, por dirección) en `phrases/es.json`; conjunto de métricas y familias de insight en `phrases/rules.json`. Las plantillas de insight admiten hasta 160 caracteres.
+- `GET /api/insights` (equipo y jugador) y las claves `insights.low_pct`, `insights.high_pct`, `insights.min_items` e `insights.max_items` activas en Configuración.
+- `components/insights-panel.js` y el bloque en Equipo y Jugador. `sw.js` v56.
 
-## Estado de CA (gate de aceptación)
+## Estado de CA
+`a10_sim.py` 15/15 y `a10_browser.py` 13/13 (1280 y 360 px).
+
 | CA | Estado | Evidencia |
 |---|---|---|
-| CA-1 (cliente) | ⬜ | |
-| CA-2 | ⬜ | |
-| CA-3 | ⬜ | |
-| CA-4 | ⬜ | |
-| CA-5 | ⬜ | |
-| CA-6 | ⬜ | |
-| CA-7 | ⬜ | |
-| CA-8 | ⬜ | |
-| CA-9 | ⬜ | |
-| CA-10 | ⬜ | |
-| CA-11 | ⬜ | |
-| CA-12 | ⬜ | |
-| CA-13 | ⬜ | |
-| CA-14 | ⬜ | |
-| CA-15 | ⬜ | |
-| CA-16 | ⬜ | |
+| Ningún insight contradice la pantalla (cliente) | ✅ | valor, promedio y percentil de cada frase son los de la ficha de `/api/metrics/team` y `/api/metrics/player` (49 insights de equipo y los de 24 jugadores verificados) |
+| Disparo ≤ 10 o ≥ 90 | ✅ | solo percentiles extremos |
+| Plantillas fijas | ✅ | validadas al cargar (sin dígitos, solo marcadores permitidos) |
+| Menos es mejor | ✅ | la frase lo dice y `good` sigue la orientación |
+| Una frase por familia, hasta `max_items` | ✅ | |
+| Muestra baja | ✅ | sin ítems y con el motivo |
+| Nulos | ✅ | no disparan frase |
+| Contexto | ✅ | se recalcula con el contexto y lo indica |
+| Umbrales de Configuración | ✅ | cambian sin reiniciar |
+| Cambio brusco (RF-16) | ⬜ | → F-12 |
 
-## Gates técnicos
-- Backend arranca sin traceback: ⬜
-- `upgrade_db()` idempotente (si aplica): ⬜ (no aplica: sin esquema)
-- Endpoints probados manualmente: ⬜
-- Consola del navegador sin errores JS: ⬜
-
-## Desviaciones respecto a docs/ o plan
-
-## Docs a actualizar
-- `docs/api.md` — `GET /api/insights` (parámetros, shape, errores).
-- `docs/frontend.md` — componente `insights-panel.js`, bloque Insights en Equipo y Jugador › Resumen, copy nuevo y motivos.
-- `docs/architecture.md` — módulo `backend/insights.py`; ampliaciones de `phrases.py`, `es.json` y `rules.json`.
-- `docs/metrics.md` — "Insights automáticos": regla de disparo (percentil ≤ 10 / ≥ 90), familias, redacción de "menos es mejor", definición de cambio brusco.
-
-## Deuda / TODO
+## Desviaciones
+- **Convive con "Análisis del equipo"** (`team-insights`): este usa umbrales 70/30 con 19 métricas; el de A-10 sigue el criterio del cliente (10/90). Falta decidir si el anterior se retira.
+- Las frases de métricas neutrales no citan el percentil (por redacción de la plantilla).
+- Copy sin `t()` (F-21).

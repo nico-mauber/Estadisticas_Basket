@@ -25,6 +25,8 @@ import { renderClockPanel } from "./components/clock-panel.js";
 import { renderTeamInsights } from "./components/team-insights.js";
 import { renderGamePlan } from "./components/game-plan.js";
 import { renderVersus } from "./components/versus-panel.js";
+import { renderInsights } from "./components/insights-panel.js";
+import { renderCompareLineups, lineupsFromUrl } from "./components/compare-lineups.js";
 import { renderLeaders, renderCompetitionProfile } from "./components/leaders-panel.js";
 import { renderTabs, applyTabs, watchTabs } from "./components/tabs.js";
 import { parseRoute, buildHash, routeKey, writeRoute, routeQuery, onRouteChange, markRouteKey } from "./core/router.js";
@@ -522,7 +524,7 @@ async function applyRoute({ initial = false } = {}) {
       case "compare":
         setSection("compare", { sync: false });
         await renderCompare();
-        if (p.tab === "equipos" || p.tab === "jugadores") _initCompareTabs(p.tab);
+        if (p.tab === "equipos" || p.tab === "jugadores" || p.tab === "quintetos") _initCompareTabs(p.tab);
         break;
       case "search":
         setSection("search", { sync: false });
@@ -1950,6 +1952,7 @@ function _applyTeamData(main, data) {
   renderSecondChancePanel(document.getElementById("team-second-chance"), data.team_code, { mode: "team", params: _teamParams() });
   renderClockPanel(document.getElementById("team-clock"), data.team_code, { mode: "team", params: _teamParams() });
   renderGamePlan(document.getElementById("team-gameplan"), data.team_code, { params: _teamParams() });
+  renderInsights(document.getElementById("team-a10"), "team", data.team_code, { params: _teamParams() });
   renderTeamInsights(document.getElementById("team-insights"), data.team_code, { params: _teamParams() });
   renderTeamShotmapTeam(data.team_code);   // mapa de tiro del equipo (Feature 10), de la selección activa
   _renderTeamRoster(data.team_code);
@@ -2170,12 +2173,25 @@ async function renderTeamLineup(teamCode, players, playerIds = []) {
 // Pestañas Equipos / Jugadores de la sección Comparar (F-05). La de jugadores se monta la
 // primera vez que se abre (o si la dirección ya trae los dos jugadores).
 let _cmpTabsBound = false;
+function _syncLineupsUrl(a, b) {
+  try {
+    const url = new URL(location.href);
+    url.searchParams.set("cmp_qa", a); url.searchParams.set("cmp_qb", b);
+    history.replaceState(history.state, "", url);
+  } catch { /* la comparación sigue sin dirección */ }
+}
 function _initCompareTabs(force = null) {
   const show = which => {
     document.querySelectorAll(".cmp-tab").forEach(b => b.classList.toggle("active", b.dataset.cmp === which));
     document.getElementById("cmp-pane-equipos").style.display = which === "equipos" ? "" : "none";
     const pane = document.getElementById("cmp-pane-jugadores");
     pane.style.display = which === "jugadores" ? "" : "none";
+    const qPane = document.getElementById("cmp-pane-quintetos");
+    qPane.style.display = which === "quintetos" ? "" : "none";
+    if (which === "quintetos" && !qPane.dataset.mounted) {
+      qPane.dataset.mounted = "1";
+      renderCompareLineups(qPane, { initial: lineupsFromUrl(), params: contextParams(), onSync: _syncLineupsUrl });
+    }
     syncRoute();
     if (which === "jugadores" && !pane.dataset.mounted) {
       pane.dataset.mounted = "1";
@@ -2188,6 +2204,7 @@ function _initCompareTabs(force = null) {
       btn.addEventListener("click", () => show(btn.dataset.cmp)));
   }
   if (force) show(force);
+  else if (lineupsFromUrl()) show("quintetos");
   else if (comparePlayersFromUrl()) show("jugadores");
 }
 
@@ -2451,6 +2468,7 @@ function _applyPlayerData(main, data) {
     onClear: () => { clearContext(); _playerLastN = 0; _reloadPlayer(); },
   });
   _loadPlayerStandard(data.player_id);
+  if (data.player_id != null) renderInsights(document.getElementById("player-insights"), "player", data.player_id, { params: _playerParams() });
   if (data.player_id != null) {
     renderOriginPanel(document.getElementById("player-origins"), data.player_id,
       { mode: "player", params: _playerParams() });
@@ -2933,6 +2951,7 @@ function renderApp() {
         <div id="team-lineup" data-tabs="quintetos"></div>
         <div id="team-gameplan" data-tabs="resumen"></div>
         <div id="team-main" data-tabs="resumen gamelog"></div>
+        <div id="team-a10" data-tabs="resumen"></div>
         <div id="team-insights" data-tabs="resumen"></div>
         <div id="team-roster" data-tabs="plantel"></div>
         <div id="team-lineups-block" data-tabs="quintetos"></div>
@@ -2950,6 +2969,7 @@ function renderApp() {
         <div class="cmp-tabs">
           <button class="filter-pill cmp-tab active" data-cmp="equipos">Equipos</button>
           <button class="filter-pill cmp-tab" data-cmp="jugadores">Jugadores</button>
+          <button class="filter-pill cmp-tab" data-cmp="quintetos">Quintetos</button>
         </div>
         <div id="cmp-pane-equipos">
         <div class="card">
@@ -2964,12 +2984,14 @@ function renderApp() {
         <div id="compare-result"></div>
         </div>
         <div id="cmp-pane-jugadores" style="display:none"></div>
+        <div id="cmp-pane-quintetos" style="display:none"></div>
       </div>
 
       <!-- Player -->
       <div class="section" id="sec-player">
         <div id="player-ctx-header" class="chdr-host"></div>
         <div id="player-tabs" class="tabs-host" hidden></div>
+        <div id="player-insights" data-tabs="resumen"></div>
         <div id="player-main"><p class="empty">Selecciona un jugador desde la vista de equipo.</p></div>
       </div>
 
@@ -3093,7 +3115,7 @@ function renderApp() {
 // Abre la dirección con la que se cargó la app; sin dirección (o con una inválida) abre la sección inicial (RF-15, RF-16).
 async function startRoute() {
   // Una dirección con dos jugadores abre directamente Comparar › Jugadores (F-05 RF-8).
-  if (comparePlayersFromUrl() && !parseRoute()) { renderCompare(); return; }
+  if ((comparePlayersFromUrl() || lineupsFromUrl()) && !parseRoute()) { renderCompare(); return; }
   if (await applyRoute({ initial: true })) return;
   await openInitialSection();
 }

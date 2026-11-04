@@ -36,7 +36,7 @@ MARKERS = ("entidad", "metrica", "valor", "referencia", "delta", "p", "media", "
 WHEN_VALUES = ("ventaja", "riesgo", "extremo_alto", "extremo_bajo")
 REFERENCES = ("competencia", "rival", "periodo_anterior", "rival_proximo")
 MODES = ("perfil", "matchup")
-MAX_LEN = 100
+MAX_LEN = {"ventaja": 100, "riesgo": 100, "extremo_alto": 160, "extremo_bajo": 160}   # A-10 agrega los de insights
 
 
 class PhraseError(Exception):
@@ -103,8 +103,8 @@ def validate_templates(data: dict, rules: dict, metrics: dict) -> list:
             errors.append(f"{tid}: el texto tiene dígitos escritos a mano")
         if not text.strip():
             errors.append(f"{tid}: texto vacío")
-        elif len(text) > MAX_LEN:
-            errors.append(f"{tid}: texto de más de {MAX_LEN} caracteres ({len(text)})")
+        elif len(text) > MAX_LEN.get(t.get("when"), 100):
+            errors.append(f"{tid}: texto de más de {MAX_LEN.get(t.get('when'), 100)} caracteres ({len(text)})")
         for ent in t.get("entities") or ["team"]:
             have.add((metric, t.get("when"), ent))
     for entity, keys in (rules.get("game_plan") or {}).items():
@@ -438,6 +438,97 @@ def _build(team_code: str, reference: str, rival_code, comp_id, ctx: Context, mo
     if not advantages and not risks:
         out["reason"] = "sin_diferencias"
     return out
+
+
+# ── Insights automáticos (A-10) ──────────────────────────────────────────────
+
+def _insight_family(metric_key: str, rules: dict) -> str:
+    for fam, keys in rules.get("insight_families", {}).items():
+        if metric_key in keys:
+            return fam
+    return metric_key
+
+
+def insights(entity_type: str, entity_id, *, comp_id: int | None, ctx: Context) -> dict:
+    """Entre `insights.min_items` y `insights.max_items` frases de plantilla fija para un equipo o un jugador: una por métrica
+    cuyo percentil de T-01 es ≤ `insights.low_pct` o ≥ `insights.high_pct`, una por familia, ordenadas por lo extremo."""
+    if entity_type not in ("team", "player"):
+        raise PhraseError("parametro_invalido", "Los insights solo existen para equipos y jugadores", 400)
+    eid = str(entity_id).upper() if entity_type == "team" else str(entity_id)
+    key = (entity_type, eid, comp_id, context_mod.context_key(ctx))
+    return cache.memo("insights", key, lambda: _build_insights(entity_type, eid, comp_id, ctx))
+
+
+def _build_insights(entity_type: str, eid: str, comp_id, ctx: Context) -> dict:
+    rules = load_rules()
+    cfg = {"low_pct": config.get("insights.low_pct"), "high_pct": config.get("insights.high_pct"),
+           "min_items": config.get("insights.min_items"), "max_items": config.get("insights.max_items")}
+    out = {"entity": {"type": entity_type, "id": eid}, "items": [], "reason": None, "rule": cfg,
+           "sample": None, "population": {"size": 0, "competition_id": comp_id}}
+
+    def done(reason, own=None):
+        out["reason"] = reason
+        label = repository.competition_labels().get(comp_id) if comp_id is not None else None
+        n = own.games if own else 0
+        out["context"] = context_mod.context_echo(ctx, games_used=n, games_total=n, games_excluded={}, ignored=[],
+                                                  competition_label=label)
+        return out
+
+    if ctx.competition_all or comp_id is None:
+        return done("sin_universo")
+    if context_mod.population_mode(ctx) == "entity_only":
+        return done("contexto_no_comparable")
+    pop = population.population(entity_type, comp_id, ctx)
+    own = pop.get(eid)
+    out["population"]["size"] = pop.size
+    if own is None:
+        return done("sin_datos")
+    out["entity"]["name"] = own.name
+    out["sample"] = own.sample
+    if own.sample and own.sample.get("level") == "baja":
+        return done("muestra_baja", own)
+    if pop.size < config.get("population.min_size"):
+        return done("poblacion_insuficiente", own)
+    cands = []
+    for order, m in enumerate(rules["insights"][entity_type]):
+        d = metrics_catalog.METRICS.get(m)
+        if d is None or entity_type not in d.entities:
+            continue
+        v = own.values.get(m)
+        f = population.ficha(m, v, own.id, pop)
+        p = f["percentile"]
+        if v is None or p is None or not f["in_population"]:
+            continue                      # nunca se reemplaza un nulo por 0
+        if p >= cfg["high_pct"]:
+            when = "extremo_alto"
+        elif p <= cfg["low_pct"]:
+            when = "extremo_bajo"
+        else:
+            continue
+        cands.append({"metric": m, "label": d.label, "fmt": d.fmt, "direction": d.direction, "when": when,
+                      "percentile": p, "value": v, "avg": f["avg"], "rank": f["rank"], "rank_total": f["rank_total"],
+                      "extreme": abs(p - 50), "family": _insight_family(m, rules), "order": order})
+    cands.sort(key=lambda c: (-c["extreme"], c["order"]))
+    used, picked = set(), []
+    for c in cands:
+        if c["family"] in used:
+            continue
+        used.add(c["family"])
+        picked.append(c)
+        if len(picked) >= cfg["max_items"]:
+            break
+    for c in picked:
+        tpl = pick_template(c["metric"], c["when"], entity_type, direction=c["direction"])
+        c["template_id"] = tpl["id"] if tpl else None
+        avg = format_value(c["metric"], c["avg"])
+        c["text"] = render(tpl["id"], {"entidad": own.name, "metrica": c["label"], "valor": format_value(c["metric"], c["value"]),
+                                       "media": avg, "referencia": avg, "delta": "", "p": c["percentile"], "rival": ""}) if tpl else ""
+        c["tone"] = "alto" if c["when"] == "extremo_alto" else "bajo"
+        c["good"] = None if c["direction"] == "neutral" else c["when"] == "extremo_alto"
+        c.pop("order", None)
+        c.pop("extreme", None)
+    out["items"] = picked
+    return done(None if picked else "sin_extremos", own)
 
 
 if __name__ == "__main__":

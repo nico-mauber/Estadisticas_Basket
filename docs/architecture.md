@@ -167,6 +167,9 @@ o configuración (F-13). Tolerante a correr fuera de `app_context`.
 ### `breakdown.py`, `team_insights.py`, `warmup.py` (correcciones de Equipo, 2026-10)
 `breakdown.py` calcula el desglose ofensivo (`paint_pts`, `second_chance_pts`, `pts_from_tov`, `bench_pts`, `fast_break_pts`) cuando FIBA lo deja `NULL`: `repository` lo llama como *row filler* al armar las filas de equipo y marca `_derived`; el perfil informa `extras_source` (`oficial` / `calculado`). `team_insights.py` arma fortalezas y debilidades del equipo con el percentil de cada métrica en su competencia (reglas fijas, como "Ventajas y amenazas" de Preparar); alimenta `GET /api/team-insights/<code>`. `warmup.py` calcula las posesiones de todos los partidos en un hilo (solo con `SB_WARMUP=1`) al arrancar y cuando sube `data_version` (`cache.on_data_bump`).
 
+### Insights (A-10)
+`phrases.insights(entity_type, id, comp_id=, ctx=)` reutiliza el motor de F-17: una plantilla genérica por dirección de la métrica (`higher`, `lower`, `neutral`) y por disparo (`extremo_alto`, `extremo_bajo`) en `phrases/es.json`, el conjunto de métricas y las familias en `phrases/rules.json` (`insights`, `insight_families`) y los percentiles de la ficha de T-01. Los textos de insight admiten hasta 160 caracteres. Alimenta `GET /api/insights` (memoizado en `cache`, namespace `insights`).
+
 ### `rival_comparison.py` y `competition_profile.py` (F-20, F-14)
 `rival_comparison.py` compara el valor agregado de un equipo en los partidos contra un rival con el de toda su selección (`bundles._team_bundle_from_games` con y sin `opponent`) para las métricas del plan de juego; las diferencias más marcadas reutilizan `phrases` (familias, plantillas, `z`). `competition_profile.py` arma los líderes (población de jugadores de T-01 con mínimo de minutos) y el perfil de la competencia (`league_reference`, mejor valor por métrica y PPP por origen de A-02); no recalcula nada propio.
 

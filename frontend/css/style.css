@@ -1747,3 +1747,18 @@ nav .nav-more { display: none; }
 .ld-dir { font-size: 11px; font-weight: 400; text-transform: none; letter-spacing: 0; }
 .ld-foot { margin-top: 8px; font-size: 12px; display: flex; flex-wrap: wrap; gap: 6px 12px; justify-content: space-between; }
 @media (max-width: 767px) { .ld-grid { grid-template-columns: 1fr; } }
+
+/* ── Insights automáticos (A-10) ── */
+.ins-list { list-style: none; margin: 8px 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.ins-item { display: flex; gap: 10px; align-items: flex-start; font-size: 14px; padding: 8px 10px; border-radius: 8px; border-left: 3px solid var(--border); background: var(--bg-card-2, rgba(127,127,127,.06)); }
+.ins-good { border-left-color: #22a06b; }
+.ins-bad { border-left-color: #d6504a; }
+.ins-good .ins-ico { color: #22a06b; }
+.ins-bad .ins-ico { color: #d6504a; }
+.ins-ico { flex: none; font-size: 12px; margin-top: 3px; }
+.ins-text { white-space: normal; overflow-wrap: anywhere; }
+
+/* ── Comparar quintetos (F-09) ── */
+.cl-sides { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.cl-side { min-width: 0; }
+@media (max-width: 767px) { .cl-sides { grid-template-columns: 1fr; } }

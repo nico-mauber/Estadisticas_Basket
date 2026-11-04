@@ -95,6 +95,7 @@ export const api = {
   teamInsights:  (code, params = {}) => apiFetch(`/api/team-insights/${encodeURIComponent(code)}${qs(params)}`),
   possessionClock: (params = {}) => apiFetch(`/api/possession-clock${qs(params)}`),
   gamePlan:      (params = {}) => apiFetch(`/api/game-plan${qs(params)}`),
+  insights:      (params = {}) => apiFetch(`/api/insights${qs(params)}`),
   rivalComparison: (params = {}) => apiFetch(`/api/rival-comparison${qs(params)}`),
   leaders:       (params = {}) => apiFetch(`/api/leaders${qs(params)}`),
   competitionProfile: (params = {}) => apiFetch(`/api/competition-profile${qs(params)}`),
