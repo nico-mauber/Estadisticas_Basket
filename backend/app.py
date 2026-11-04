@@ -552,6 +552,87 @@ def competition_profile_route():
     return jsonify(cp.profile(ctx.competition_id, ctx))
 
 
+@app.route("/api/trends")
+@login_required
+def trends_route():
+    """Evolución partido a partido (F-18): `?entity=team|player&id=…&metrics=a,b,c` (hasta tres del conjunto estándar), `ma` (3, 5 o 10),
+    `last_n`, `base` y el contexto de T-03. Devuelve las series con media móvil, el indicador de tendencia, los hitos y el Ø de referencia."""
+    import trends
+    entity = (request.args.get("entity") or "").strip()
+    ident = (request.args.get("id") or "").strip()
+    if entity not in ("team", "player") or not ident:
+        return jsonify({"error": "Indicá entity (team o player) e id.", "code": "parametro_invalido"}), 400
+    metrics = [m.strip() for m in (request.args.get("metrics") or "oer,der").split(",") if m.strip()]
+    if not 1 <= len(metrics) <= 3 or len(set(metrics)) != len(metrics):
+        return jsonify({"error": "Elegí entre una y tres métricas distintas.", "code": "parametro_invalido"}), 400
+    for m in metrics:
+        d = metrics_catalog.METRICS.get(m)
+        if d is None or entity not in d.entities:
+            return jsonify({"error": f"La métrica {m} no existe o no aplica.", "code": "parametro_invalido"}), 400
+    try:
+        ma = int(request.args["ma"]) if (request.args.get("ma") or "").strip() else None
+        last_n = int(request.args["last_n"]) if (request.args.get("last_n") or "").strip() else None
+    except ValueError:
+        return jsonify({"error": "ma y last_n deben ser enteros.", "code": "parametro_invalido"}), 400
+    if ma is not None and ma not in trends.MA_CHOICES:
+        return jsonify({"error": "La media móvil debe ser de 3, 5 o 10 partidos.", "code": "parametro_invalido"}), 400
+    if last_n is not None and last_n < 1:
+        return jsonify({"error": "last_n debe ser mayor a 0.", "code": "parametro_invalido"}), 400
+    base = (request.args.get("base") or "partido").strip()
+    if base not in ("partido", "total", "por40", "por100"):
+        return jsonify({"error": "Base inválida.", "code": "parametro_invalido"}), 400
+    try:
+        if entity == "team":
+            code = ident.upper()
+            if not any(r["team_code"] == code for r in repository.team_game_rows(None).values()):
+                return jsonify({"error": "Equipo no encontrado", "code": "no_encontrado"}), 404
+            ctx = context.parse_context(request.args, team_code=code)
+            out = trends.trends("team", code, ctx.competition_id, ctx, metrics=metrics, ma=ma, last_n=last_n, base=base)
+        else:
+            if not ident.isdigit():
+                return jsonify({"error": "Indicá el id del jugador.", "code": "parametro_invalido"}), 400
+            pid = identity.canonical_id(int(ident))
+            if pid is None or identity.player_card(pid) is None:
+                return jsonify({"error": "Jugador no encontrado", "code": "no_encontrado"}), 404
+            ctx = context.parse_context(request.args, player_id=pid)
+            out = trends.trends("player", pid, ctx.competition_id, ctx, metrics=metrics, ma=ma, last_n=last_n, base=base)
+    except ContextError as e:
+        return jsonify(e.payload()), e.status
+    return jsonify(out)
+
+
+@app.route("/api/similar/<int:player_id>")
+@login_required
+def similar_route(player_id: int):
+    """Jugadores de perfil parecido (A-09). `?competition=` (obligatoria: una concreta), `top_n` (3 a 50), `position=G|F|C|misma`,
+    `min_minutes` (se sube al mínimo de la población de T-01) y el contexto de T-03."""
+    import similar
+    pid = identity.canonical_id(player_id)
+    if pid is None or identity.player_card(pid) is None:
+        return jsonify({"error": "Jugador no encontrado", "code": "no_encontrado"}), 404
+    try:
+        ctx = context.parse_context(request.args, player_id=pid)
+        if ctx.competition_all or ctx.competition_id is None:
+            return jsonify({"error": "Elegí una competencia para buscar jugadores parecidos.", "code": "parametro_invalido"}), 400
+        position = (request.args.get("position") or "").strip()
+        if position and position not in ("G", "F", "C", "misma"):
+            return jsonify({"error": "La posición debe ser G, F, C o misma.", "code": "parametro_invalido"}), 400
+        top_n = None
+        if (request.args.get("top_n") or "").strip():
+            top_n = int(request.args["top_n"])
+            if not 3 <= top_n <= 50:
+                return jsonify({"error": "top_n debe estar entre 3 y 50.", "code": "parametro_invalido"}), 400
+        min_minutes = float(request.args["min_minutes"]) if (request.args.get("min_minutes") or "").strip() else None
+        out = similar.similar_players(pid, ctx.competition_id, ctx, top_n=top_n, position=position, min_minutes=min_minutes)
+    except ValueError:
+        return jsonify({"error": "top_n y min_minutes deben ser números.", "code": "parametro_invalido"}), 400
+    except ContextError as e:
+        return jsonify(e.payload()), e.status
+    except similar.SimilarError as e:
+        return jsonify(e.payload()), e.status
+    return jsonify(out)
+
+
 @app.route("/api/insights")
 @login_required
 def insights_route():

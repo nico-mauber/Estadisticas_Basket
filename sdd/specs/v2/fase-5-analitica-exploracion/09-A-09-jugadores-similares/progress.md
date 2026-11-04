@@ -1,60 +1,34 @@
 # Progress — A-09: Jugadores similares
 
-> **Estado:** ⬜ No iniciado
+> **Estado:** 🔶 Implementado en Jugador (pestaña Similares, `GET /api/similar/<id>`). Faltan la pestaña y la acción en Explorar, la exportación (T-06), el bloque "emparejamiento propuesto por perfil" de F-03 y el protocolo de validación con alguien del ambiente.
+> **Fecha:** 2026-11-04
 
-## Estado de tareas
-- [ ] T-A1 · activar `similar.top_n`
-- [ ] T-B1 · `similarity.py` base (dimensiones, errores, posiciones)
-- [ ] T-B2 · `_zone_vectors`
-- [ ] T-B3 · perfil crudo, media/desvío y z-score
-- [ ] T-B4 · distancia y similitud
-- [ ] T-B5 · `similar_payload` (filtros, orden, explicación)
-- [ ] T-B6 · `similar_players` y caché
-- [ ] T-B7 · ruta `GET /api/similar/<player_id>`
-- [ ] T-B8 · `profile_suggestions` (incremento de F-03)
-- [ ] T-B9 · `suggestions_profile` en `prepare.py`
-- [ ] T-C1 · `api.similar`
-- [ ] T-D1 · `renderSimilarPlayers`
-- [ ] T-D2 · fila expandible y exportación
-- [ ] T-D3 · pestaña Similares de Jugador (S4)
-- [ ] T-D4 · pestaña Similares de Explorar (S7) y acción del buscador
-- [ ] T-D5 · CSS
-- [ ] T-D6 · bloque en el informe de F-03
-- [ ] T-E1 · errores y offline
-- [ ] T-E2 · `sw.js`
-- [ ] T-F1 … T-F20 · verificación (T-F18 = protocolo de validación manual)
+## Qué se hizo
+- `backend/similar.py` (perfil de nueve dimensiones, z-score dentro de la competencia, distancia euclidiana, similitud `100·exp(−d)`) y `GET /api/similar/<player_id>`; `similar.top_n` activa en Configuración.
+- `components/similar-panel.js` y la pestaña **Similares** de Jugador (filtros de posición y minutos, método explicado, valores de las nueve dimensiones). `sw.js` v58.
 
-## Estado de CA (gate de aceptación)
+## Estado de CA
+`a09_sim.py` 21/21 y `a09_browser.py` 19/19 (1280 y 360 px).
+
 | CA | Estado | Evidencia |
 |---|---|---|
-| CA-1 (cliente) | ⬜ | |
-| CA-2 | ⬜ | |
-| CA-3 | ⬜ | |
-| CA-4 | ⬜ | |
-| CA-5 | ⬜ | |
-| CA-6 | ⬜ | |
-| CA-7 | ⬜ | |
-| CA-8 | ⬜ | |
-| CA-9 | ⬜ | |
-| CA-10 | ⬜ | |
-| CA-11 | ⬜ | |
-| CA-12 | ⬜ | |
-| CA-13 | ⬜ | |
-| CA-14 | ⬜ | |
-| CA-15 | ⬜ | |
+| CA-1 (cliente) | ⬜ | "reconocibles por alguien del ambiente": falta el protocolo de validación manual (RF-17) |
+| CA-2 | ✅ | exactamente `similar.top_n` resultados distintos y sin el de referencia |
+| CA-3 | ✅ | distancia del primero recalculada a mano con las funciones del módulo (0,74) |
+| CA-4 | ✅ | posición G → solo G; "misma" usa la de la referencia |
+| CA-5 | ✅ | cada resultado compara al menos 6 dimensiones (nunca 0 ni la media) |
+| CA-6 | ✅ | un mínimo menor al de la población se sube; nadie bajo el mínimo |
+| CA-7 | ✅ | la distancia A→B es la de B→A |
+| CA-8 | 🔶 | el reparto de tiro usa pintura, media y triples del conjunto estándar, no las 11 zonas de C-03 |
+| CA-9 | ✅ | pestaña Similares de Jugador |
+| CA-10 | ⬜ | exportación |
+| CA-11 | ✅ | jugador inexistente 404; competencia inexistente, posición inválida, `top_n` fuera de rango y `all` → 400 |
+| CA-12 | ⬜ | incremento de F-03 |
+| CA-13 | ✅ | `similar.top_n` cambia sin reiniciar |
+| CA-14 | ✅ | 360 px sin scroll horizontal de página (la tabla se desplaza dentro de su caja) |
+| CA-15 | ⬜ | no se midió en frío con 74 jugadores |
 
-## Gates técnicos
-- Backend arranca sin traceback: ⬜
-- `upgrade_db()` idempotente (si aplica): ⬜ (no aplica: sin esquema)
-- Endpoints probados manualmente: ⬜
-- Consola del navegador sin errores JS: ⬜
-
-## Desviaciones respecto a docs/ o plan
-
-## Docs a actualizar
-- `docs/api.md` — `GET /api/similar/<player_id>`; `suggestions_profile` de `GET /api/prepare`.
-- `docs/frontend.md` — componente `similar-players.js`, pestañas Similares de Jugador (S4) y Explorar (S7), acción "Similares" del buscador, bloque "Perfil parecido en tu plantel" del informe de F-03, copy nuevo.
-- `docs/architecture.md` — módulo `backend/similarity.py`.
-- `docs/metrics.md` — "Jugadores similares": dimensiones, z-score dentro de la competencia, distancia euclidiana normalizada, similitud, nulos, modo de zonas y protocolo de validación.
-
-## Deuda / TODO
+## Desviaciones
+- Reparto por zona con tres componentes (pintura, media distancia, triples) en vez de 11 zonas.
+- Sin Explorar, exportación ni el bloque de F-03.
+- Copy sin `t()` (F-21).

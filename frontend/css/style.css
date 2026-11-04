@@ -1762,3 +1762,20 @@ nav .nav-more { display: none; }
 .cl-sides { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 .cl-side { min-width: 0; }
 @media (max-width: 767px) { .cl-sides { grid-template-columns: 1fr; } }
+
+/* ── Jugadores similares (A-09) ── */
+.sm-table th, .sm-table td { white-space: nowrap; }
+.sm-ref td { background: rgba(255,106,0,.08); }
+.sm-method { margin-top: 10px; font-size: 12px; }
+
+/* ── Evolución y tendencias (F-18) ── */
+.tr-controls { align-items: flex-end; }
+.tr-presets { display: flex; flex-wrap: wrap; gap: 6px; }
+.tr-chart { position: relative; width: 100%; }
+.tr-trends { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+.tr-trend { min-width: 0; padding: 8px 10px; border-radius: 8px; background: var(--bg-card-2, rgba(127,127,127,.06)); }
+.tr-delta { font-weight: 700; font-size: 16px; }
+.tr-warn { font-size: 13px; margin: 6px 0; }
+.tr-warn[hidden] { display: none; }
+
+input.ld-min, .tr-controls input { background: var(--surface2); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius, 8px); padding: 8px 10px; font-size: 14px; }
