@@ -29,7 +29,8 @@ function _resetMu() {
   _mu = { level: "quinteto", jqSide: "team", own: "", opp: "", allRows: false, allLineups: false, open: null };
 }
 
-export async function renderPrepare(el, { onOpenGame } = {}) {
+// `team` y `rival` abren el informe de ese cruce sin elegir nada (F-20); `focus: "matchups"` baja a la coincidencia en cancha.
+export async function renderPrepare(el, { onOpenGame, team = null, rival = null, focus = null } = {}) {
   _el = el;
   _onOpenGame = onOpenGame;
   loadCsvSeparator();
@@ -43,6 +44,12 @@ export async function renderPrepare(el, { onOpenGame } = {}) {
     }
   }
   _renderShell();
+  if (team && rival && team !== rival) {
+    _el.querySelector("#pr-team").value = team;
+    _el.querySelector("#pr-rival").value = rival;
+    await _generate();
+    if (focus === "matchups") _el.querySelector("#pr-mu-card")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
 }
 
 function _renderShell() {

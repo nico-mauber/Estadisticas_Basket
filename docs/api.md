@@ -761,6 +761,36 @@ Cabecera de contexto: cómo quedó la selección activa de una entidad. Auth: `l
 
 Response 200: `entity {type, id, name}`, `label` (etiqueta legible de los filtros aplicados), `record` ("V-D"; `null` en competencia), `wins`, `losses`, `avg_margin` (diferencia media de puntos con 1 decimal; `null` sin partidos), `games` (N: partidos de la selección), `games_total` (M: partidos de la entidad en la competencia **sin ningún otro filtro**), `sample` (badge de T-02: partidos para equipo, minutos para jugador) y `context` (eco de T-03 con `games_excluded` e `ignored`). Récord y diferencia salen del resultado final: victoria = puntos propios > puntos del rival; en un jugador cuentan solo los partidos que jugó. Errores: 400 `parametro_invalido` (tipo o id inválidos), 400 `contexto_invalido`, 400 `competencia_inexistente`, 404 `no_encontrado`.
 
+## GET `/api/insights` — NUEVO (A-10)
+
+Insights automáticos de un equipo o un jugador. Auth: `login_required`. Query: `entity=team|player`, `id` (código de equipo o `player_id`) y el contexto de T-03.
+
+Response 200: `entity {type, id, name}`, `items[]`, `reason`, `rule {low_pct, high_pct, min_items, max_items}`, `sample` (badge de T-02), `population {size, competition_id}` y `context` (eco de T-03). Cada ítem: `metric`, `label`, `fmt`, `direction`, `when` (`extremo_alto` | `extremo_bajo`), `tone` (`alto` | `bajo`), `good` (`true` si es bueno, `false` si es malo, `null` en las neutrales), `percentile`, `value`, `avg`, `rank`, `rank_total`, `family`, `template_id` y `text` (plantilla fija con valor, promedio y percentil: los de la ficha de la misma métrica).
+
+Una métrica dispara una frase solo si su percentil es ≤ `insights.low_pct` (10) o ≥ `insights.high_pct` (90); se emite como máximo una frase por familia (`insight_families` de `rules.json`) y hasta `insights.max_items`. Si hay menos extremos que `insights.min_items` se devuelven solo los que hay (`reason: "sin_extremos"` si ninguno). Sin ítems: `muestra_baja`, `contexto_no_comparable`, `sin_universo`, `poblacion_insuficiente` o `sin_datos`. Errores: 400 `parametro_invalido`, 404 `no_encontrado`, 400 `contexto_invalido`.
+
+## GET `/api/rival-comparison` — NUEVO (F-20)
+
+Enfrentamiento directo de un equipo. Auth: `login_required`. Query: `team` (obligatorio), `rival` (opcional) y el contexto de T-03 (el filtro `opponent` se ignora: el rival se elige con `rival`).
+- Sin `rival`: `{team, rivals: [{code, name, games}], context}` con los rivales del equipo en la competencia, los más jugados primero.
+- Con `rival`: `{team, rival, vs {games, sample}, general {games}, rows[], items[], reason, rule, context}`. `rows` trae las 15 métricas del plan de juego con `vs` (valor agregado del equipo en los partidos contra el rival), `general` (valor agregado en toda la selección, incluidos esos partidos; igual a la ficha de `/api/metrics/team`), `delta` (orientado: positivo = mejor que su promedio general) y `delta_raw`. `items` son las 3 a 5 diferencias más marcadas con el mismo formato que el plan de juego (puntaje `z` con el desvío de la competencia sin mínimos de muestra, frase de plantilla). `reason`: `sin_historial`, `sin_datos` o `sin_diferencias`. El historial de partidos sale de `GET /api/h2h`.
+- Errores: 400 `parametro_invalido` (falta `team`; `rival` igual a `team`: "El rival no puede ser el mismo equipo"), 404 `no_encontrado` ("Equipo no encontrado" / "Rival no encontrado"), 400 `contexto_invalido`.
+
+## GET `/api/leaders` — NUEVO (F-14)
+
+Líderes de jugadores de una competencia concreta (con `competition=all` responde 400 "Elegí una competencia para ver líderes y perfil."). Query: `competition`, contexto de T-03, `min_minutes` (se sube al mínimo de la población de T-01, `sample.player.min`, si es menor), `top`, `metric` y `all=1`.
+- Sin `metric`: `{cards[], top_n, min_minutes, metrics[]}` con una tarjeta por métrica clave (PTS, REB, AS, ROB, TAP, eFG%, TS%, FG3%, FT%, OER, USO%, AS/PER, TO%, +/-) y el top de `leaders.top_n` jugadores.
+- Con `metric`: esa métrica con `rows[]` (`rank` en competición estándar y `tied`, `id`, `name`, `team_code`, `value`, `minutes`, `games`, `sample`), `qualified`, `excluded_null` (jugadores sin dato, nunca tratados como 0), `avg` y `population`. En las métricas de "menos es mejor" el líder es el valor más bajo; en las neutrales se ordena de mayor a menor (`direction_label`: "Mayor valor").
+- `min_minutes`: `{requested, effective, raised, default, floor}`. La población y los valores son los de T-01 (el primer puesto coincide con el `leader` de la ficha y `avg` con el de la ficha). Los conteos están en base por partido.
+
+## GET `/api/competition-profile` — NUEVO (F-14)
+
+Perfil de una competencia concreta: `reference {teams[], players[]}` (promedio de referencia, entidades en la población y mejor valor por métrica; el promedio es el `avg` de la ficha de T-01), `pace[]`, `shot[]`, `origins[]` (PPP medio por equipo y posesiones y peso de cada uno de los siete orígenes de A-02, en ataque), `population`, `insufficient` (menos de `population.min_size` equipos) y `context`.
+
+## GET `/api/league` — contexto (T-03)
+
+Ahora acepta `venue`, `opponent`, `rest` y `last`: la población del mapa de liga se recalcula con el mismo contexto que las tablas (`/api/table/league_standings` y `/api/table/league_teams`).
+
 ## GET `/api/game-plan` — NUEVO (F-17)
 
 Plan de juego de un equipo: las métricas donde está mejor y peor que una referencia, con la frase de plantilla de cada una. Auth: `login_required`. Query:

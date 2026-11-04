@@ -1,11 +1,95 @@
 {
   "version": 1,
   "families": {
-    "tiro": ["efg_pct", "ts_pct", "ppt"],
-    "circulacion": ["ast_to", "as_pct"]
+    "tiro": [
+      "efg_pct",
+      "ts_pct",
+      "ppt"
+    ],
+    "circulacion": [
+      "ast_to",
+      "as_pct"
+    ]
   },
   "game_plan": {
-    "team": ["oer", "der", "net_rating", "efg_pct", "ts_pct", "ppt", "fg2_pct", "fg3_pct", "ft_pct",
-             "ft_rate", "to_pct", "or_pct", "dr_pct", "ast_to", "as_pct"]
+    "team": [
+      "oer",
+      "der",
+      "net_rating",
+      "efg_pct",
+      "ts_pct",
+      "ppt",
+      "fg2_pct",
+      "fg3_pct",
+      "ft_pct",
+      "ft_rate",
+      "to_pct",
+      "or_pct",
+      "dr_pct",
+      "ast_to",
+      "as_pct"
+    ]
+  },
+  "insights": {
+    "team": [
+      "oer",
+      "der",
+      "net_rating",
+      "efg_pct",
+      "ts_pct",
+      "ppt",
+      "fg2_pct",
+      "fg3_pct",
+      "ft_pct",
+      "ft_rate",
+      "to_pct",
+      "or_pct",
+      "dr_pct",
+      "ast_to",
+      "as_pct",
+      "pace"
+    ],
+    "player": [
+      "pts",
+      "trb",
+      "ast",
+      "stl",
+      "blk",
+      "oer",
+      "efg_pct",
+      "ts_pct",
+      "fg2_pct",
+      "fg3_pct",
+      "ft_pct",
+      "ft_rate",
+      "to_pct",
+      "or_pct",
+      "dr_pct",
+      "uso_pct",
+      "ast_to",
+      "as_pct"
+    ]
+  },
+  "insight_families": {
+    "tiro": [
+      "efg_pct",
+      "ts_pct",
+      "ppt",
+      "fg2_pct"
+    ],
+    "circulacion": [
+      "ast_to",
+      "as_pct",
+      "ast"
+    ],
+    "rebote": [
+      "or_pct",
+      "dr_pct",
+      "trb"
+    ],
+    "anotacion": [
+      "pts",
+      "oer"
+    ]
   }
 }
