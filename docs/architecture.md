@@ -167,6 +167,9 @@ o configuración (F-13). Tolerante a correr fuera de `app_context`.
 ### `breakdown.py`, `team_insights.py`, `warmup.py` (correcciones de Equipo, 2026-10)
 `breakdown.py` calcula el desglose ofensivo (`paint_pts`, `second_chance_pts`, `pts_from_tov`, `bench_pts`, `fast_break_pts`) cuando FIBA lo deja `NULL`: `repository` lo llama como *row filler* al armar las filas de equipo y marca `_derived`; el perfil informa `extras_source` (`oficial` / `calculado`). `team_insights.py` arma fortalezas y debilidades del equipo con el percentil de cada métrica en su competencia (reglas fijas, como "Ventajas y amenazas" de Preparar); alimenta `GET /api/team-insights/<code>`. `warmup.py` calcula las posesiones de todos los partidos en un hilo (solo con `SB_WARMUP=1`) al arrancar y cuando sube `data_version` (`cache.on_data_bump`).
 
+### `similar.py` y `trends.py` (A-09, F-18)
+`similar.py` arma el perfil de nueve dimensiones de los jugadores de la población de T-01 (`population.population("player")`), lo normaliza con z-score dentro de la competencia y calcula la distancia euclidiana; memoizado en `cache` (`similar`). `trends.py` calcula por partido los valores del conjunto estándar con `compute_standard` sobre los bundles por partido (`bundles.team_game_bundles` / `player_game_bundles`), la media móvil, la prueba de Welch (p-valor con la beta incompleta, sin dependencias) y los hitos; memoizado (`trends`).
+
 ### Insights (A-10)
 `phrases.insights(entity_type, id, comp_id=, ctx=)` reutiliza el motor de F-17: una plantilla genérica por dirección de la métrica (`higher`, `lower`, `neutral`) y por disparo (`extremo_alto`, `extremo_bajo`) en `phrases/es.json`, el conjunto de métricas y las familias en `phrases/rules.json` (`insights`, `insight_families`) y los percentiles de la ficha de T-01. Los textos de insight admiten hasta 160 caracteres. Alimenta `GET /api/insights` (memoizado en `cache`, namespace `insights`).
 
