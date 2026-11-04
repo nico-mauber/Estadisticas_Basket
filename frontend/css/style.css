@@ -1724,3 +1724,26 @@ nav .nav-more { display: none; }
   .nav-sheet button { display: flex; align-items: center; gap: 10px; background: none; border: none; color: var(--text); padding: 12px; font-size: 15px; border-radius: 8px; cursor: pointer; text-align: left; }
   .nav-sheet button.active { color: var(--accent); }
 }
+
+/* ── Enfrentamiento directo (F-20) ── */
+.vs-table-wrap { overflow-x: auto; margin: 6px 0 10px; }
+.vs-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.vs-table th, .vs-table td { padding: 6px 10px; text-align: left; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.vs-table th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; }
+.vs-table td:nth-child(n+2) { font-variant-numeric: tabular-nums; }
+.vs-score { font-weight: 700; }
+.vs-links { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+
+/* ── Líderes y perfil de la competencia (F-14) ── */
+.ld-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; align-items: start; }
+.ld-grid > .card { margin: 0; min-width: 0; }
+.ld-grid { min-width: 0; }
+.ld-controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; margin-bottom: 8px; }
+.ld-min { width: 110px; }
+.ld-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.ld-table th, .ld-table td { padding: 5px 8px; text-align: left; border-bottom: 1px solid var(--border); }
+.ld-rank { color: var(--muted); white-space: nowrap; width: 48px; }
+.ld-val { font-weight: 700; font-variant-numeric: tabular-nums; text-align: right; }
+.ld-dir { font-size: 11px; font-weight: 400; text-transform: none; letter-spacing: 0; }
+.ld-foot { margin-top: 8px; font-size: 12px; display: flex; flex-wrap: wrap; gap: 6px 12px; justify-content: space-between; }
+@media (max-width: 767px) { .ld-grid { grid-template-columns: 1fr; } }

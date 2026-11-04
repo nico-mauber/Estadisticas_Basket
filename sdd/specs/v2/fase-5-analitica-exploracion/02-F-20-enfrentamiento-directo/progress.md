@@ -1,70 +1,31 @@
 # Progress — F-20: Enfrentamiento directo dentro de Equipo
 
-> Estado: ⬜ No iniciado
+> **Estado:** ✅ Implementado (pestaña Enfrentamiento de Equipo con historial, promedios contra el rival frente a los generales, diferencias más marcadas y enlaces a Preparar)
+> **Fecha:** 2026-11-04
 
-## Estado de tareas
-(copiar checklist de tasks.md con [x] al implementar)
+## Qué se hizo
+- `backend/rival_comparison.py` y `GET /api/rival-comparison` (lista de rivales y comparación).
+- `components/versus-panel.js` y la pestaña **Enfrentamiento** de Equipo; el rival viaja en la dirección (`?rival=`).
+- `renderPrepare` acepta `team`, `rival` y `focus` para abrir el informe del cruce.
+- `sw.js` v54.
 
-### Grupo A — Backend: `rival_comparison.py`
-- [ ] T-A1 · `compare` (agregación y `compute_standard`)
-- [ ] T-A2 · `deltas` y `top_deltas`
-- [ ] T-A3 · Bloque `sample`
-
-### Grupo B — Backend: ruta
-- [ ] T-B1 · `GET /api/rival-comparison`
-- [ ] T-B2 · Validaciones 400/404
-
-### Grupo C — Frontend: api.js
-- [ ] T-C1 · `api.rivalComparison(params)`
-
-### Grupo D — Frontend: UI
-- [ ] T-D1 · Habilitar pestaña `enfrentamiento`
-- [ ] T-D2 · Selector de rival
-- [ ] T-D3 · Lectura de `?rival=` preseleccionado
-- [ ] T-D4 · Bloque Historial
-- [ ] T-D5 · Bloque Comparación de promedios
-- [ ] T-D6 · Bloque Diferencias más marcadas
-- [ ] T-D7 · Enlaces a F-03 y emparejamientos
-
-### Grupo E — Errores, estados vacíos, offline/SW
-- [ ] T-E1 · Estados vacíos por bloque
-- [ ] T-E2 · `sw.js` STATIC (si aplica)
-
-### Grupo F — Verificación de feature
-- [ ] T-F1 · Backend arranca sin traceback
-- [ ] T-F2 · `upgrade_db()` (N/A)
-- [ ] T-F3 · Endpoint probado con curl
-- [ ] T-F4 · Consola sin errores JS
-- [ ] T-F5 · CA recorridos manualmente
-
-## Estado de CA (gate de aceptación)
+## Estado de CA
+`f20_sim.py` 17/17 y `f20_browser.py` 23/23 (1280 y 360 px).
 
 | CA | Estado | Evidencia |
 |---|---|---|
-| CA-1 (cliente) | ⬜ | |
-| CA-2 | ⬜ | |
-| CA-3 | ⬜ | |
-| CA-4 | ⬜ | |
-| CA-5 | ⬜ | |
-| CA-6 | ⬜ | |
-| CA-7 | ⬜ | |
-| CA-8 | ⬜ | |
+| CA-1 | ✅ | pestaña Enfrentamiento + elegir rival = dos clics |
+| CA-2 | ✅ | el historial es el de `/api/h2h` (mismos partidos) |
+| CA-3 | ✅ | el general es igual a la ficha de `/api/metrics/team`; el valor contra el rival, igual a `opponent=<rival>` |
+| CA-4 | ✅ | 3 a 5 ítems ordenados por `|z|` |
+| CA-5 | ✅ | "Ver informe completo" abre Preparar con ambos equipos elegidos |
+| CA-6 | 🔶 | "Ver emparejamientos" abre Preparar y baja a la coincidencia en cancha |
+| CA-7 | ✅ | rival sin enfrentamientos: `sin_historial`, sin romper |
+| CA-8 | ✅ | `rival == team` → 400 "El rival no puede ser el mismo equipo" |
 
-## Gates técnicos
-- Backend arranca sin traceback: ⬜
-- `upgrade_db()` idempotente (si aplica): ⬜ (N/A, sin cambios de esquema)
-- Endpoints probados manualmente: ⬜
-- Consola del navegador sin errores JS: ⬜
-
-## Desviaciones respecto a docs/ o plan
-
-(completar al implementar)
-
-## Docs a actualizar
-- [ ] `docs/api.md` — endpoint `GET /api/rival-comparison`
-- [ ] `docs/architecture.md` — módulo `backend/rival_comparison.py`
-- [ ] `docs/frontend.md` — pestaña Enfrentamiento en Equipo, `api.rivalComparison()`
-
-## Deuda / TODO
-- [NEEDS CLARIFICATION] (spec §9): si "promedios generales" debe excluir los partidos contra el propio rival del cálculo.
-- [NEEDS CLARIFICATION] (spec §9): umbral mínimo de partidos contra un rival para la comparación de promedios (se usó `sample.team.min` = 3 por defecto).
+## Desviaciones
+- **Sin X-01 completo:** el enlace a Preparar abre `#/preparar` y el rival se pasa por código, no por la dirección `#/partido/preparar?team=&rival=`.
+- **Muestra baja:** en vez de ocultar la comparación con menos de `sample.team.min` partidos contra el rival, la muestra con un aviso y el badge.
+- **Competencia:** usa la de la vista (no "todas" por defecto): el historial y la comparación comparten el mismo universo.
+- **Desvío para `z`:** sale de toda la competencia sin mínimos de muestra, como Preparar.
+- **Copy sin `t()`** (F-21).

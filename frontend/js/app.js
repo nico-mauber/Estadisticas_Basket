@@ -24,6 +24,8 @@ import { renderSecondChancePanel } from "./components/second-chance-panel.js";
 import { renderClockPanel } from "./components/clock-panel.js";
 import { renderTeamInsights } from "./components/team-insights.js";
 import { renderGamePlan } from "./components/game-plan.js";
+import { renderVersus } from "./components/versus-panel.js";
+import { renderLeaders, renderCompetitionProfile } from "./components/leaders-panel.js";
 import { renderTabs, applyTabs, watchTabs } from "./components/tabs.js";
 import { parseRoute, buildHash, routeKey, writeRoute, routeQuery, onRouteChange, markRouteKey } from "./core/router.js";
 import { mountContextHeader } from "./components/context-header.js";
@@ -325,6 +327,8 @@ let _lastSection = "import";
 let _routing = false;      // true mientras se aplica una dirección: la vista no la vuelve a escribir (X-01)
 let _routeQuery = null;    // competencia y últimos N de la dirección abierta; los consume la carga de equipo o jugador
 let _gameId = null;        // partido abierto en Partido (para la dirección)
+let _leaders = { metric: "", min: "" };   // métrica y mínimo de minutos de Liga › Líderes (F-14)
+let _versusRival = "";     // rival elegido en Equipo › Enfrentamiento (F-20)
 let _navCount = 0;         // cuántas veces se cambió de sección: la sección inicial no pisa una elección del usuario
 
 // `sync: false` en los flujos que abren una entidad (equipo, jugador, partido): la dirección se escribe cuando llegan los datos.
@@ -337,6 +341,42 @@ function setSection(id, { sync = true } = {}) {
   document.querySelectorAll(".section").forEach(s => s.style.display = s.id === `sec-${id}` ? "" : "none");
   _closeNavSheet();
   if (sync) syncRoute();
+}
+
+// Enfrentamiento directo del equipo abierto (F-20): se vuelve a pedir al cambiar equipo, competencia, período o filtros.
+function _renderVersus() {
+  const code = _teamData?.team_code;
+  if (!code) return;
+  renderVersus(document.getElementById("team-versus"), code, {
+    params: _teamParams(), rival: _versusRival, teamName: _teamData.team_name,
+    onRival: r => { _versusRival = r; syncRoute(); },
+    onOpenPrepare: (team, rival, focus) => showPrepare(team, rival, focus),
+  });
+}
+
+// Líderes y perfil de la competencia (F-14): se piden al abrir la pestaña y al cambiar la competencia o los filtros.
+function _leagueParams() { return { competition: _leagueComp, ...contextParams() }; }
+function _openPlayerById(id) {
+  _tab.player = "resumen";
+  setSection("player", { sync: false });
+  renderPlayer(null, null, Number(id));
+}
+function _renderLeagueExtras() {
+  if (_tab.league === "lideres") {
+    renderLeaders(document.getElementById("league-leaders"), {
+      params: _leagueParams(), metric: _leaders.metric, minMinutes: _leaders.min,
+      onChange: ({ metric, minMinutes }) => { _leaders = { metric, min: minMinutes }; syncRoute(); _renderLeagueExtras(); },
+      onOpenPlayer: _openPlayerById,
+    });
+  } else if (_tab.league === "perfil") {
+    renderCompetitionProfile(document.getElementById("league-profile"), { params: _leagueParams() });
+  }
+}
+
+// Abre Preparar con el cruce ya elegido (F-20).
+function showPrepare(team, rival, focus = null) {
+  setSection("preparar");
+  renderPrepare(document.getElementById("preparar-main"), { onOpenGame: showGame, team, rival, focus });
 }
 
 // Abre una sección desde la barra de navegación.
@@ -357,9 +397,9 @@ function _closeNavSheet() { document.getElementById("nav-sheet")?.setAttribute("
 // ── Pestañas de sección y direcciones (X-01) ─────────────────────────────────
 const TAB_DEFS = {
   team: [["resumen", "Resumen"], ["plantel", "Plantel"], ["tiro", "Tiro"], ["posesion", "Posesión"], ["quintetos", "Quintetos"],
-         ["momentos", "Momentos"], ["gamelog", "Game log"]],
+         ["momentos", "Momentos"], ["enfrentamiento", "Enfrentamiento"], ["gamelog", "Game log"]],
   player: [["resumen", "Resumen"], ["tiro", "Tiro"], ["posesion", "Posesión"], ["gamelog", "Game log"]],
-  league: [["tabla", "Tabla"], ["ranking", "Ranking"], ["mapa", "Mapa"]],
+  league: [["tabla", "Tabla"], ["ranking", "Ranking"], ["lideres", "Líderes"], ["perfil", "Perfil"], ["mapa", "Mapa"]],
 };
 const TAB_DEFAULT = { team: "resumen", player: "resumen", league: "tabla" };
 const _tab = { ...TAB_DEFAULT };
@@ -374,6 +414,8 @@ function setTab(section, tab, { sync = true } = {}) {
   _tab[section] = tab;
   _drawTabs(section);
   applyTabs(document.getElementById(`sec-${section}`), tab);
+  if (section === "team" && tab === "enfrentamiento") _renderVersus();
+  if (section === "league") _renderLeagueExtras();
   window.dispatchEvent(new Event("resize"));   // los gráficos de la pestaña recalculan su ancho
   if (sync) syncRoute();
 }
@@ -398,9 +440,10 @@ function currentRoute() {
 function syncRoute() {
   if (_routing) return;
   const r = currentRoute();
-  const query = r.section === "team" ? { competition: _teamComp, last: _teamLastN }
+  const query = r.section === "team" ? { competition: _teamComp, last: _teamLastN, rival: _tab.team === "enfrentamiento" ? _versusRival : null }
     : r.section === "player" ? { competition: _playerComp, last: _playerLastN }
-    : r.section === "league" ? { competition: _leagueComp, last: null }
+    : r.section === "league" ? { competition: _leagueComp, last: null, metric: _tab.league === "lideres" ? _leaders.metric : null,
+        min_minutes: _tab.league === "lideres" ? _leaders.min : null }
     : { competition: null, last: null };
   writeRoute(r, query);
 }
@@ -435,10 +478,12 @@ async function applyRoute({ initial = false } = {}) {
         let t = _validTab("league", p.tab) ? p.tab : "tabla";
         if (p.tab && t !== p.tab) _notice("Esa pestaña todavía no está disponible.");
         if (activeSection === "league" && document.getElementById("league-tabs") && (!q.competition || q.competition === _leagueComp)) {
+          _leaders = { metric: q.metric || "", min: q.min_minutes ?? "" };
           setTab("league", t, { sync: false });
         } else {
           if (q.competition) _leagueComp = q.competition;
           _tab.league = t;
+          _leaders = { metric: q.metric || "", min: q.min_minutes ?? "" };
           setSection("league", { sync: false });
           await renderLeague();
         }
@@ -455,7 +500,7 @@ async function applyRoute({ initial = false } = {}) {
         if (t && !_validTab("team", t)) { _notice("Esa pestaña todavía no está disponible."); t = null; }
         _tab.team = t || "resumen";
         const same = _teamData?.team_code === code && (!q.competition || q.competition === _teamComp) && Number(q.last || 0) === _teamLastN;
-        if (same) { setTab("team", _tab.team, { sync: false }); break; }
+        if (same) { if (q.rival) _versusRival = q.rival.toUpperCase(); setTab("team", _tab.team, { sync: false }); break; }
         sel.value = code;
         _routeQuery = q;
         await renderTeam(code);
@@ -1384,10 +1429,19 @@ async function renderLeague() {
       _leagueComp = def ? String(def.id) : null;
     }
     // El mapa de liga sigue con /api/league (no migra, T-D7).
-    const res = await api.league(_leagueComp, { summary: true });
+    const res = await api.league(_leagueComp, { summary: true, ...contextParams() });
     _leagueTeams = res.teams || [];
     _leagueSummary = { avg: res.avg || {}, leaders: res.leaders || {}, population: res.population || null };
-    if (!_leagueTeams.length) { sec.innerHTML = '<p class="empty">Sin datos. Importa partidos primero.</p>'; return; }
+    if (!_leagueTeams.length) {
+      sec.innerHTML = activeCount() > 0
+        ? '<div id="league-ctx-bar" class="ctx-bar-host"></div><p class="empty">No hay partidos que cumplan estos filtros. <button type="button" class="btn btn-ghost btn-sm" id="league-clear">Limpiar filtros</button></p>'
+        : '<p class="empty">Sin datos. Importa partidos primero.</p>';
+      if (activeCount() > 0) {
+        mountContextBar(document.getElementById("league-ctx-bar"), { competition: _leagueComp, onChange: () => renderLeague() });
+        document.getElementById("league-clear").addEventListener("click", () => { clearContext(); renderLeague(); });
+      }
+      return;
+    }
 
     const compSelHTML = comps.length > 1
       ? `<select id="league-comp" class="map-select">${_compOptions(comps, _leagueComp, "Todas las competencias", "all")}</select>`
@@ -1414,14 +1468,14 @@ async function renderLeague() {
     // Tabla general (league_standings): el backend responde 400 con el mensaje de C-09
     // cuando hay varias competencias y no se eligió una.
     const standEl = document.getElementById("league-standings-dt");
-    mountTable(standEl, () => api.table("league_standings", { competition: compParam }), {
+    mountTable(standEl, () => api.table("league_standings", { competition: compParam, ...contextParams() }), {
       tableId: "league_standings",
       onRowClick: _openTeamFromRow,
     });
 
     // Ranking (league_teams): clic de fila → abre el equipo.
     const rankEl = document.getElementById("league-ranking-dt");
-    mountTable(rankEl, () => api.table("league_teams", { competition: compParam }), {
+    mountTable(rankEl, () => api.table("league_teams", { competition: compParam, ...contextParams() }), {
       tableId: "league_teams",
       onRowClick: _openTeamFromRow,
     });
@@ -1459,10 +1513,13 @@ async function renderLeague() {
     // Cierres se movieron a la vista Equipo (Feature 05 v2).
     sec.children[0].dataset.tabs = "tabla";
     sec.children[1].dataset.tabs = "ranking";
-    sec.insertAdjacentHTML("afterbegin", '<div id="league-tabs" class="tabs-host"></div>');
+    sec.insertAdjacentHTML("beforeend", '<div id="league-leaders" data-tabs="lideres"></div><div id="league-profile" data-tabs="perfil"></div>');
+    sec.insertAdjacentHTML("afterbegin", '<div id="league-ctx-bar" class="ctx-bar-host"></div><div id="league-tabs" class="tabs-host"></div>');
+    mountContextBar(document.getElementById("league-ctx-bar"), { competition: _leagueComp, onChange: () => renderLeague() });
     _drawTabs("league");
     applyTabs(sec, _tab.league);
     syncRoute();
+    _renderLeagueExtras();
   } catch (e) {
     sec.innerHTML = `<p class="empty below-avg">${e.message}</p>`;
   }
@@ -1879,6 +1936,7 @@ function _applyTeamData(main, data) {
   _drawTabs("team");
   applyTabs(document.getElementById("sec-team"), _tab.team);
   syncRoute();
+  if (_tab.team === "enfrentamiento") _renderVersus();
   _mountCtxBar(main, _teamComp, () => _reloadTeam(), data.team_code);
   mountContextHeader(document.getElementById("team-ctx-header"), {
     entity: "team", id: data.team_code, competition: _teamComp, last: _teamLastN, excludeTeam: data.team_code,
@@ -1959,6 +2017,7 @@ async function renderTeam(teamCode) {
   main.innerHTML = '<p class="empty"><span class="spinner"></span>Cargando...</p>';
   // Con una dirección abierta (X-01) la competencia y los últimos N vienen de ella; si no, la del partido más reciente (RF-6).
   const rq = _routeQuery; _routeQuery = null;
+  _versusRival = rq?.rival && rq.rival !== teamCode ? String(rq.rival).toUpperCase() : "";
   _teamLastN = Number(rq?.last) > 0 ? Number(rq.last) : 0;
   _teamComp  = rq?.competition || null;
   const req = ++_teamReq;
@@ -2883,6 +2942,7 @@ function renderApp() {
         <div id="team-second-chance" data-tabs="posesion"></div>
         <div id="team-clock" data-tabs="posesion"></div>
         <div id="team-clutch" data-tabs="momentos"></div>
+        <div id="team-versus" data-tabs="enfrentamiento"></div>
       </div>
 
       <!-- Compare -->

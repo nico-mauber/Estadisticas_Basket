@@ -69,8 +69,8 @@ export function writeRoute(route, query = {}) {
 export function routeQuery() {
   try {
     const q = new URL(location.href).searchParams;
-    return { competition: q.get("competition"), last: q.get("last") };
-  } catch { return { competition: null, last: null }; }
+    return { competition: q.get("competition"), last: q.get("last"), rival: q.get("rival"), metric: q.get("metric"), min_minutes: q.get("min_minutes") };
+  } catch { return { competition: null, last: null, rival: null, metric: null, min_minutes: null }; }
 }
 
 /** Llama a `fn` cuando el usuario cambia la dirección (Atrás, Adelante o edición manual). */
