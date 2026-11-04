@@ -422,6 +422,42 @@ def second_chance_route():
     return jsonify(out)
 
 
+@app.route("/api/context/summary")
+@login_required
+def context_summary_route():
+    """Cabecera de contexto (F-19): récord, diferencia media, partidos incluidos y badge de muestra de la selección activa.
+    `?entity=team|player|competition&id=…` más el contexto de T-03 (`competition`, `last`, `venue`, `opponent`, …)."""
+    import context_summary
+    entity = (request.args.get("entity") or "").strip()
+    ident = (request.args.get("id") or "").strip()
+    if entity not in ("team", "player", "competition"):
+        return jsonify({"error": "El tipo de entidad debe ser team, player o competition.", "code": "parametro_invalido"}), 400
+    if entity == "player" and not ident.isdigit():
+        return jsonify({"error": "Indicá el id del jugador.", "code": "parametro_invalido"}), 400
+    if entity == "team" and not ident:
+        return jsonify({"error": "Indicá el equipo.", "code": "parametro_invalido"}), 400
+    try:
+        if entity == "team":
+            code = ident.upper()
+            ctx = context.parse_context(request.args, team_code=code)
+            out = context_summary.team_summary(code, ctx)
+        elif entity == "player":
+            pid = identity.canonical_id(int(ident))
+            ctx = context.parse_context(request.args, player_id=pid)
+            out = context_summary.player_summary(pid, ctx) if pid is not None else None
+        else:
+            ctx = context.parse_context(request.args)
+            out = context_summary.competition_summary(ctx.competition_id, ctx)
+    except ContextError as e:
+        return jsonify(e.payload()), e.status
+    except CompetitionError as e:
+        return jsonify({"error": str(e), "code": "competencia_inexistente"}), e.status
+    if out is None:
+        return jsonify({"error": "No encontramos esa entidad.", "code": "no_encontrado"}), 404
+    out["label"] = out["context"].get("label")
+    return jsonify(out)
+
+
 @app.route("/api/team-insights/<team_code>")
 @login_required
 def team_insights_route(team_code: str):
@@ -436,6 +472,144 @@ def team_insights_route(team_code: str):
     import team_insights
     out = team_insights.team_insights(team_code, ctx.competition_id, last=ctx.last)
     out["entity"] = {"type": "team", "id": team_code}
+    out["context"] = {"competition": {"id": ctx.competition_id}, "last": ctx.last}
+    return jsonify(out)
+
+
+@app.route("/api/game-plan")
+@login_required
+def game_plan_route():
+    """Plan de juego (F-17): ventajas y vulnerabilidades del equipo contra una referencia.
+    `?team=<code>`, `reference=competencia|rival|periodo_anterior` (+ `rival=<code>`) y contexto de T-03."""
+    import phrases
+    team = (request.args.get("team") or "").strip().upper()
+    if not team:
+        return jsonify({"error": "Falta el parámetro team", "code": "parametro_invalido"}), 400
+    reference = (request.args.get("reference") or "competencia").strip()
+    try:
+        if not any(r["team_code"] == team for r in repository.team_game_rows(None).values()):
+            return jsonify({"error": "Equipo no encontrado", "code": "no_encontrado"}), 404
+        ctx = context.parse_context(request.args, team_code=team, event_level=True)
+        out = phrases.game_plan("team", team, reference=reference, rival=request.args.get("rival"),
+                                comp_id=ctx.competition_id, ctx=ctx)
+    except ContextError as e:
+        return jsonify(e.payload()), e.status
+    except phrases.PhraseError as e:
+        return jsonify(e.payload()), e.status
+    return jsonify(out)
+
+
+def _comp_ctx_or_error():
+    """Contexto con una competencia concreta (líderes y perfil no tienen universo con "todas")."""
+    try:
+        ctx = context.parse_context(request.args)
+    except ContextError as e:
+        return None, (jsonify(e.payload()), e.status)
+    if ctx.competition_all or ctx.competition_id is None:
+        return None, (jsonify({"error": "Elegí una competencia para ver líderes y perfil.", "code": "parametro_invalido"}), 400)
+    return ctx, None
+
+
+@app.route("/api/leaders")
+@login_required
+def leaders_route():
+    """Líderes (F-14): sin `metric`, las tarjetas de las métricas clave; con `metric=<clave>`, esa métrica (`all=1` trae todos
+    los jugadores que califican). `min_minutes` se sube al mínimo de la población de T-01 si es menor."""
+    import competition_profile as cp
+    ctx, err = _comp_ctx_or_error()
+    if err:
+        return err
+    raw_min = (request.args.get("min_minutes") or "").strip()
+    try:
+        min_minutes = float(raw_min) if raw_min else None
+        top = int(request.args["top"]) if (request.args.get("top") or "").strip() else None
+    except ValueError:
+        return jsonify({"error": "min_minutes y top deben ser números.", "code": "parametro_invalido"}), 400
+    if (min_minutes is not None and min_minutes < 0) or (top is not None and top < 1):
+        return jsonify({"error": "min_minutes y top deben ser positivos.", "code": "parametro_invalido"}), 400
+    metric = (request.args.get("metric") or "").strip()
+    if not metric:
+        out = cp.leader_cards(ctx.competition_id, ctx, min_minutes=min_minutes, top_n=top)
+    else:
+        d = metrics_catalog.METRICS.get(metric)
+        if d is None or "player" not in d.entities:
+            return jsonify({"error": "Métrica desconocida o que no aplica a jugadores.", "code": "parametro_invalido"}), 400
+        every = request.args.get("all") in ("1", "true")
+        out = cp.leaders(metric, ctx.competition_id, ctx, min_minutes=min_minutes,
+                         top_n=None if every else (top or config.get("leaders.top_n")))
+    out["context"] = cp._echo(ctx)
+    return jsonify(out)
+
+
+@app.route("/api/competition-profile")
+@login_required
+def competition_profile_route():
+    """Perfil de la competencia (F-14): promedios de referencia, ritmo, reparto de tiro y PPP por origen de posesión."""
+    import competition_profile as cp
+    ctx, err = _comp_ctx_or_error()
+    if err:
+        return err
+    return jsonify(cp.profile(ctx.competition_id, ctx))
+
+
+@app.route("/api/insights")
+@login_required
+def insights_route():
+    """Insights automáticos (A-10): frases de plantilla fija sobre los percentiles extremos de un equipo o un jugador.
+    `?entity=team|player&id=<código o player_id>` más el contexto de T-03."""
+    import phrases
+    entity = (request.args.get("entity") or "").strip()
+    ident = (request.args.get("id") or "").strip()
+    if entity not in ("team", "player") or not ident:
+        return jsonify({"error": "Indicá entity (team o player) e id.", "code": "parametro_invalido"}), 400
+    try:
+        if entity == "team":
+            code = ident.upper()
+            if not any(r["team_code"] == code for r in repository.team_game_rows(None).values()):
+                return jsonify({"error": "Equipo no encontrado", "code": "no_encontrado"}), 404
+            ctx = context.parse_context(request.args, team_code=code, event_level=True)
+            out = phrases.insights("team", code, comp_id=ctx.competition_id, ctx=ctx)
+        else:
+            if not ident.isdigit():
+                return jsonify({"error": "Indicá el id del jugador.", "code": "parametro_invalido"}), 400
+            pid = identity.canonical_id(int(ident))
+            if pid is None or identity.player_card(pid) is None:
+                return jsonify({"error": "Jugador no encontrado", "code": "no_encontrado"}), 404
+            ctx = context.parse_context(request.args, player_id=pid)
+            out = phrases.insights("player", pid, comp_id=ctx.competition_id, ctx=ctx)
+    except ContextError as e:
+        return jsonify(e.payload()), e.status
+    except phrases.PhraseError as e:
+        return jsonify(e.payload()), e.status
+    return jsonify(out)
+
+
+@app.route("/api/rival-comparison")
+@login_required
+def rival_comparison_route():
+    """Enfrentamiento directo (F-20): `?team=<code>` sin `rival` lista los rivales con su cantidad de partidos; con
+    `rival=<code>` compara al equipo contra ese rival frente a su promedio general (más el contexto de T-03)."""
+    import rival_comparison
+    team = (request.args.get("team") or "").strip().upper()
+    rival = (request.args.get("rival") or "").strip().upper()
+    if not team:
+        return jsonify({"error": "Falta el parámetro team", "code": "parametro_invalido"}), 400
+    if rival and rival == team:
+        return jsonify({"error": "El rival no puede ser el mismo equipo", "code": "parametro_invalido"}), 400
+    try:
+        codes = {r["team_code"] for r in repository.team_game_rows(None).values()}
+        if team not in codes:
+            return jsonify({"error": "Equipo no encontrado", "code": "no_encontrado"}), 404
+        if rival and rival not in codes:
+            return jsonify({"error": "Rival no encontrado", "code": "no_encontrado"}), 404
+        args = {k: v for k, v in request.args.items() if k != "opponent"}   # el rival se elige con `rival`
+        ctx = context.parse_context(args, team_code=team)
+    except ContextError as e:
+        return jsonify(e.payload()), e.status
+    if rival:
+        out = rival_comparison.compare(team, rival, ctx.competition_id, ctx)
+    else:
+        out = {"team": team, "rivals": rival_comparison.opponents(team, ctx.competition_id)}
     out["context"] = {"competition": {"id": ctx.competition_id}, "last": ctx.last}
     return jsonify(out)
 
@@ -1696,7 +1870,10 @@ def league_overview():
         comp_gids = {g.game_id for g in Game.query.filter_by(competition_id=comp_id).all()}
         all_rows = [r for r in all_rows if r.game_id in comp_gids]
 
-    ctx = context.Context(comp_id, comp_id is None, None)
+    try:
+        ctx = context.parse_context(request.args)   # sede, rival, descanso y últimos N (T-03): el mapa y el ranking usan la misma población
+    except ContextError as e:
+        return jsonify(e.payload()), e.status
     pop = population.population("team", comp_id, ctx)
     members_by_id = {m.id: m for m in pop.members}
 

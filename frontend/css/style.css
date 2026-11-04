@@ -1648,3 +1648,117 @@ tbody tr.fuera-poblacion { opacity: .6; }
 .cp-list li { margin: 2px 0; }
 .cp-cell-low { color: var(--muted); }
 @media (max-width: 520px) { .cp-decision { grid-template-columns: 1fr; } }
+
+/* ── Pestaña Equipo: grilla de 2 columnas (boceto del cliente) ── */
+.team-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-3); margin-bottom: var(--sp-3); align-items: start; }
+.team-grid > .card, .tg-stack > .card, #team-teamshot > .card { margin-bottom: 0; }
+.tg-stack { display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; }
+.tg-full { grid-column: 1 / -1; }
+@media (min-width: 768px) {
+  .team-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-4); margin-bottom: var(--sp-4); }
+  .tg-stack { gap: var(--sp-4); }
+}
+
+/* ── Cabecera de contexto y filtros rápidos (F-19) ── */
+.chdr-host { position: sticky; top: var(--header-h); z-index: 30; }
+.chdr { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 8px 12px; margin-bottom: var(--sp-3);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, .25); }
+.chdr-top { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; }
+.chdr-name { font-size: 16px; }
+.chdr-rec { font-weight: 700; color: var(--accent); }
+.chdr-margin, .chdr-n { font-size: 13px; color: var(--muted); }
+.chdr-n-zero { color: #d6504a; font-weight: 700; }
+.chdr-clear { margin-left: auto; }
+.chdr-label { font-size: 12px; margin-top: 2px; }
+.chdr-chips { display: flex; gap: 6px 18px; margin-top: 6px; overflow-x: auto; padding-bottom: 4px; scrollbar-width: thin; }
+.chdr-group { display: inline-flex; align-items: center; gap: 6px; flex: none; }
+.chdr-group > em { font-style: normal; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.chdr-chip { white-space: nowrap; padding: 4px 10px; font-size: 12px; }
+.chdr-sec { font-size: 12px; margin-top: 4px; }
+.chdr-warn { margin-top: 6px; font-weight: 700; color: #d6504a; }
+.chdr-notice { margin-top: 6px; padding: 4px 10px; border-radius: 6px; background: var(--accent); color: #fff; font-weight: 700; font-size: 13px; display: inline-block; }
+.chdr-notice[hidden] { display: none; }
+@media (max-width: 767px) { .chdr { padding: 6px 10px; } .chdr-name { font-size: 14px; } .chdr-label { font-size: 11px; } }
+
+/* ── Plan de juego (F-17) ── */
+.gp-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.gp-wrap[hidden] { display: none; }
+.gp-controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; margin-bottom: 8px; }
+.gp-lbl { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+.gp-meta { font-size: 12px; margin-bottom: 10px; display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
+.gp-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.gp-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.gp-item { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto auto; grid-template-areas: "ico metric delta pct" ". vals vals vals" ". text text text";
+  gap: 2px 8px; align-items: baseline; padding: 8px 10px; border-radius: 8px; border-left: 3px solid var(--border); background: var(--bg-card-2, rgba(127,127,127,.06)); }
+.gp-pos { border-left-color: #22a06b; }
+.gp-neg { border-left-color: #d6504a; }
+.gp-minor { opacity: .72; }
+.gp-ico { grid-area: ico; font-weight: 700; }
+.gp-pos .gp-ico { color: #22a06b; }
+.gp-neg .gp-ico { color: #d6504a; }
+.gp-metric { grid-area: metric; font-weight: 600; }
+.gp-delta { grid-area: delta; font-weight: 700; white-space: nowrap; }
+.gp-delta small { font-weight: 400; color: var(--muted); }
+.gp-vals { grid-area: vals; font-size: 13px; color: var(--muted); }
+.gp-vals em { font-style: normal; opacity: .7; }
+.gp-pct { grid-area: pct; flex: none; min-width: 40px; text-align: center; font-size: 12px; font-weight: 700; padding: 2px 6px; border-radius: 6px; color: #fff; }
+.gp-text { grid-area: text; font-size: 13px; white-space: normal; overflow-wrap: anywhere; }
+.gp-err, .gp-warn { font-size: 12px; }
+@media (max-width: 767px) { .gp-cols { grid-template-columns: 1fr; } .gp-controls { flex-direction: column; align-items: stretch; } .gp-controls select { width: 100%; } }
+
+/* ── Pestañas de sección y barra "Más" (X-01) ── */
+.tab-hidden { display: none !important; }
+.tabs-host { margin: 0 0 var(--sp-3, 12px); }
+.tabs-host[hidden] { display: none; }
+.tabs-row { display: flex; gap: 6px; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: thin; padding-bottom: 4px; border-bottom: 1px solid var(--border); }
+.tab-btn { flex: none; background: transparent; border: none; border-bottom: 2px solid transparent; color: var(--muted); padding: 8px 12px; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.tab-btn:hover { color: var(--text); }
+.tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+nav .nav-more { display: none; }
+.nav-sheet { display: none; }
+@media (max-width: 767px) {
+  nav button.nav-extra { display: none; }
+  nav .nav-more { display: flex; }
+  .nav-sheet:not([hidden]) { display: flex; flex-direction: column; position: fixed; left: 8px; right: 8px; bottom: calc(var(--bottom-nav-h) + 8px); z-index: 45;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 6px; box-shadow: 0 8px 24px rgba(0,0,0,.4); }
+  .nav-sheet button { display: flex; align-items: center; gap: 10px; background: none; border: none; color: var(--text); padding: 12px; font-size: 15px; border-radius: 8px; cursor: pointer; text-align: left; }
+  .nav-sheet button.active { color: var(--accent); }
+}
+
+/* ── Enfrentamiento directo (F-20) ── */
+.vs-table-wrap { overflow-x: auto; margin: 6px 0 10px; }
+.vs-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.vs-table th, .vs-table td { padding: 6px 10px; text-align: left; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.vs-table th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; }
+.vs-table td:nth-child(n+2) { font-variant-numeric: tabular-nums; }
+.vs-score { font-weight: 700; }
+.vs-links { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+
+/* ── Líderes y perfil de la competencia (F-14) ── */
+.ld-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; align-items: start; }
+.ld-grid > .card { margin: 0; min-width: 0; }
+.ld-grid { min-width: 0; }
+.ld-controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; margin-bottom: 8px; }
+.ld-min { width: 110px; }
+.ld-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.ld-table th, .ld-table td { padding: 5px 8px; text-align: left; border-bottom: 1px solid var(--border); }
+.ld-rank { color: var(--muted); white-space: nowrap; width: 48px; }
+.ld-val { font-weight: 700; font-variant-numeric: tabular-nums; text-align: right; }
+.ld-dir { font-size: 11px; font-weight: 400; text-transform: none; letter-spacing: 0; }
+.ld-foot { margin-top: 8px; font-size: 12px; display: flex; flex-wrap: wrap; gap: 6px 12px; justify-content: space-between; }
+@media (max-width: 767px) { .ld-grid { grid-template-columns: 1fr; } }
+
+/* ── Insights automáticos (A-10) ── */
+.ins-list { list-style: none; margin: 8px 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.ins-item { display: flex; gap: 10px; align-items: flex-start; font-size: 14px; padding: 8px 10px; border-radius: 8px; border-left: 3px solid var(--border); background: var(--bg-card-2, rgba(127,127,127,.06)); }
+.ins-good { border-left-color: #22a06b; }
+.ins-bad { border-left-color: #d6504a; }
+.ins-good .ins-ico { color: #22a06b; }
+.ins-bad .ins-ico { color: #d6504a; }
+.ins-ico { flex: none; font-size: 12px; margin-top: 3px; }
+.ins-text { white-space: normal; overflow-wrap: anywhere; }
+
+/* ── Comparar quintetos (F-09) ── */
+.cl-sides { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.cl-side { min-width: 0; }
+@media (max-width: 767px) { .cl-sides { grid-template-columns: 1fr; } }

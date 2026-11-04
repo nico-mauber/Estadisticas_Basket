@@ -51,9 +51,13 @@ function _isNeutral(col) {
   return dir == null || dir === "neutral";
 }
 
+// `collapsedRows`: la tabla arranca mostrando solo las primeras N filas, con "Ver todos" para extenderla (y
+// "Ver menos" para volver a acortarla); el orden, la exportación y las filas tocables no cambian.
 export function createDataTable(el, {
-  tableId, payload, onRowClick, rowFilter, filterLabels, title, exportFormats,
+  tableId, payload, onRowClick, rowFilter, filterLabels, title, exportFormats, collapsedRows,
 } = {}) {
+  const _collapsedRows = Number(collapsedRows) > 0 ? Number(collapsedRows) : 0;
+  let collapsed = _collapsedRows > 0;
   let _payload = payload;
   let _rowFilter = rowFilter;
   let _filterLabels = filterLabels || [];
@@ -181,7 +185,9 @@ export function createDataTable(el, {
     const total = sorted.length;
     const pageCount = Math.max(1, Math.ceil(total / _pageSize));
     if (page >= pageCount) page = pageCount - 1;
-    const pageRows = showAll ? sorted : sorted.slice(page * _pageSize, (page + 1) * _pageSize);
+    const short = collapsed && total > _collapsedRows;
+    const pageRows = short ? sorted.slice(0, _collapsedRows)
+      : showAll ? sorted : sorted.slice(page * _pageSize, (page + 1) * _pageSize);
 
     el.innerHTML = `
       ${_toolbarHTML(total)}
@@ -192,7 +198,7 @@ export function createDataTable(el, {
           ${_tfootHTML(vis)}
         </table>
       </div>
-      ${_pagerHTML(total, pageCount)}`;
+      ${_pagerHTML(total, pageCount, short)}`;
 
     _bindToolbar();
     _bindHead();
@@ -294,17 +300,22 @@ export function createDataTable(el, {
     return rows.length ? `<tfoot>${rows.join("")}</tfoot>` : "";
   }
 
-  function _pagerHTML(total, pageCount) {
-    if (total <= _pageSize) return "";
+  function _pagerHTML(total, pageCount, short = false) {
+    if (short) {
+      return `<div class="dt-pager"><button class="btn btn-ghost btn-sm dt-expand" type="button">Ver todos (${total})</button> <span class="td-muted">Mostrando ${_collapsedRows} de ${total}</span></div>`;
+    }
+    const less = _collapsedRows && total > _collapsedRows
+      ? ' <button class="btn btn-ghost btn-sm dt-collapse" type="button">Ver menos</button>' : "";
+    if (total <= _pageSize) return less ? `<div class="dt-pager">${less.trim()}</div>` : "";
     if (showAll) {
-      return `<div class="dt-pager"><button class="btn btn-ghost btn-sm dt-paginate" type="button">Paginar</button> <span class="td-muted">${total} filas</span></div>`;
+      return `<div class="dt-pager"><button class="btn btn-ghost btn-sm dt-paginate" type="button">Paginar</button> <span class="td-muted">${total} filas</span>${less}</div>`;
     }
     return `
       <div class="dt-pager">
         <button class="btn btn-ghost btn-sm dt-prev" type="button" ${page === 0 ? "disabled" : ""}>‹ Anterior</button>
         <span class="td-muted">Página ${page + 1} de ${pageCount}</span>
         <button class="btn btn-ghost btn-sm dt-next" type="button" ${page >= pageCount - 1 ? "disabled" : ""}>Siguiente ›</button>
-        <button class="btn btn-ghost btn-sm dt-showall" type="button">Ver todas (${total})</button>
+        <button class="btn btn-ghost btn-sm dt-showall" type="button">Ver todas (${total})</button>${less}
       </div>`;
   }
 
@@ -356,6 +367,8 @@ export function createDataTable(el, {
     _on(el.querySelector(".dt-next"), "click", () => { if (page < pageCount - 1) { page++; render(); } });
     _on(el.querySelector(".dt-showall"), "click", () => { showAll = true; render(); });
     _on(el.querySelector(".dt-paginate"), "click", () => { showAll = false; page = 0; render(); });
+    _on(el.querySelector(".dt-expand"), "click", () => { collapsed = false; render(); });
+    _on(el.querySelector(".dt-collapse"), "click", () => { collapsed = true; showAll = false; page = 0; render(); });
   }
 
   function _mountExport() {

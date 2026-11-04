@@ -1,58 +1,37 @@
-# Progress — F-14: Líderes y perfil de competencia
+# Progress — F-14: Líderes y perfil de la competencia
 
-> **Estado:** ⬜ No iniciado
+> **Estado:** 🔶 Implementado (pestañas Líderes y Perfil de Liga, `GET /api/leaders`, `GET /api/competition-profile`, claves `leaders.*` activas). Faltan la tabla `leaders` de T-06 con exportación y la base de normalización de T-04.
+> **Fecha:** 2026-11-04
 
-## Estado de tareas
-- [ ] T-A1 · Activar `leaders.min_minutes` y `leaders.top_n`
-- [ ] T-B1 · Extensiones de `population.py` (base, `team_code`, `reasons`, `member_bundles`)
-- [ ] T-B2 · Constantes, `ProfileError` y `effective_min_minutes`
-- [ ] T-B3 · `_leaders_core` sobre la población de T-01
-- [ ] T-B4 · `leaders`, `leaders_payload` y `leaders_cards`
-- [ ] T-B5 · `profile`: referencia, ritmo y reparto de tiro
-- [ ] T-B6 · Bloque `ppp_origen`
-- [ ] T-B7 · Tabla `leaders` registrada en T-06
-- [ ] T-B8 · Rutas `/api/leaders` y `/api/competition-profile`
-- [ ] T-C1 · `api.leaders` y `api.competitionProfile`
-- [ ] T-D1 · `components/leaders-panel.js`
-- [ ] T-D2 · `components/profile-panel.js`
-- [ ] T-D3 · Habilitar las pestañas `lideres` y `perfil` de Liga
-- [ ] T-D4 · Estilos de tarjetas y perfil
-- [ ] T-E1 · Estados vacíos, error y sin conexión
-- [ ] T-E2 · Service worker (si corresponde)
-- [ ] T-F1 … T-F21 · Verificación de feature (checks obligatorios y un check por CA)
+## Qué se hizo
+- `backend/competition_profile.py`: líderes sobre la población de jugadores de T-01 y perfil con `league_reference`, mejor valor, ritmo, reparto de tiro y PPP por origen (A-02).
+- `GET /api/leaders` (tarjetas o una métrica con todos los que califican) y `GET /api/competition-profile`.
+- `leaders.min_minutes` y `leaders.top_n` activas en Configuración.
+- `components/leaders-panel.js` y las pestañas **Líderes** y **Perfil** de Liga; métrica y mínimo en la dirección. `sw.js` v54.
 
-## Estado de CA (gate de aceptación)
+## Estado de CA
+`f14_sim.py` 26/26 y `f14_browser.py` 29/29 (1280 y 360 px).
+
 | CA | Estado | Evidencia |
 |---|---|---|
-| CA-1 (cliente) | ⬜ | |
-| CA-2 | ⬜ | |
-| CA-3 | ⬜ | |
-| CA-4 | ⬜ | |
-| CA-5 | ⬜ | |
-| CA-6 | ⬜ | |
-| CA-7 | ⬜ | |
-| CA-8 | ⬜ | |
-| CA-9 | ⬜ | |
-| CA-10 | ⬜ | |
-| CA-11 | ⬜ | |
-| CA-12 | ⬜ | |
-| CA-13 | ⬜ | |
-| CA-14 | ⬜ | |
-| CA-15 | ⬜ | |
-| CA-16 | ⬜ | |
+| CA-1 (cliente) | ✅ | cada promedio del perfil (equipos, ritmo, reparto de tiro, jugadores) es igual al `avg` de `/api/rankings` |
+| CA-2 | ✅ | el primero coincide con el `leader` de la ficha, y `avg` con el de la ficha |
+| CA-3 | ✅ | un mínimo menor al de la población se sube y se informa (`raised`) |
+| CA-4 | ✅ | "menos es mejor": líder = valor más bajo; neutral: "Mayor valor" |
+| CA-5 | ✅ | competición estándar con marca de empate |
+| CA-6 | 🔶 | los conteos van por partido; falta la base de T-04 |
+| CA-7 | ✅ | `last` se aplica a la población y la etiqueta lo dice |
+| CA-8 | ✅ | `competition=all` → 400 con el mensaje |
+| CA-9 | ✅ | población insuficiente: "Población insuficiente para calcular referencias." |
+| CA-10 | 🔶 | PPP por origen: media por equipo y peso sobre las posesiones clasificadas; los siete pesos suman 100 % |
+| CA-11 | ✅ | los nulos no entran y se cuentan en `excluded_null` |
+| CA-12 | ✅ | nadie por debajo del mínimo de la población |
+| CA-13 | ⬜ | exportación (tabla `leaders` de T-06) no hecha |
+| CA-14 | ✅ | `leaders.top_n` y `leaders.min_minutes` cambian la respuesta sin reiniciar |
+| CA-15 | ✅ | 360 px sin scroll horizontal |
+| CA-16 | ✅ | `#/liga/lideres?metric=ast&min_minutes=…` reproduce la vista |
 
-## Gates técnicos
-- Backend arranca sin traceback: ⬜
-- `upgrade_db()` idempotente (si aplica): ⬜
-- Endpoints probados manualmente: ⬜
-- Consola del navegador sin errores JS: ⬜
-
-## Desviaciones respecto a docs/ o plan
-
-## Docs a actualizar
-- `docs/api.md` — `GET /api/leaders`, `GET /api/competition-profile`, tabla `leaders`, errores
-- `docs/frontend.md` — pestañas Líderes y Perfil de Liga, componentes `leaders-panel` y `profile-panel`, copy nuevo
-- `docs/metrics.md` — líderes y promedios de referencia (misma población que los percentiles; mínimo efectivo de minutos)
-- `docs/architecture.md` — módulo `competition_profile.py`
-
-## Deuda / TODO
+## Desviaciones
+- Sin tabla `leaders` de T-06 ni exportación; la tabla de una métrica es propia.
+- Sin base de normalización (T-04): los conteos van por partido.
+- Copy sin `t()` (F-21).

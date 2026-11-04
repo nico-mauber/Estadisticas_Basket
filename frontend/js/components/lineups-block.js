@@ -98,6 +98,7 @@ function _cardsHTML(payload, catKey, clutchPayload) {
   return `<div class="lb-cards">${top.map((r, i) => _cardHTML(payload, cat, r, i + 1)).join("")}</div>`;
 }
 
+const LIST_ROWS = 5;   // las listas largas arrancan cortas y se extienden con "Ver todos"
 let _token = 0;
 let _openDetailId = null;   // quinteto abierto en el detalle (sobrevive a un remontaje del bloque)
 
@@ -262,7 +263,7 @@ export async function renderLineupsBlock(el, teamCode, opts = {}) {
   const mountLineups = () => mountTable(tableHost,
     () => api.table("team_lineups", { team: teamCode, ...params, size, base })
       .then(p => { lastPayload = p; return p; }),
-    { tableId: "team_lineups", onRowClick: row => openDetail(lastPayload, row.id) });
+    { tableId: "team_lineups", collapsedRows: LIST_ROWS, onRowClick: row => openDetail(lastPayload, row.id) });
   mountLineups();
   el.querySelectorAll(".lb-size").forEach(btn => btn.addEventListener("click", () => {
     el.querySelectorAll(".lb-size").forEach(b => b.classList.toggle("active", b === btn));
@@ -272,12 +273,12 @@ export async function renderLineupsBlock(el, teamCode, opts = {}) {
 
   mountTable(el.querySelector(".lb-clutch"),
     () => api.table("team_clutch_lineups", { team: teamCode, ...params, base }),
-    { tableId: "team_clutch_lineups" });
+    { tableId: "team_clutch_lineups", collapsedRows: LIST_ROWS });
 
   const onoffHost = el.querySelector(".lb-onoff");
   const mountOnoff = () => mountTable(onoffHost,
     () => api.table("team_onoff", { team: teamCode, ...params, view, base }),
-    { tableId: "team_onoff" });
+    { tableId: "team_onoff", collapsedRows: LIST_ROWS });
   mountOnoff();
   el.querySelectorAll(".lb-view").forEach(btn => btn.addEventListener("click", () => {
     el.querySelectorAll(".lb-view").forEach(b => b.classList.toggle("active", b === btn));

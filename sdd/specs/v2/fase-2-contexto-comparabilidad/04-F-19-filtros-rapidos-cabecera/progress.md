@@ -1,53 +1,42 @@
 # Progress — F-19: Filtros rápidos y cabecera de contexto
 
-> **Estado:** ⬜ No iniciado
+> **Estado:** 🔶 Implementado en Equipo y Jugador (cabecera fija, chips de período, sede y rival, limpiar filtros, aviso "Quedan N de M", `GET /api/context/summary`). Faltan Liga, Comparar y Explorar, que dependen de T-03 y de la navegación X-01.
+> **Fecha:** 2026-11-03
 
 ## Estado de tareas
-- [ ] T-B1 · `context_summary` ramas team y competition
-- [ ] T-B2 · rama player
-- [ ] T-B3 · caché y nulos con razón
-- [ ] T-B4 · ruta `GET /api/context/summary`
-- [ ] T-C1 · `api.contextSummary`
-- [ ] T-D1 · chips período/sede/rival
-- [ ] T-D2 · panel "Más filtros"
-- [ ] T-D3 · "Limpiar filtros"
-- [ ] T-D4 · `renderContextHeader`
-- [ ] T-D5 · aviso "Quedan N de M partidos"
-- [ ] T-D6 · `mountContextDock`
-- [ ] T-D7 · estilos sticky y móvil
-- [ ] T-D8 · dock en S3 y retiro de pills
-- [ ] T-D9 · dock en S4
-- [ ] T-D10 · dock en S2 y S7
-- [ ] T-D11 · S6 Comparar equipos
-- [ ] T-E1 · errores y offline
-- [ ] T-E2 · `sw.js`
-- [ ] T-F1 … T-F15 · verificación
+- [x] RF-1 · Chips de período: Todos, Últimos 3, 5, 10, 15 (mutuamente excluyentes, el activo resaltado)
+- [x] RF-2 · Chips de sede: Todos, Local, Visitante
+- [x] RF-3 · Chips de rival: Todos y uno por equipo de la competencia activa, sin el equipo de la entidad
+- [x] RF-4 · Los chips reflejan el contexto (URL de T-03), se combinan entre sí y con la barra de filtros, y recalculan toda la vista
+- [x] RF-5 · Panel desplegable "Más filtros": es la barra "Filtros" de T-03 (cuarto, marcador, con/sin jugador, descanso); lleva el contador de filtros activos
+- [x] RF-6 · Cabecera con nombre, récord V-D, diferencia media con signo, N de M partidos, badge de muestra y etiqueta de filtros
+- [x] RF-7 · Cabecera fija al hacer scroll en escritorio y móvil
+- [x] RF-8 · Aviso destacado "Quedan N de M partidos" durante unos 4 s; el conteo permanente queda actualizado
+- [x] RF-9 · Con 0 partidos la cabecera lo dice y ofrece limpiar los filtros
+- [x] RF-10 · "Limpiar filtros" visible con algún filtro activo; conserva la competencia (la base de normalización no se toca)
+- [x] RF-11 · Línea secundaria con partidos excluidos (sin jugada a jugada, sin descanso) y filtros no aplicados
+- [x] RF-12 · `GET /api/context/summary` (team, player, competition)
+- [ ] RF-13 · Copy con `t()` y es-UY: el copy va directo en español (F-21 multi-idioma pendiente); los números usan el formato de la app
 
-## Estado de CA (gate de aceptación)
-| CA | Estado | Evidencia |
-|---|---|---|
-| CA-1 (cliente) | ⬜ | |
-| CA-2 | ⬜ | |
-| CA-3 | ⬜ | |
-| CA-4 | ⬜ | |
-| CA-5 | ⬜ | |
-| CA-6 | ⬜ | |
-| CA-7 | ⬜ | |
-| CA-8 | ⬜ | |
-| CA-9 | ⬜ | |
-| CA-10 | ⬜ | |
+## Estado de CA
+`f19_sim.py` 22/22 y `f19_browser.py` 51/51 (1280 y 360 px, sin errores de consola).
 
-## Gates técnicos
-- Backend arranca sin traceback: ⬜
-- `upgrade_db()` idempotente (si aplica): ⬜ (no aplica: sin esquema)
-- Endpoints probados manualmente: ⬜
-- Consola del navegador sin errores JS: ⬜
+| Qué se verificó | Estado |
+|---|---|
+| Récord y diferencia media = los de `/api/team` (ALB 2-0, +12,5) | ✅ |
+| Local + Visitante suman los partidos y los récords del total | ✅ |
+| Últimos N, sede y rival cambian N sin cambiar M | ✅ |
+| Rival sin enfrentamientos: 0 partidos, margen nulo (nunca 0), aviso y botón limpiar | ✅ |
+| Jugador: partidos jugados, récord del equipo en esos partidos, badge en minutos | ✅ |
+| Cabecera fija al hacer scroll | ✅ |
+| Limpiar quita período, sede y rival de la URL | ✅ |
 
-## Desviaciones respecto a docs/ o plan
+## Desviaciones
+- **Sin Liga, Comparar y Explorar:** esas vistas no tienen todavía el contexto global de T-03 ni la navegación de X-01.
+- **Las pills "Últ. N" de Equipo** se ocultan: los chips de la cabecera las reemplazan.
+- **Selecciones vacías:** los bloques de posesión (origen, transición, segunda oportunidad, reloj) responden 404 `sin_pbp` con un mensaje de "sin play-by-play" cuando el rival elegido no tiene enfrentamientos; la cabecera sí explica el motivo real. Falta ajustar esos mensajes.
+- **Copy sin `t()`** (DA-21): F-21 no se hizo.
+- **M de "N de M"** es el total de partidos de la entidad en la competencia **sin ningún filtro** (el eco de T-03 también recorta por sede y rival).
 
-## Docs a actualizar
-- `docs/api.md` — `GET /api/context/summary`.
-- `docs/frontend.md` — componentes `quick-filters.js`, `context-header.js`, `ctx-dock.js`; retiro de las pills "Últ. N" de Equipo; copy nuevo.
-- `docs/architecture.md` — módulo `backend/context_summary.py`.
-
-## Deuda / TODO
+## Docs actualizados
+- ✅ `docs/api.md` · ✅ `docs/frontend.md`

@@ -38,7 +38,7 @@ Smart-Basket es un monolito full-stack: Flask sirve tanto la API REST como los a
          ▼
 ┌──────────────────────┐
 │  Browser / PWA       │
-│  frontend/js/app.js  │  SPA, 6 vistas + config (+ login)
+│  frontend/js/app.js  │  SPA, 7 secciones + config (+ login), rutas por hash
 │  frontend/sw.js      │  Service Worker (cache offline)
 └──────────────────────┘
 ```
@@ -166,6 +166,15 @@ o configuración (F-13). Tolerante a correr fuera de `app_context`.
 
 ### `breakdown.py`, `team_insights.py`, `warmup.py` (correcciones de Equipo, 2026-10)
 `breakdown.py` calcula el desglose ofensivo (`paint_pts`, `second_chance_pts`, `pts_from_tov`, `bench_pts`, `fast_break_pts`) cuando FIBA lo deja `NULL`: `repository` lo llama como *row filler* al armar las filas de equipo y marca `_derived`; el perfil informa `extras_source` (`oficial` / `calculado`). `team_insights.py` arma fortalezas y debilidades del equipo con el percentil de cada métrica en su competencia (reglas fijas, como "Ventajas y amenazas" de Preparar); alimenta `GET /api/team-insights/<code>`. `warmup.py` calcula las posesiones de todos los partidos en un hilo (solo con `SB_WARMUP=1`) al arrancar y cuando sube `data_version` (`cache.on_data_bump`).
+
+### Insights (A-10)
+`phrases.insights(entity_type, id, comp_id=, ctx=)` reutiliza el motor de F-17: una plantilla genérica por dirección de la métrica (`higher`, `lower`, `neutral`) y por disparo (`extremo_alto`, `extremo_bajo`) en `phrases/es.json`, el conjunto de métricas y las familias en `phrases/rules.json` (`insights`, `insight_families`) y los percentiles de la ficha de T-01. Los textos de insight admiten hasta 160 caracteres. Alimenta `GET /api/insights` (memoizado en `cache`, namespace `insights`).
+
+### `rival_comparison.py` y `competition_profile.py` (F-20, F-14)
+`rival_comparison.py` compara el valor agregado de un equipo en los partidos contra un rival con el de toda su selección (`bundles._team_bundle_from_games` con y sin `opponent`) para las métricas del plan de juego; las diferencias más marcadas reutilizan `phrases` (familias, plantillas, `z`). `competition_profile.py` arma los líderes (población de jugadores de T-01 con mínimo de minutos) y el perfil de la competencia (`league_reference`, mejor valor por métrica y PPP por origen de A-02); no recalcula nada propio.
+
+### `phrases.py` y `backend/phrases/` (F-17)
+Motor de frases de plantillas fijas y plan de juego. `backend/phrases/es.json` guarda las plantillas por métrica y disparo (`ventaja` / `riesgo`) y `rules.json` el conjunto de métricas del plan y las familias que no se repiten en una columna. `load_templates` valida al cargar (id único, métrica del catálogo, solo marcadores permitidos, sin dígitos escritos a mano, una plantilla de ventaja y una de riesgo por métrica) y se recarga al editar el archivo; `python phrases.py` imprime `OK: N plantillas` o los errores. `format_value` y `render` formatean con coma decimal y redondeo half-up. `game_plan("team", id, reference=, rival=, comp_id=, ctx=, mode=)` arma el plan sobre la población de T-01 (la misma de las fichas), memoizado en `cache` (`gplan`); `mode="matchup"` es la entrada de F-03 (referencia siempre el rival, población sin mínimos de muestra y la muestra baja se advierte). Alimenta `GET /api/game-plan`. No hay cambios de esquema.
 
 **Rendimiento:** `cache.NAMESPACE_LIMITS` sube el tope por namespace de los cachés con una entrada por partido (`poss:game` 4000): con el tope general de 64 una liga de más de 32 partidos expulsaba entradas sin parar y cada petición reconstruía todas las posesiones. `repository._load_events` carga los eventos con una consulta de núcleo (sin objetos del ORM); `identity.canonical_id` y `resolve_player_id(create=False)` usan mapas por petición (antes una consulta por llamada: 330 000 consultas para armar la población de jugadores); `possessions.ppp_stats` y `assists._links_of_game` se cachean. Armar el plantel de una liga de 170 partidos pasó de más de 10 minutos a 8 s en frío.
 
