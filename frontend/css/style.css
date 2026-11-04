@@ -1705,3 +1705,22 @@ tbody tr.fuera-poblacion { opacity: .6; }
 .gp-text { grid-area: text; font-size: 13px; white-space: normal; overflow-wrap: anywhere; }
 .gp-err, .gp-warn { font-size: 12px; }
 @media (max-width: 767px) { .gp-cols { grid-template-columns: 1fr; } .gp-controls { flex-direction: column; align-items: stretch; } .gp-controls select { width: 100%; } }
+
+/* ── Pestañas de sección y barra "Más" (X-01) ── */
+.tab-hidden { display: none !important; }
+.tabs-host { margin: 0 0 var(--sp-3, 12px); }
+.tabs-host[hidden] { display: none; }
+.tabs-row { display: flex; gap: 6px; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: thin; padding-bottom: 4px; border-bottom: 1px solid var(--border); }
+.tab-btn { flex: none; background: transparent; border: none; border-bottom: 2px solid transparent; color: var(--muted); padding: 8px 12px; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.tab-btn:hover { color: var(--text); }
+.tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+nav .nav-more { display: none; }
+.nav-sheet { display: none; }
+@media (max-width: 767px) {
+  nav button.nav-extra { display: none; }
+  nav .nav-more { display: flex; }
+  .nav-sheet:not([hidden]) { display: flex; flex-direction: column; position: fixed; left: 8px; right: 8px; bottom: calc(var(--bottom-nav-h) + 8px); z-index: 45;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 6px; box-shadow: 0 8px 24px rgba(0,0,0,.4); }
+  .nav-sheet button { display: flex; align-items: center; gap: 10px; background: none; border: none; color: var(--text); padding: 12px; font-size: 15px; border-radius: 8px; cursor: pointer; text-align: left; }
+  .nav-sheet button.active { color: var(--accent); }
+}

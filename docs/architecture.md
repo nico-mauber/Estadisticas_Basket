@@ -38,7 +38,7 @@ Smart-Basket es un monolito full-stack: Flask sirve tanto la API REST como los a
          ▼
 ┌──────────────────────┐
 │  Browser / PWA       │
-│  frontend/js/app.js  │  SPA, 6 vistas + config (+ login)
+│  frontend/js/app.js  │  SPA, 7 secciones + config (+ login), rutas por hash
 │  frontend/sw.js      │  Service Worker (cache offline)
 └──────────────────────┘
 ```

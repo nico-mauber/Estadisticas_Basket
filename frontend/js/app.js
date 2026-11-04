@@ -24,6 +24,8 @@ import { renderSecondChancePanel } from "./components/second-chance-panel.js";
 import { renderClockPanel } from "./components/clock-panel.js";
 import { renderTeamInsights } from "./components/team-insights.js";
 import { renderGamePlan } from "./components/game-plan.js";
+import { renderTabs, applyTabs, watchTabs } from "./components/tabs.js";
+import { parseRoute, buildHash, routeKey, writeRoute, routeQuery, onRouteChange, markRouteKey } from "./core/router.js";
 import { mountContextHeader } from "./components/context-header.js";
 import { renderLineupsBlock } from "./components/lineups-block.js";
 import { renderComparePlayers, comparePlayersFromUrl } from "./components/compare-players.js";
@@ -320,13 +322,194 @@ async function refreshCompareSelectors() {
 const sections = ["import", "league", "team", "compare", "player", "search", "preparar", "partido", "config"];
 let activeSection = "import";
 let _lastSection = "import";
+let _routing = false;      // true mientras se aplica una dirección: la vista no la vuelve a escribir (X-01)
+let _routeQuery = null;    // competencia y últimos N de la dirección abierta; los consume la carga de equipo o jugador
+let _gameId = null;        // partido abierto en Partido (para la dirección)
+let _navCount = 0;         // cuántas veces se cambió de sección: la sección inicial no pisa una elección del usuario
 
-function setSection(id) {
+// `sync: false` en los flujos que abren una entidad (equipo, jugador, partido): la dirección se escribe cuando llegan los datos.
+function setSection(id, { sync = true } = {}) {
   if (activeSection !== "config") _lastSection = activeSection;
   if (id !== "partido") destroyLiveView();
   activeSection = id;
-  document.querySelectorAll("nav button").forEach(b => b.classList.toggle("active", b.dataset.section === id));
+  _navCount++;
+  document.querySelectorAll("nav button, .nav-sheet button").forEach(b => b.classList.toggle("active", b.dataset.section === id));
   document.querySelectorAll(".section").forEach(s => s.style.display = s.id === `sec-${id}` ? "" : "none");
+  _closeNavSheet();
+  if (sync) syncRoute();
+}
+
+// Abre una sección desde la barra de navegación.
+function goSection(id) {
+  setSection(id, { sync: !["team", "player"].includes(id) });
+  if (id === "import")  renderImport();
+  if (id === "league")  renderLeague();
+  if (id === "team")    { refreshTeamSelector(); syncRoute(); }
+  if (id === "player")  syncRoute();
+  if (id === "compare") renderCompare();
+  if (id === "search")  renderSearch();
+  if (id === "preparar") renderPrepare(document.getElementById("preparar-main"), { onOpenGame: showGame });
+  if (id === "config")  renderConfig();
+}
+
+function _closeNavSheet() { document.getElementById("nav-sheet")?.setAttribute("hidden", ""); }
+
+// ── Pestañas de sección y direcciones (X-01) ─────────────────────────────────
+const TAB_DEFS = {
+  team: [["resumen", "Resumen"], ["plantel", "Plantel"], ["tiro", "Tiro"], ["posesion", "Posesión"], ["quintetos", "Quintetos"],
+         ["momentos", "Momentos"], ["gamelog", "Game log"]],
+  player: [["resumen", "Resumen"], ["tiro", "Tiro"], ["posesion", "Posesión"], ["gamelog", "Game log"]],
+  league: [["tabla", "Tabla"], ["ranking", "Ranking"], ["mapa", "Mapa"]],
+};
+const TAB_DEFAULT = { team: "resumen", player: "resumen", league: "tabla" };
+const _tab = { ...TAB_DEFAULT };
+const _validTab = (section, tab) => (TAB_DEFS[section] || []).some(([id]) => id === tab);
+
+function _drawTabs(section) {
+  renderTabs(document.getElementById(`${section}-tabs`), TAB_DEFS[section], _tab[section], t => setTab(section, t));
+}
+
+function setTab(section, tab, { sync = true } = {}) {
+  if (!_validTab(section, tab)) return;
+  _tab[section] = tab;
+  _drawTabs(section);
+  applyTabs(document.getElementById(`sec-${section}`), tab);
+  window.dispatchEvent(new Event("resize"));   // los gráficos de la pestaña recalculan su ancho
+  if (sync) syncRoute();
+}
+
+const _cmpTab = () => document.querySelector(".cmp-tab.active")?.dataset.cmp || "equipos";
+
+// La vista actual como ruta: sección, entidad y pestaña.
+function currentRoute() {
+  const section = activeSection;
+  const r = { section, id: null, tab: null };
+  if (section === "team")    { r.id = _teamData?.team_code ?? null; r.tab = _tab.team; }
+  else if (section === "player") { r.id = _playerData?.player_id ?? null; r.tab = _tab.player; }
+  else if (section === "league") r.tab = _tab.league;
+  else if (section === "import") r.tab = _importTab;
+  else if (section === "compare") r.tab = _cmpTab();
+  else if (section === "search") r.tab = "jugadores";
+  else if (section === "partido") r.id = _gameId;
+  return r;
+}
+
+// Escribe la dirección de la vista actual (un paso del historial si cambió la sección, la entidad o la pestaña).
+function syncRoute() {
+  if (_routing) return;
+  const r = currentRoute();
+  const query = r.section === "team" ? { competition: _teamComp, last: _teamLastN }
+    : r.section === "player" ? { competition: _playerComp, last: _playerLastN }
+    : r.section === "league" ? { competition: _leagueComp, last: null }
+    : { competition: null, last: null };
+  writeRoute(r, query);
+}
+
+const _notice = msg => toast(msg, "err");
+
+// Reconstruye la vista de la dirección abierta. `false` si no hay dirección válida (el llamador abre la sección inicial).
+async function applyRoute({ initial = false } = {}) {
+  const p = parseRoute();
+  if (!p) return false;
+  if (p.invalid) { _notice("Esa sección no existe o todavía no está disponible."); return false; }
+  const cur = currentRoute();
+  if (!initial && !p.legacy && routeKey({ section: p.section, id: p.id, tab: p.tab }) === routeKey(cur)) return true;
+  const q = routeQuery();
+  if (p.legacy) {   // #search → #/explorar/jugadores: la dirección nueva se escribe ya, sin esperar a los datos
+    const tab = { import: "importar", league: "tabla", compare: "equipos", search: "jugadores" }[p.section] || null;
+    markRouteKey(routeKey({ section: p.section, id: null, tab }));
+    writeRoute({ section: p.section, id: null, tab }, {});
+  }
+  _routing = true;
+  try {
+    switch (p.section) {
+      case "import": {
+        const t = IMPORT_TABS.some(([id]) => id === p.tab) ? p.tab : "importar";
+        if (p.tab && t !== p.tab) _notice("Esa pestaña todavía no está disponible.");
+        _importTab = t;
+        setSection("import", { sync: false });
+        renderImport();
+        break;
+      }
+      case "league": {
+        let t = _validTab("league", p.tab) ? p.tab : "tabla";
+        if (p.tab && t !== p.tab) _notice("Esa pestaña todavía no está disponible.");
+        if (activeSection === "league" && document.getElementById("league-tabs") && (!q.competition || q.competition === _leagueComp)) {
+          setTab("league", t, { sync: false });
+        } else {
+          if (q.competition) _leagueComp = q.competition;
+          _tab.league = t;
+          setSection("league", { sync: false });
+          await renderLeague();
+        }
+        break;
+      }
+      case "team": {
+        setSection("team", { sync: false });
+        await refreshTeamSelector();
+        if (!p.id) break;
+        const code = String(p.id).toUpperCase();
+        const sel = document.getElementById("team-select");
+        if (![...sel.options].some(o => o.value === code)) { _notice("No encontramos ese equipo."); break; }
+        let t = p.tab;
+        if (t && !_validTab("team", t)) { _notice("Esa pestaña todavía no está disponible."); t = null; }
+        _tab.team = t || "resumen";
+        const same = _teamData?.team_code === code && (!q.competition || q.competition === _teamComp) && Number(q.last || 0) === _teamLastN;
+        if (same) { setTab("team", _tab.team, { sync: false }); break; }
+        sel.value = code;
+        _routeQuery = q;
+        await renderTeam(code);
+        break;
+      }
+      case "player": {
+        setSection("player", { sync: false });
+        if (!p.id) break;
+        let t = p.tab;
+        if (t && !_validTab("player", t)) { _notice("Esa pestaña todavía no está disponible."); t = null; }
+        _tab.player = t || "resumen";
+        const same = String(_playerData?.player_id) === String(p.id) && (!q.competition || q.competition === _playerComp) && Number(q.last || 0) === _playerLastN;
+        if (same) { setTab("player", _tab.player, { sync: false }); break; }
+        _routeQuery = q;
+        const ok = /^\d+$/.test(p.id) ? await renderPlayer(null, null, Number(p.id)) : false;
+        if (!ok) _notice("No encontramos ese jugador.");
+        break;
+      }
+      case "compare":
+        setSection("compare", { sync: false });
+        await renderCompare();
+        if (p.tab === "equipos" || p.tab === "jugadores") _initCompareTabs(p.tab);
+        break;
+      case "search":
+        setSection("search", { sync: false });
+        await renderSearch();
+        break;
+      case "preparar":
+        setSection("preparar", { sync: false });
+        renderPrepare(document.getElementById("preparar-main"), { onOpenGame: showGame });
+        break;
+      case "partido":
+        if (p.id && /^\d+$/.test(p.id)) showGame(p.id); else setSection("partido", { sync: false });
+        break;
+      case "config":
+        setSection("config", { sync: false });
+        renderConfig();
+        break;
+    }
+  } finally {
+    _routing = false;
+    markRouteKey(routeKey(currentRoute()));   // normaliza la dirección (pestaña por defecto, filtros) sin sumar un paso
+    syncRoute();
+  }
+  return true;
+}
+
+// Sin dirección: Datos si la base no tiene partidos; si tiene, Liga › Tabla (RF-16).
+async function openInitialSection() {
+  const seen = _navCount;
+  let n = 0;
+  try { n = (await api.games()).length; } catch { /* sin conexión: queda Datos */ }
+  if (seen !== _navCount) return;   // el usuario ya eligió una sección mientras se consultaban los partidos
+  if (n > 0) goSection("league"); else goSection("import");
 }
 
 // ── Import section ─────────────────────────────────────────────────────────
@@ -554,6 +737,7 @@ function renderImport() {
   sec.querySelectorAll("[data-tab]").forEach(b => b.addEventListener("click", () => {
     _importTab = b.dataset.tab;
     renderImport();
+    syncRoute();
   }));
   const el = document.getElementById("import-tab");
   if (_importTab === "calidad") return _renderQualityTab(el);
@@ -1184,7 +1368,8 @@ function _openTeamFromRow(row) {
   const code = String(row.id ?? "").split(":").pop() || row.id;
   const sel = document.getElementById("team-select");
   if (sel) sel.value = code;
-  setSection("team");
+  _tab.team = "resumen";
+  setSection("team", { sync: false });
   renderTeam(code);
 }
 
@@ -1263,6 +1448,7 @@ async function renderLeague() {
           </div>
         </div>`);
       _makeCollapsible(sec.lastElementChild, "liga-mapa");
+      sec.lastElementChild.dataset.tabs = "mapa";
       _drawLeagueMap();
       document.getElementById("map-select").addEventListener("change", e => {
         _leagueMap = e.target.value;
@@ -1271,6 +1457,12 @@ async function renderLeague() {
       document.getElementById("btn-reset-scatter").addEventListener("click", () => resetZoom("chart-scatter"));
     }
     // Cierres se movieron a la vista Equipo (Feature 05 v2).
+    sec.children[0].dataset.tabs = "tabla";
+    sec.children[1].dataset.tabs = "ranking";
+    sec.insertAdjacentHTML("afterbegin", '<div id="league-tabs" class="tabs-host"></div>');
+    _drawTabs("league");
+    applyTabs(sec, _tab.league);
+    syncRoute();
   } catch (e) {
     sec.innerHTML = `<p class="empty below-avg">${e.message}</p>`;
   }
@@ -1466,7 +1658,7 @@ function _renderTeamContent(main, data) {
   //   Conjunto estándar (desplegable, ancho completo)
   main.innerHTML = `
     ${_selectionNote(data, ["equipo", "equipos"])}
-    <div class="team-grid">
+    <div class="team-grid" data-tabs="resumen">
       <div id="team-teamshot"></div>
       ${radarCard}
       ${evoCard}
@@ -1480,7 +1672,7 @@ function _renderTeamContent(main, data) {
         <div id="team-standard-panel"></div>
       </div>
     </div>
-    <div class="card">
+    <div class="card" data-tabs="gamelog">
       <div class="card-title">Game log</div>
       <div id="team-gamelog-dt"></div>
     </div>`;
@@ -1684,6 +1876,9 @@ function _applyTeamData(main, data) {
     compSel.innerHTML = _compOptions(data.competitions, _teamComp, "Todas las competencias", "all");
   }
   _renderTeamContent(main, data);
+  _drawTabs("team");
+  applyTabs(document.getElementById("sec-team"), _tab.team);
+  syncRoute();
   _mountCtxBar(main, _teamComp, () => _reloadTeam(), data.team_code);
   mountContextHeader(document.getElementById("team-ctx-header"), {
     entity: "team", id: data.team_code, competition: _teamComp, last: _teamLastN, excludeTeam: data.team_code,
@@ -1762,12 +1957,14 @@ async function renderTeam(teamCode) {
   _ctxTeam = teamCode;
   const main = document.getElementById("team-main");
   main.innerHTML = '<p class="empty"><span class="spinner"></span>Cargando...</p>';
-  _teamLastN = 0;
-  _teamComp  = null;   // sin competencia: el servidor usa la del partido más reciente del equipo (RF-6)
+  // Con una dirección abierta (X-01) la competencia y los últimos N vienen de ella; si no, la del partido más reciente (RF-6).
+  const rq = _routeQuery; _routeQuery = null;
+  _teamLastN = Number(rq?.last) > 0 ? Number(rq.last) : 0;
+  _teamComp  = rq?.competition || null;
   const req = ++_teamReq;
 
   try {
-    const data = await _loadDroppingInvalid(() => api.team(teamCode, contextParams()));
+    const data = await _loadDroppingInvalid(() => api.team(teamCode, _teamParams()));
     if (req !== _teamReq) return;
     _applyTeamData(main, data);
 
@@ -1920,6 +2117,7 @@ function _initCompareTabs(force = null) {
     document.getElementById("cmp-pane-equipos").style.display = which === "equipos" ? "" : "none";
     const pane = document.getElementById("cmp-pane-jugadores");
     pane.style.display = which === "jugadores" ? "" : "none";
+    syncRoute();
     if (which === "jugadores" && !pane.dataset.mounted) {
       pane.dataset.mounted = "1";
       renderComparePlayers(pane, { base: getBase(), initial: comparePlayersFromUrl() });
@@ -2152,18 +2350,21 @@ const _playerParams = () => ({ competition: _playerComp, last: _playerLastN || n
 async function renderPlayer(teamCode, playerName, playerId = null) {
   const main = document.getElementById("player-main");
   main.innerHTML = '<p class="empty"><span class="spinner"></span>Cargando...</p>';
-  _playerComp = null;   // sin competencia: la del partido más reciente del jugador (RF-6)
-  _playerLastN = 0;
+  const rq = _routeQuery; _routeQuery = null;
+  _playerComp = rq?.competition || null;   // sin competencia: la del partido más reciente del jugador (RF-6)
+  _playerLastN = Number(rq?.last) > 0 ? Number(rq.last) : 0;
   _playerCtx  = { teamCode, playerName };
   const req = ++_playerReq;
 
   try {
-    const load = () => playerId != null ? api.playerById(playerId, contextParams()) : api.player(teamCode, playerName, contextParams());
+    const load = () => playerId != null ? api.playerById(playerId, _playerParams()) : api.player(teamCode, playerName, _playerParams());
     const data = await _loadDroppingInvalid(load);
-    if (req !== _playerReq) return;
+    if (req !== _playerReq) return false;
     _applyPlayerData(main, data);
+    return true;
   } catch (e) {
     if (req === _playerReq) main.innerHTML = `<p class="empty below-avg">${e.message}</p>`;
+    return false;
   }
 }
 
@@ -2173,6 +2374,9 @@ function _applyPlayerData(main, data) {
   _playerLastN = data.context.applied?.last || 0;
   _playerCtx  = { teamCode: data.team_code, playerName: data.player };   // grafía de la ficha
   _renderPlayerContent(main, data);
+  _drawTabs("player");
+  applyTabs(document.getElementById("sec-player"), _tab.player);
+  syncRoute();
   // RF-1: la identidad se dibuja antes que cualquier card de métricas.
   if (data.player_id != null) {
     renderPlayerHeader(document.getElementById("player-identity"), data.player_id, {
@@ -2322,13 +2526,13 @@ function _renderPlayerContent(main, data) {
       </div>` : ""}
       ${_selectionNote(data, ["jugador", "jugadores"])}
       ${PLAYER_CARD_GROUPS.map((g, i) => `
-      <div class="card">
+      <div class="card" data-tabs="resumen">
         <div class="card-title">${g.title}</div>
         <div class="stat-grid metric-card-grid" data-mc-group="${i}">${_fichaGridHTML(g.metrics, "player", null, data.player_id)}</div>
         ${g.trailing ? `<div class="stat-grid">${g.trailing}</div>` : ""}
         ${g.extra || ""}
       </div>`).join("")}
-      <div class="chart-grid">
+      <div class="chart-grid" data-tabs="resumen">
         <div class="card">
           <div class="card-title">Perfil de jugador</div>
           ${radarOk ? '<div class="radar-wrap"><canvas id="chart-player-radar"></canvas></div>'
@@ -2339,15 +2543,15 @@ function _renderPlayerContent(main, data) {
           <canvas id="chart-player-evo" height="200"></canvas>
         </div>
       </div>
-      <div class="card">
+      <div class="card" data-tabs="resumen">
         <div class="card-title">Conjunto estándar</div>
         <div id="player-standard-panel"></div>
       </div>
-      <div id="player-origins"></div>
-      <div id="player-transition"></div>
-      <div id="player-second-chance"></div>
-      <div id="player-clock"></div>
-      <div class="card">
+      <div id="player-origins" data-tabs="posesion"></div>
+      <div id="player-transition" data-tabs="posesion"></div>
+      <div id="player-second-chance" data-tabs="posesion"></div>
+      <div id="player-clock" data-tabs="posesion"></div>
+      <div class="card" data-tabs="gamelog">
         <div class="card-title">Game log — ${playerName}</div>
         <div id="player-gamelog-dt"></div>
       </div>`;
@@ -2365,9 +2569,14 @@ function _renderPlayerContent(main, data) {
 
     // Shot chart — async, non-blocking (C-03: usa api.shotZones + shotChart)
     api.shotZones({ entity: 'player', id: data.player_id, competition: _playerComp }).then(shots => {
-      if (!shots || !shots.summary?.total_shots) return;
       const shotCard = document.createElement("div");
       shotCard.className = "card";
+      shotCard.dataset.tabs = "tiro";
+      if (!shots || !shots.summary?.total_shots) {
+        shotCard.innerHTML = '<p class="empty">Sin tiros registrados para este jugador.</p>';
+        main.insertBefore(shotCard, main.querySelector(".chart-grid"));
+        return;
+      }
       shotCard.innerHTML = `
         <div class="card-title">Shot chart por zonas <span style="color:var(--muted2);font-weight:400;text-transform:none;letter-spacing:0">— ${playerName}</span></div>
         ${shotChart(shots)}`;
@@ -2566,25 +2775,31 @@ function _applySearch() {
 
 // ── Bootstrap ──────────────────────────────────────────────────────────────
 const NAV_ITEMS = {
-  import:  { icon: "📥", label: "Importar" },
+  import:  { icon: "📥", label: "Datos" },
   league:  { icon: "🏆", label: "Liga" },
   team:    { icon: "📊", label: "Equipo" },
   compare: { icon: "⚡", label: "Comparar" },
   player:  { icon: "👤", label: "Jugador" },
-  search:  { icon: "🔎", label: "Buscar" },
+  search:  { icon: "🔎", label: "Explorar" },
   preparar: { icon: "📋", label: "Preparar" },
   partido: { icon: "🏀", label: "Partido" },
+  config:  { icon: "⚙", label: "Configuración" },
 };
+// En pantallas chicas la barra muestra las cuatro secciones principales y "Más" abre el resto (X-01 RF-11).
+const NAV_ORDER = ["import", "league", "team", "player", "compare", "search", "preparar"];
+const NAV_EXTRA = ["import", "search", "preparar"];
 
 // ── F-07: Analizar partido ──────────────────────────────────────────────────
 function showGame(gameId) {
   destroyLiveView();
+  _gameId = String(gameId);
   setSection("partido");
   renderGameView(document.getElementById("partido-main"), gameId);
 }
 
 // ── F-01: Partido en vivo ──────────────────────────────────────────────────
 function showLiveGame(gameId, url = null) {
+  _gameId = null;
   setSection("partido");
   renderLiveView(document.getElementById("partido-main"), gameId, { url });
 }
@@ -2609,12 +2824,18 @@ function renderApp() {
       ${_authRequired ? `<span class="header-user">${_authUser || ""} · <button class="header-logout" id="btn-logout">Salir</button></span>` : ""}
     </header>
     <nav>
-      ${sections.filter(s => s !== "config" && s !== "partido").map(s => `
-        <button data-section="${s}">
+      ${NAV_ORDER.map(s => `
+        <button data-section="${s}"${NAV_EXTRA.includes(s) ? ' class="nav-extra"' : ""}>
           <span class="nav-icon">${NAV_ITEMS[s].icon}</span>
           ${NAV_ITEMS[s].label}
         </button>`).join("")}
+      <button type="button" class="nav-more" id="btn-nav-more" aria-haspopup="true" aria-expanded="false">
+        <span class="nav-icon">⋯</span>Más
+      </button>
     </nav>
+    <div class="nav-sheet" id="nav-sheet" hidden>
+      ${[...NAV_EXTRA, "config"].map(s => `<button type="button" data-section="${s}"><span class="nav-icon">${NAV_ITEMS[s].icon}</span>${NAV_ITEMS[s].label}</button>`).join("")}
+    </div>
     <main>
       <div class="section" id="sec-import"></div>
       <div class="section" id="sec-league"></div>
@@ -2640,26 +2861,28 @@ function renderApp() {
           </span>
         </div>
         <div id="team-ctx-header" class="chdr-host"></div>
-        <div id="team-shotmap"></div>
-        <div id="team-onoff"></div>
-        <div class="card" id="team-lineup-card" style="display:none">
+        <div id="team-tabs" class="tabs-host" hidden></div>
+        <div id="team-shotmap" data-tabs="tiro"></div>
+        <p class="td-muted" data-tabs="tiro" id="team-tiro-hint">Elegí un jugador arriba y tocá “Ver mapa de tiro”. El mapa de tiro del equipo está en Resumen.</p>
+        <div id="team-onoff" data-tabs="quintetos"></div>
+        <div class="card" id="team-lineup-card" data-tabs="quintetos" style="display:none">
           <div class="card-title">Combinaciones (Lineups)</div>
           <p class="td-muted">Elegí entre 3 y 5 jugadores para ver el rendimiento del equipo cuando comparten cancha.</p>
           <div class="lineup-picker" id="team-lineup-picker"></div>
           <button class="btn btn-ghost" id="btn-analyze-lineup" style="margin-top:12px">Analizar combinación</button>
         </div>
-        <div id="team-lineup"></div>
-        <div id="team-gameplan"></div>
-        <div id="team-main"></div>
-        <div id="team-insights"></div>
-        <div id="team-roster"></div>
-        <div id="team-lineups-block"></div>
-        <div id="team-periods"></div>
-        <div id="team-origins"></div>
-        <div id="team-transition"></div>
-        <div id="team-second-chance"></div>
-        <div id="team-clock"></div>
-        <div id="team-clutch"></div>
+        <div id="team-lineup" data-tabs="quintetos"></div>
+        <div id="team-gameplan" data-tabs="resumen"></div>
+        <div id="team-main" data-tabs="resumen gamelog"></div>
+        <div id="team-insights" data-tabs="resumen"></div>
+        <div id="team-roster" data-tabs="plantel"></div>
+        <div id="team-lineups-block" data-tabs="quintetos"></div>
+        <div id="team-periods" data-tabs="momentos"></div>
+        <div id="team-origins" data-tabs="posesion"></div>
+        <div id="team-transition" data-tabs="posesion"></div>
+        <div id="team-second-chance" data-tabs="posesion"></div>
+        <div id="team-clock" data-tabs="posesion"></div>
+        <div id="team-clutch" data-tabs="momentos"></div>
       </div>
 
       <!-- Compare -->
@@ -2686,6 +2909,7 @@ function renderApp() {
       <!-- Player -->
       <div class="section" id="sec-player">
         <div id="player-ctx-header" class="chdr-host"></div>
+        <div id="player-tabs" class="tabs-host" hidden></div>
         <div id="player-main"><p class="empty">Selecciona un jugador desde la vista de equipo.</p></div>
       </div>
 
@@ -2709,17 +2933,20 @@ function renderApp() {
     </main>`;
 
   // Nav clicks
-  document.querySelectorAll("nav button").forEach(btn => {
-    btn.addEventListener("click", () => {
-      setSection(btn.dataset.section);
-      if (btn.dataset.section === "import")  renderImport();
-      if (btn.dataset.section === "league")  renderLeague();
-      if (btn.dataset.section === "team")    refreshTeamSelector();
-      if (btn.dataset.section === "compare") renderCompare();
-      if (btn.dataset.section === "search")  renderSearch();
-      if (btn.dataset.section === "preparar") renderPrepare(document.getElementById("preparar-main"), { onOpenGame: showGame });
-    });
+  document.querySelectorAll("nav button[data-section], .nav-sheet button").forEach(btn => {
+    btn.addEventListener("click", () => goSection(btn.dataset.section));
   });
+  const moreBtn = document.getElementById("btn-nav-more");
+  moreBtn.addEventListener("click", e => {
+    e.stopPropagation();
+    const sheet = document.getElementById("nav-sheet");
+    sheet.hidden = !sheet.hidden;
+    moreBtn.setAttribute("aria-expanded", String(!sheet.hidden));
+  });
+  document.addEventListener("click", e => { if (!e.target.closest("#nav-sheet, #btn-nav-more")) _closeNavSheet(); });
+  watchTabs(document.getElementById("sec-team"), () => _tab.team);
+  watchTabs(document.getElementById("sec-player"), () => _tab.player);
+  watchTabs(document.getElementById("sec-league"), () => _tab.league);
 
   // Team selector
   const teamSel = document.getElementById("team-select");
@@ -2737,7 +2964,8 @@ function renderApp() {
     const team   = document.getElementById("team-select").value;
     const player = _selectedPlayer();
     if (!team || !player) return toast("Selecciona equipo y jugador", "err");
-    setSection("player");
+    _tab.player = "resumen";
+    setSection("player", { sync: false });
     renderPlayer(team, player.name, player.id);
   });
 
@@ -2746,6 +2974,7 @@ function renderApp() {
     const team   = document.getElementById("team-select").value;
     const player = _selectedPlayer();
     if (!team || !player) return toast("Selecciona equipo y jugador", "err");
+    setTab("team", "tiro");
     renderTeamShotmap(team, player.name);
   });
 
@@ -2754,6 +2983,7 @@ function renderApp() {
     const team   = document.getElementById("team-select").value;
     const player = _selectedPlayer();
     if (!team || !player) return toast("Selecciona equipo y jugador", "err");
+    setTab("team", "quintetos");
     renderTeamOnOff(team, player.name, player.id);
   });
 
@@ -2765,6 +2995,7 @@ function renderApp() {
     const checked = checkedEls.map(el => el.value);
     const checkedIds = checkedEls.map(el => Number(el.dataset.playerId)).filter(id => Number.isFinite(id));
     if (checked.length < 3 || checked.length > 5) return toast("Elegí entre 3 y 5 jugadores", "err");
+    setTab("team", "quintetos");
     renderTeamLineup(team, checked, checkedIds);
   });
 
@@ -2792,18 +3023,19 @@ function renderApp() {
     });
   }
 
-  document.getElementById("btn-config").addEventListener("click", () => {
-    setSection("config");
-    renderConfig();
-  });
+  document.getElementById("btn-config").addEventListener("click", () => goSection("config"));
 
+  // Atrás, Adelante o una dirección editada a mano reconstruyen la vista (X-01 RF-4).
+  onRouteChange(() => applyRoute());
+  startRoute();
+}
+
+// Abre la dirección con la que se cargó la app; sin dirección (o con una inválida) abre la sección inicial (RF-15, RF-16).
+async function startRoute() {
   // Una dirección con dos jugadores abre directamente Comparar › Jugadores (F-05 RF-8).
-  if (comparePlayersFromUrl()) {
-    renderCompare();
-    return;
-  }
-  setSection("import");
-  renderImport();
+  if (comparePlayersFromUrl() && !parseRoute()) { renderCompare(); return; }
+  if (await applyRoute({ initial: true })) return;
+  await openInitialSection();
 }
 
 // ── Config screen (F-13) ─────────────────────────────────────────────────────
@@ -2816,7 +3048,7 @@ async function renderConfig() {
   </div>
   <div id="config-calibrate-card"></div>`;
   document.getElementById("btn-config-back").addEventListener("click", () => {
-    setSection(_lastSection !== "config" ? _lastSection : "import");
+    goSection(_lastSection !== "config" ? _lastSection : "import");
   });
   try {
     const data = await api.settings();
