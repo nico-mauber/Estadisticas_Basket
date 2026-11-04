@@ -268,6 +268,20 @@ class UserPref(db.Model):
     updated_at = db.Column(db.String, nullable=False)
 
 
+class SavedQuery(db.Model):
+    """Búsqueda guardada con nombre (F-10): parámetros planos de una búsqueda de quintetos o de jugadores."""
+    __tablename__  = "saved_queries"
+    __table_args__ = (db.UniqueConstraint("owner", "name", name="uq_saved_queries_owner_name"),)
+
+    id         = db.Column(db.Integer, primary_key=True)
+    owner      = db.Column(db.String, nullable=False)
+    name       = db.Column(db.String, nullable=False)
+    kind       = db.Column(db.String, nullable=False)
+    params     = db.Column(db.Text, nullable=False, default="{}")
+    created_at = db.Column(db.String, nullable=False)
+    updated_at = db.Column(db.String, nullable=False)
+
+
 class GameSource(db.Model):
     """JSON crudo de FIBA archivado (gzip) para reprocesar sin volver a descargarlo (F-11, DA-12)."""
     __tablename__ = "game_sources"

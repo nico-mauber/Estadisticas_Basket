@@ -2230,6 +2230,44 @@ def delete_pref():
     return jsonify({"scope": scope, "key": key, "deleted": deleted})
 
 
+# ── Consultas guardadas (F-10) ─────────────────────────────────────────────
+
+@app.route("/api/saved-queries")
+@login_required
+def saved_queries_list():
+    import saved_queries
+    try:
+        return jsonify(saved_queries.list_queries(prefs.current_owner(), (request.args.get("kind") or "").strip() or None))
+    except saved_queries.SavedQueryError as e:
+        return jsonify(e.payload()), e.status
+
+
+@app.route("/api/saved-queries", methods=["POST"])
+@login_required
+def saved_queries_create():
+    import saved_queries
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return jsonify({"error": "Cuerpo inválido.", "code": "parametro_invalido"}), 400
+    try:
+        row = saved_queries.save_query(prefs.current_owner(), body.get("name"), body.get("kind"), body.get("params"),
+                                       overwrite=bool(body.get("overwrite")))
+    except saved_queries.SavedQueryError as e:
+        return jsonify(e.payload()), e.status
+    return jsonify(row), 201
+
+
+@app.route("/api/saved-queries/<int:query_id>", methods=["DELETE"])
+@login_required
+def saved_queries_delete(query_id: int):
+    import saved_queries
+    try:
+        saved_queries.delete_query(prefs.current_owner(), query_id)
+    except saved_queries.SavedQueryError as e:
+        return jsonify(e.payload()), e.status
+    return jsonify({"deleted": query_id})
+
+
 # ── PWA ────────────────────────────────────────────────────────────────────
 
 @app.route("/")
