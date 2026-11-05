@@ -628,6 +628,36 @@ def cross_route():
     return jsonify(out)
 
 
+@app.route("/api/events-production")
+@login_required
+def events_production_route():
+    """Producción desde eventos (A-07): `?entity=team|player&id=<código|player_id>` y el contexto de T-03. Cinco bloques
+    (asistencias, rebotes ofensivos y defensivos, robos, pérdidas) con la consecuencia en puntos de cada evento."""
+    import events_production
+    entity = (request.args.get("entity") or "").strip()
+    ident = (request.args.get("id") or "").strip()
+    if entity not in ("team", "player") or not ident or (entity == "player" and not ident.isdigit()):
+        return jsonify({"error": "Indicá entity (team o player) e id.", "code": "parametro_invalido"}), 400
+    try:
+        if entity == "team":
+            ident = ident.upper()
+            if not any(r["team_code"] == ident for r in repository.team_game_rows(None).values()):
+                return jsonify({"error": "Equipo no encontrado", "code": "no_encontrado"}), 404
+            ctx = context.parse_context(request.args, team_code=ident)
+        else:
+            pid = identity.canonical_id(int(ident))
+            if pid is None or identity.player_card(pid) is None:
+                return jsonify({"error": "Jugador no encontrado", "code": "no_encontrado"}), 404
+            ident = str(pid)
+            ctx = context.parse_context(request.args, player_id=pid)
+        out = events_production.events_production(entity, ident, ctx.competition_id, ctx)
+    except ContextError as e:
+        return jsonify(e.payload()), e.status
+    except events_production.EventsError as e:
+        return jsonify(e.payload()), e.status
+    return jsonify(out)
+
+
 @app.route("/api/similar/<int:player_id>")
 @login_required
 def similar_route(player_id: int):

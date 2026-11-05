@@ -1836,3 +1836,16 @@ input.ld-min, .tr-controls input { background: var(--surface2); color: var(--tex
 .cx-foot th, .cx-total { font-weight: 600; }
 .cx-legend, .cx-check { font-size: 13px; margin: 8px 0 0; }
 .cx-detail-table td.num { text-align: right; font-weight: 600; }
+
+/* ── Producción desde eventos (A-07) ── */
+.ev-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr)); gap: 12px; }
+.ev-card { min-width: 0; }
+.ev-low { opacity: .8; }
+.ev-n { font-weight: 400; color: var(--muted); margin: 0 6px; }
+.ev-kvs { display: grid; gap: 4px; margin-bottom: 8px; }
+.ev-kv { display: flex; justify-content: space-between; gap: 8px; font-size: 14px; }
+.ev-kv strong { text-align: right; overflow-wrap: anywhere; }
+.ev-table { width: 100%; font-size: 13px; }
+.ev-rec { font-size: 12px; margin: 6px 0 0; }
+.ev-scroll { overflow-x: auto; max-width: 100%; }
+.ev-table td:first-child { white-space: normal; }

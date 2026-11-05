@@ -30,6 +30,7 @@ import { renderSimilar } from "./components/similar-panel.js";
 import { renderTrends } from "./components/trends-panel.js";
 import { renderLineupSearch } from "./components/lineup-search.js";
 import { renderCross } from "./components/cross-panel.js";
+import { renderEvents } from "./components/events-panel.js";
 import { renderSavedQueries, saveQueryDialog } from "./components/saved-queries.js";
 import { renderCompareLineups, lineupsFromUrl } from "./components/compare-lineups.js";
 import { renderLeaders, renderCompetitionProfile } from "./components/leaders-panel.js";
@@ -375,6 +376,12 @@ function _renderTrends(section) {
     onChange: s => { _trendsState[section] = { metrics: s.metrics, ma: s.ma, lastN: s.lastN }; _renderTrends(section); },
   });
 }
+// Producción desde eventos (A-07): pestaña Eventos de Equipo y de Jugador.
+function _renderEvents(section) {
+  const id = section === "team" ? _teamData?.team_code : _playerData?.player_id;
+  if (id == null) return;
+  renderEvents(document.getElementById(`${section}-events`), section, id, { params: section === "team" ? _teamParams() : _playerParams() });
+}
 function _renderSimilar() {
   const id = _playerData?.player_id;
   if (id == null) return;
@@ -424,9 +431,9 @@ function _closeNavSheet() { document.getElementById("nav-sheet")?.setAttribute("
 
 // ── Pestañas de sección y direcciones (X-01) ─────────────────────────────────
 const TAB_DEFS = {
-  team: [["resumen", "Resumen"], ["plantel", "Plantel"], ["tiro", "Tiro"], ["posesion", "Posesión"], ["quintetos", "Quintetos"],
+  team: [["resumen", "Resumen"], ["plantel", "Plantel"], ["tiro", "Tiro"], ["posesion", "Posesión"], ["eventos", "Eventos"], ["quintetos", "Quintetos"],
          ["momentos", "Momentos"], ["enfrentamiento", "Enfrentamiento"], ["gamelog", "Game log"]],
-  player: [["resumen", "Resumen"], ["tiro", "Tiro"], ["posesion", "Posesión"], ["tendencias", "Tendencias"], ["similares", "Similares"], ["gamelog", "Game log"]],
+  player: [["resumen", "Resumen"], ["tiro", "Tiro"], ["posesion", "Posesión"], ["eventos", "Eventos"], ["tendencias", "Tendencias"], ["similares", "Similares"], ["gamelog", "Game log"]],
   league: [["tabla", "Tabla"], ["ranking", "Ranking"], ["lideres", "Líderes"], ["perfil", "Perfil"], ["mapa", "Mapa"]],
 };
 const TAB_DEFAULT = { team: "resumen", player: "resumen", league: "tabla" };
@@ -445,6 +452,7 @@ function setTab(section, tab, { sync = true } = {}) {
   if (section === "team" && tab === "enfrentamiento") _renderVersus();
   if (section === "league") _renderLeagueExtras();
   if (section === "player" && tab === "similares") _renderSimilar();
+  if (tab === "eventos" && (section === "team" || section === "player")) _renderEvents(section);
   if ((section === "team" && tab === "gamelog") || (section === "player" && tab === "tendencias")) _renderTrends(section);
   window.dispatchEvent(new Event("resize"));   // los gráficos de la pestaña recalculan su ancho
   if (sync) syncRoute();
@@ -1978,6 +1986,7 @@ function _applyTeamData(main, data) {
   syncRoute();
   if (_tab.team === "enfrentamiento") _renderVersus();
   if (_tab.team === "gamelog") _renderTrends("team");
+  if (_tab.team === "eventos") _renderEvents("team");
   _mountCtxBar(main, _teamComp, () => _reloadTeam(), data.team_code);
   mountContextHeader(document.getElementById("team-ctx-header"), {
     entity: "team", id: data.team_code, competition: _teamComp, last: _teamLastN, excludeTeam: data.team_code,
@@ -2494,6 +2503,7 @@ function _applyPlayerData(main, data) {
   syncRoute();
   if (_tab.player === "similares") _renderSimilar();
   if (_tab.player === "tendencias") _renderTrends("player");
+  if (_tab.player === "eventos") _renderEvents("player");
   // RF-1: la identidad se dibuja antes que cualquier card de métricas.
   if (data.player_id != null) {
     renderPlayerHeader(document.getElementById("player-identity"), data.player_id, {
@@ -3111,6 +3121,7 @@ function renderApp() {
         <div id="team-clutch" data-tabs="momentos"></div>
         <div id="team-versus" data-tabs="enfrentamiento"></div>
         <div id="team-trends" data-tabs="gamelog"></div>
+        <div id="team-events" data-tabs="eventos"></div>
       </div>
 
       <!-- Compare -->
@@ -3143,6 +3154,7 @@ function renderApp() {
         <div id="player-insights" data-tabs="resumen"></div>
         <div id="player-similar" data-tabs="similares"></div>
         <div id="player-trends" data-tabs="tendencias"></div>
+        <div id="player-events" data-tabs="eventos"></div>
         <div id="player-main"><p class="empty">Selecciona un jugador desde la vista de equipo.</p></div>
       </div>
 
