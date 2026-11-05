@@ -258,6 +258,20 @@ Preferencias por usuario (F-13). Clave compuesta `(owner, scope, key)`.
 
 ---
 
+### `saved_queries`
+Búsquedas guardadas con nombre (F-10). Tabla nueva, creada por `db.create_all()`. `UNIQUE(owner, name)`.
+
+| Columna | Tipo | Descripción |
+|---------|------|-------------|
+| `id` | INTEGER PK | |
+| `owner` | TEXT NOT NULL | Usuario de sesión o `"_open"` |
+| `name` | TEXT NOT NULL | 1–80 caracteres |
+| `kind` | TEXT NOT NULL | `quintetos` o `jugadores` |
+| `params` | TEXT NOT NULL | JSON de un objeto plano `{clave: valor}` más `_saved` (versiones de datos y configuración al guardar) |
+| `created_at`, `updated_at` | TEXT NOT NULL | ISO-8601 |
+
+---
+
 ## Inicialización y migración
 
 ```bash

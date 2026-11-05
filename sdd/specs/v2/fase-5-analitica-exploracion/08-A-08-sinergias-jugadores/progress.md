@@ -1,74 +1,28 @@
-# Progress — A-08: Sinergias entre jugadores
+# Progress — A-08: Sinergias de jugadores
 
-> **Estado:** ⬜ No iniciado
-> Reglas: `sdd/04-implement.md`. Tareas: [tasks.md](tasks.md). Spec: [spec.md](spec.md). Plan: [plan.md](plan.md).
+> **Estado:** 🔶 Implementado (Equipo › Quintetos y Jugador › Impacto, `GET /api/synergy/<team>`). Faltan la tabla `pairs`, la entidad `pair` de T-05 y los rankings de T-01.
+> **Fecha:** 2026-11-05
 
-## Estado de tareas
-### Grupo A — Backend: piezas de soporte
-- [ ] T-A1 · `lineups.all_lineups(size=2)`
-- [ ] T-A2 · `lineups.pair_states`
-- [ ] T-A3 · `context.filter_events`
-- [ ] T-A4 · `chains.assist_pairs_from_events` (A-07)
-- [ ] T-A5 [P] · `stats_engine.assist_link_rates`
-### Grupo B — Backend: análisis, loader, tabla y ruta
-- [ ] T-B1 · `assist_matrix`
-- [ ] T-B2 · Triples generados y puntos tras asistencia
-- [ ] T-B3 · `reconcile_assists` y check `assist_link`
-- [ ] T-B4 · `pair_table` y loader `pair`
-- [ ] T-B5 · `teammate_impact`
-- [ ] T-B6 · `synergy_report` y `GET /api/synergy/<team_code>`
-- [ ] T-B7 · Tabla `pairs`
-### Grupo C — Frontend: api.js
-- [ ] T-C1 · `api.synergy`
-### Grupo D — Frontend: UI
-- [ ] T-D1 · `components/synergy-panel.js`
-- [ ] T-D2 · Sección Sinergias en S3 Quintetos
-- [ ] T-D3 · Bloque de sinergias en S4 Impacto
-- [ ] T-D4 [P] · Estilos
-### Grupo E — Errores, estados vacíos, offline/SW
-- [ ] T-E1 · Estados de UI
-- [ ] T-E2 · `sw.js` (`STATIC` y `CACHE`)
-### Grupo F — Verificación de feature
-- [ ] T-F1 · Backend arranca sin traceback
-- [ ] T-F2 · `database.py` idempotente
-- [ ] T-F3 · Endpoints probados con curl
-- [ ] T-F4 · Consola del navegador sin errores
-- [ ] T-F5 · Recorrido de CA
-- [ ] T-F6 … T-F22 · Verificación de CA-1…CA-17
+## Qué se hizo
+- `backend/synergy.py` y `GET /api/synergy/<team_code>`: matriz de asistencias con cuadre, rankings de triples y de puntos tras asistencia, parejas con ajuste de T-02 y jugadores que potencian a sus compañeros.
+- `components/synergy-panel.js`: bloque de sinergias en Equipo › Quintetos y pestaña **Impacto** en Jugador. `sw.js` v62.
 
-## Estado de CA (gate de aceptación)
+## Estado de CA
+`a08_sim.py` 27/27 y `a08_browser.py` 30/30 (1280 y 360 px), con el equipo ALB de la base de ejemplo (umbrales de pareja bajados para probar los rankings).
+
 | CA | Estado | Evidencia |
 |---|---|---|
-| CA-1 (CA del cliente) | ⬜ | |
-| CA-2 | ⬜ | |
-| CA-3 | ⬜ | |
-| CA-4 | ⬜ | |
-| CA-5 | ⬜ | |
-| CA-6 | ⬜ | |
-| CA-7 | ⬜ | |
-| CA-8 | ⬜ | |
-| CA-9 | ⬜ | |
-| CA-10 | ⬜ | |
-| CA-11 | ⬜ | |
-| CA-12 | ⬜ | |
-| CA-13 | ⬜ | |
-| CA-14 | ⬜ | |
-| CA-15 | ⬜ | |
-| CA-16 | ⬜ | |
-| CA-17 | ⬜ | |
+| CA-1 (cliente) | ✅ | matriz 33 + sin vínculo 5 + incompletas 0 = 38 asistencias del pbp = 38 del box; totales de fila = totales de columna |
+| CA-2 | 🔶 | ningún anotador es el propio asistente; la matriz coincide con las asistencias vinculadas de A-07; no se distingue vínculo oficial de respaldo (no hay vínculo de FIBA guardado) |
+| CA-3 | ✅ | `check.games_differing` lista los partidos que difieren del box (ninguno) |
+| RF-5, RF-6, RF-7 | ✅ | triples y puntos suman los de la matriz; muestra baja al final |
+| RF-8, RF-9, RF-10 | ✅ | una fila por cada pareja que compartió cancha; filas por Net ajustado; rankings solo con muestra suficiente (30 posesiones por defecto) |
+| RF-12, RF-13 | ✅ | diferencial con y sin, ponderado por la menor muestra; ordenado por impacto |
+| RF-14 | ✅ | Impacto en Jugador |
+| RF-11, RF-18 | 🔶 | sin tabla T-06 `pairs`; solo se exporta la matriz |
 
-## Gates técnicos
-- Backend arranca sin traceback: ⬜
-- `upgrade_db()` idempotente (A-08 no toca esquema): ⬜
-- Endpoints probados manualmente: ⬜
-- Consola del navegador sin errores JS: ⬜
-
-## Desviaciones respecto a docs/ o plan
-
-## Docs a actualizar
-- [ ] `docs/api.md` — `GET /api/synergy/<team_code>` (+ `player`, `top`), tabla `pairs`, tipo `pair`
-- [ ] `docs/metrics.md` — matriz de asistencias y su cuadre, impacto sobre compañeros (con y sin), ajuste de parejas
-- [ ] `docs/frontend.md` — sección Sinergias (S3 Quintetos) y bloque de Impacto (S4), `synergy-panel.js`, copy nuevo (para extracción en F-21)
-- [ ] `docs/architecture.md` — módulo `synergy.py`
-
-## Deuda / TODO
+## Desviaciones
+- Sin tabla `pairs` ni entidad `pair` de T-05; las parejas llevan solo OER, DER, Net, TS% y eFG%.
+- Las dimensiones de posesión del contexto no se aplican a las parejas (los filtros de evento no entran).
+- El estado «B sin A» usa los partidos totales de B como conteo de partidos.
+- Copy sin `t()` (F-21).

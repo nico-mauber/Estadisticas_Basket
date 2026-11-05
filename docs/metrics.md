@@ -265,6 +265,10 @@ Cada rebote ofensivo propio (incluido el de equipo) abre una oportunidad nueva (
 
 **Tipos de pérdida.** pase = `badpass`; manejo = `ballhandling`; pasos = `travel`; 24 segundos = `24sec`; otras = el resto de los subtipos y las pérdidas sin subtipo.
 
+## Contextos cruzados (A-06)
+
+Cada celda reparte las posesiones del equipo (o las del rival, en defensa) según dos dimensiones y calcula la métrica como **cociente de totales de la celda**: PPP = puntos / posesiones; eFG% = (T2c + 1,5 × T3c) / tiros de campo; TS% = puntos / (2 × (tiros de campo + 0,44 × TLi)); PPT = (2 × T2c + 3 × T3c) / tiros de campo; TO% = pérdidas / (tiros de campo + 0,44 × TLi + pérdidas); OR% = RO / (RO + RD rival); FT Rate = TLi / tiros de campo; volumen = posesiones. Con la dimensión oportunidad la unidad es la oportunidad y OR% no aplica. **Tramo de reloj de una posesión** = el del último tiro de campo con tramo derivable; sin tiro, «Sin tiro». **Clutch** = la posesión empieza en la ventana de cierre (`clutch.window_secs`) de un partido cerrado (`clutch.margin`), igual que Cierres. Mínimo de muestra de la celda: entidad «split» de T-02. El PPP se ajusta por regresión a la media (`regression.split.k`); el color usa el valor ajustado. Percentil: contra la misma celda de los demás equipos cuando las dos dimensiones son comunes a todos (cuarto, clutch, tramo, origen, tipo, oportunidad, sede); si no, dentro de la matriz.
+
 ## Composición de los puntos (A-05)
 
 Con el box oficial de los partidos de la selección (en defensa, el del rival): puntos de triples = 3 × T3c, de dobles = 2 × T2c, de tiros libres = TLc; el peso de cada uno es su parte de los puntos (suman 100 %). **Peso de las pérdidas**: pérdidas / posesiones (`TC + 0,44 × TL + TO − RO`) y puntos perdidos estimados = pérdidas × PPP del equipo (estimación). **Peso de las asistencias**: asistencias / canastas de campo, y puntos generados = 2 × asistencias a doble + 3 × asistencias a triple (A-12; los tiros libres asistidos no suman).

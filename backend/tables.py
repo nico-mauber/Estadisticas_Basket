@@ -83,6 +83,7 @@ class TableDef:
     totals_mode: str = "sum"             # sum | none
     avg_mode: str = "population"          # population | none
     title_fn: Callable | None = None
+    payload_extras: Callable | None = None   # F-10: `{info, filters}` que se suma al payload y a meta.filters
 
 
 @dataclass
@@ -115,6 +116,7 @@ def register_table(table_id: str, *, entity_type: str, title: str, builder: Call
         totals_mode=kwargs.get("totals_mode", "sum"),
         avg_mode=kwargs.get("avg_mode", "population"),
         title_fn=kwargs.get("title_fn"),
+        payload_extras=kwargs.get("payload_extras"),
     )
 
 
@@ -288,8 +290,11 @@ def _compute(tdef: TableDef, treq: TableRequest) -> dict:
     # 15. meta
     title = tdef.title_fn(treq) if tdef.title_fn else tdef.title
     meta = _meta(tdef, treq, title, echo, comp_label)
+    extras = tdef.payload_extras(treq) if tdef.payload_extras else {}
+    if extras.get("filters"):
+        meta["filters"] = list(meta["filters"]) + list(extras["filters"])
 
-    return {
+    out = {
         "table_id": tdef.table_id,
         "title": title,
         "entity_type": entity_type,
@@ -304,6 +309,9 @@ def _compute(tdef: TableDef, treq: TableRequest) -> dict:
         "base": base,
         "meta": meta,
     }
+    if "info" in extras:
+        out["info"] = extras["info"]
+    return out
 
 
 _SAMPLE_ENTITIES = frozenset({"player", "lineup", "onoff", "clutch", "origin", "ptype"})
@@ -951,6 +959,16 @@ def _build_team_lineups(treq: TableRequest) -> list:
     return _lineup_rows(treq, size)
 
 
+def _build_lineup_search(treq: TableRequest) -> list:
+    import lineup_search
+    return lineup_search.table_rows(treq)
+
+
+def _lineup_search_extras(treq: TableRequest) -> dict:
+    import lineup_search
+    return lineup_search.payload_extras(treq)
+
+
 def _build_team_onoff(treq: TableRequest) -> list:
     """Una fila por jugador del plantel: ON, OFF o la diferencia ON − OFF (`view`, F-06 RF-12)."""
     import identity
@@ -1081,6 +1099,15 @@ def _build_team_roster(treq: TableRequest) -> list:
 
 
 # ── Registro de las 6 tablas de T-06 (plan §4.2) ───────────────────────────────
+
+register_table(
+    "lineup_search", entity_type="lineup", title="Buscador de quintetos", builder=_build_lineup_search,
+    default_columns=("_name", "_team", "possessions", "net_rating", "oer", "der", "efg_pct", "ts_pct", "or_pct", "to_pct"),
+    row_kind="entity", extra_columns=(("_name", "Quinteto", "text"), ("_team", "Eq", "text")),
+    default_sort={"key": "net_rating", "dir": "desc", "use_adjusted": True},
+    totals_mode="none", payload_extras=_lineup_search_extras,
+    title_fn=lambda treq: f"Buscador de quintetos — {_competition_label(treq.comp_id) or 'competencia'}",
+)
 
 register_table(
     "league_teams", entity_type="team", title="Ranking de Liga",
