@@ -761,6 +761,18 @@ Cabecera de contexto: cómo quedó la selección activa de una entidad. Auth: `l
 
 Response 200: `entity {type, id, name}`, `label` (etiqueta legible de los filtros aplicados), `record` ("V-D"; `null` en competencia), `wins`, `losses`, `avg_margin` (diferencia media de puntos con 1 decimal; `null` sin partidos), `games` (N: partidos de la selección), `games_total` (M: partidos de la entidad en la competencia **sin ningún otro filtro**), `sample` (badge de T-02: partidos para equipo, minutos para jugador) y `context` (eco de T-03 con `games_excluded` e `ignored`). Récord y diferencia salen del resultado final: victoria = puntos propios > puntos del rival; en un jugador cuentan solo los partidos que jugó. Errores: 400 `parametro_invalido` (tipo o id inválidos), 400 `contexto_invalido`, 400 `competencia_inexistente`, 404 `no_encontrado`.
 
+## GET `/api/synergy/<team_code>` — NUEVO (A-08)
+
+Sinergias entre jugadores de un equipo. Auth: `login_required`. Query: el contexto de T-03 y `player` (`player_id`, agrega el recorte `player`).
+
+Response 200: `assist_matrix`, `rankings`, `pairs`, `teammate_impact`, `context` y, con `player`, `player`.
+- `assist_matrix`: `rows` (quien asiste) y `cols` (quien anota) como `{id, name}`, `cells[] {assister, scorer, count, points, threes}`, `row_totals` y `col_totals` por `player_id`, `total` (canastas de campo asistidas vinculadas), `unlinked` (asistencias del pbp sin anotador identificado), `incomplete` (en posesiones incompletas) y `check {ok, matrix, unlinked, incomplete, pbp, box, box_matches, self_links, games_differing}`: matriz + sin vínculo + incompletas = asistencias del play-by-play, que deben coincidir con `team_game_stats.ast`; ningún anotador es el propio asistente.
+- `rankings`: `threes_pairs` (asistente → anotador por triples), `threes_by_player` y `points_after_assist` (por anotador: puntos, canastas asistidas, `assisted_share`, asistente principal). Los de muestra baja (`sample.player.*`, en minutos) van al final con `ranked: false`.
+- `pairs`: `rows[]` con una fila por cada pareja que compartió cancha (`id` = `<equipo>:<pid>-<pid>`, valores, `adj` de OER, DER y Net, `sample` con los umbrales `sample.pair.*`) y `rankings` con los ids de las mejores parejas con muestra suficiente por Net ajustado, OER ajustado y TS%.
+- `teammate_impact[]`: por jugador A, `impact_net` e `impact_oer` (promedio del diferencial de cada compañero B con y sin A en cancha, ponderado por la menor de las dos muestras), `n` y `companions[] {net_with, net_without, diff_net, diff_oer, weight}`. Solo entran compañeros con muestra suficiente en ambos estados.
+- `player`: `best_pairs`, `assists_to`, `assisted_by` y `boosts`.
+Errores: 400 `parametro_invalido`, 400 `competencia_inexistente`, 404 `no_encontrado` y 404 `sin_pbp`.
+
 ## GET `/api/events-production` — NUEVO (A-07)
 
 Consecuencia en puntos de cada evento de un equipo o un jugador. Auth: `login_required`. Query: `entity=team|player`, `id` (código de equipo o `player_id`, que sigue las fusiones de C-08) y el contexto de T-03 (el contexto de nivel evento no se aplica).

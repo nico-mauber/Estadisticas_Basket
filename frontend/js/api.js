@@ -96,6 +96,7 @@ export const api = {
   possessionClock: (params = {}) => apiFetch(`/api/possession-clock${qs(params)}`),
   gamePlan:      (params = {}) => apiFetch(`/api/game-plan${qs(params)}`),
   eventsProduction: (params = {}) => apiFetch(`/api/events-production${qs(params)}`),
+  synergy:       (team, params = {}) => apiFetch(`/api/synergy/${encodeURIComponent(team)}${qs(params)}`),
   cross:         (params = {}) => apiFetch(`/api/cross${qs(params)}`),
   savedQueries:  (kind) => apiFetch(`/api/saved-queries${qs({ kind })}`),
   saveQuery:     body => send("/api/saved-queries", "POST", body),

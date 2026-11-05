@@ -658,6 +658,28 @@ def events_production_route():
     return jsonify(out)
 
 
+@app.route("/api/synergy/<team_code>")
+@login_required
+def synergy_route(team_code: str):
+    """Sinergias del equipo (A-08): matriz de asistencias, rankings de triples y puntos tras asistencia, parejas con ajuste de
+    muestra y jugadores que potencian a sus compañeros. `?player=<player_id>` agrega el recorte del jugador. Contexto de T-03."""
+    import synergy
+    code = team_code.strip().upper()
+    if not any(r["team_code"] == code for r in repository.team_game_rows(None).values()):
+        return jsonify({"error": "Equipo no encontrado", "code": "no_encontrado"}), 404
+    player = (request.args.get("player") or "").strip() or None
+    if player is not None and not player.isdigit():
+        return jsonify({"error": "El jugador debe ser un id numérico.", "code": "parametro_invalido"}), 400
+    try:
+        ctx = context.parse_context(request.args, team_code=code)
+        out = synergy.synergy(code, ctx.competition_id, ctx, player)
+    except ContextError as e:
+        return jsonify(e.payload()), e.status
+    except synergy.SynergyError as e:
+        return jsonify(e.payload()), e.status
+    return jsonify(out)
+
+
 @app.route("/api/similar/<int:player_id>")
 @login_required
 def similar_route(player_id: int):

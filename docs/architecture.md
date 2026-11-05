@@ -167,6 +167,9 @@ o configuración (F-13). Tolerante a correr fuera de `app_context`.
 ### `breakdown.py`, `team_insights.py`, `warmup.py` (correcciones de Equipo, 2026-10)
 `breakdown.py` calcula el desglose ofensivo (`paint_pts`, `second_chance_pts`, `pts_from_tov`, `bench_pts`, `fast_break_pts`) cuando FIBA lo deja `NULL`: `repository` lo llama como *row filler* al armar las filas de equipo y marca `_derived`; el perfil informa `extras_source` (`oficial` / `calculado`). `team_insights.py` arma fortalezas y debilidades del equipo con el percentil de cada métrica en su competencia (reglas fijas, como "Ventajas y amenazas" de Preparar); alimenta `GET /api/team-insights/<code>`. `warmup.py` calcula las posesiones de todos los partidos en un hilo (solo con `SB_WARMUP=1`) al arrancar y cuando sube `data_version` (`cache.on_data_bump`).
 
+### `synergy.py` (A-08)
+Matriz de asistencias sobre las posesiones de A-01 (`assister_id`, `finisher_id`), conciliada con los eventos `assist` del pbp y con `team_game_stats.ast`. Parejas y jugadores individuales salen de `lineups.all_lineups` con `size=2` y `size=1`, tratadas como entidad `pair` de T-02 (umbrales `sample.pair.*`, regresión `regression.pair.k`); el estado «B sin A» se obtiene restando a B su estado con A (conteos y tiempo). Memoizado en `cache` (`synergy`).
+
 ### `events_production.py` (A-07)
 Vincula cada evento con la posesión que sigue o que lo contiene, sobre las posesiones de A-01: asistencia = posesión con `assister_id`; rebote ofensivo = `Chance` n ≥ 2 (desenlace de A-04); rebote defensivo y robo = posesión con origen `rebote_defensivo` o `robo`; pérdida = posesión del rival que sigue en el mismo período. Es independiente de `chains.py` (que sigue sirviendo al partido en vivo). Memoizado en `cache` (`events:collect`, `events:report`).
 
