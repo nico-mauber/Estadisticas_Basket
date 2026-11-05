@@ -28,6 +28,11 @@ import { renderVersus } from "./components/versus-panel.js";
 import { renderInsights } from "./components/insights-panel.js";
 import { renderSimilar } from "./components/similar-panel.js";
 import { renderTrends } from "./components/trends-panel.js";
+import { renderLineupSearch } from "./components/lineup-search.js";
+import { renderCross } from "./components/cross-panel.js";
+import { renderEvents } from "./components/events-panel.js";
+import { renderSynergy, renderImpact } from "./components/synergy-panel.js";
+import { renderSavedQueries, saveQueryDialog } from "./components/saved-queries.js";
 import { renderCompareLineups, lineupsFromUrl } from "./components/compare-lineups.js";
 import { renderLeaders, renderCompetitionProfile } from "./components/leaders-panel.js";
 import { renderTabs, applyTabs, watchTabs } from "./components/tabs.js";
@@ -372,6 +377,21 @@ function _renderTrends(section) {
     onChange: s => { _trendsState[section] = { metrics: s.metrics, ma: s.ma, lastN: s.lastN }; _renderTrends(section); },
   });
 }
+// Sinergias (A-08): Equipo › Quintetos y Jugador › Impacto.
+function _renderSynergy() {
+  const code = _teamData?.team_code;
+  if (code) renderSynergy(document.getElementById("team-synergy"), code, { params: _teamParams() });
+}
+function _renderImpactTab() {
+  if (_playerData?.player_id == null || !_playerData.team_code) return;
+  renderImpact(document.getElementById("player-impact"), _playerData.team_code, _playerData.player_id, { params: _playerParams() });
+}
+// Producción desde eventos (A-07): pestaña Eventos de Equipo y de Jugador.
+function _renderEvents(section) {
+  const id = section === "team" ? _teamData?.team_code : _playerData?.player_id;
+  if (id == null) return;
+  renderEvents(document.getElementById(`${section}-events`), section, id, { params: section === "team" ? _teamParams() : _playerParams() });
+}
 function _renderSimilar() {
   const id = _playerData?.player_id;
   if (id == null) return;
@@ -421,9 +441,9 @@ function _closeNavSheet() { document.getElementById("nav-sheet")?.setAttribute("
 
 // ── Pestañas de sección y direcciones (X-01) ─────────────────────────────────
 const TAB_DEFS = {
-  team: [["resumen", "Resumen"], ["plantel", "Plantel"], ["tiro", "Tiro"], ["posesion", "Posesión"], ["quintetos", "Quintetos"],
+  team: [["resumen", "Resumen"], ["plantel", "Plantel"], ["tiro", "Tiro"], ["posesion", "Posesión"], ["eventos", "Eventos"], ["quintetos", "Quintetos"],
          ["momentos", "Momentos"], ["enfrentamiento", "Enfrentamiento"], ["gamelog", "Game log"]],
-  player: [["resumen", "Resumen"], ["tiro", "Tiro"], ["posesion", "Posesión"], ["tendencias", "Tendencias"], ["similares", "Similares"], ["gamelog", "Game log"]],
+  player: [["resumen", "Resumen"], ["tiro", "Tiro"], ["posesion", "Posesión"], ["eventos", "Eventos"], ["impacto", "Impacto"], ["tendencias", "Tendencias"], ["similares", "Similares"], ["gamelog", "Game log"]],
   league: [["tabla", "Tabla"], ["ranking", "Ranking"], ["lideres", "Líderes"], ["perfil", "Perfil"], ["mapa", "Mapa"]],
 };
 const TAB_DEFAULT = { team: "resumen", player: "resumen", league: "tabla" };
@@ -442,6 +462,9 @@ function setTab(section, tab, { sync = true } = {}) {
   if (section === "team" && tab === "enfrentamiento") _renderVersus();
   if (section === "league") _renderLeagueExtras();
   if (section === "player" && tab === "similares") _renderSimilar();
+  if (tab === "eventos" && (section === "team" || section === "player")) _renderEvents(section);
+  if (section === "team" && tab === "quintetos") _renderSynergy();
+  if (section === "player" && tab === "impacto") _renderImpactTab();
   if ((section === "team" && tab === "gamelog") || (section === "player" && tab === "tendencias")) _renderTrends(section);
   window.dispatchEvent(new Event("resize"));   // los gráficos de la pestaña recalculan su ancho
   if (sync) syncRoute();
@@ -458,7 +481,7 @@ function currentRoute() {
   else if (section === "league") r.tab = _tab.league;
   else if (section === "import") r.tab = _importTab;
   else if (section === "compare") r.tab = _cmpTab();
-  else if (section === "search") r.tab = "jugadores";
+  else if (section === "search") r.tab = _searchTab;
   else if (section === "partido") r.id = _gameId;
   return r;
 }
@@ -471,8 +494,9 @@ function syncRoute() {
     : r.section === "player" ? { competition: _playerComp, last: _playerLastN }
     : r.section === "league" ? { competition: _leagueComp, last: null, metric: _tab.league === "lideres" ? _leaders.metric : null,
         min_minutes: _tab.league === "lideres" ? _leaders.min : null }
+    : r.section === "search" ? {}
     : { competition: null, last: null };
-  writeRoute(r, query);
+  writeRoute(r, { ..._searchUrlQuery(r.section), ...query });
 }
 
 const _notice = msg => toast(msg, "err");
@@ -551,10 +575,19 @@ async function applyRoute({ initial = false } = {}) {
         await renderCompare();
         if (p.tab === "equipos" || p.tab === "jugadores" || p.tab === "quintetos") _initCompareTabs(p.tab);
         break;
-      case "search":
+      case "search": {
+        const t = SEARCH_TABS.some(([id]) => id === p.tab) ? p.tab : "jugadores";
+        if (p.tab && t !== p.tab) _notice("Esa pestaña todavía no está disponible.");
+        _searchTab = t;
+        const fromUrl = _searchParamsFromUrl();
+        if (t === "quintetos" && Object.keys(fromUrl).length) _searchInit = fromUrl;
+        if (t === "contextos" && !fromUrl.team && (fromUrl.competition || fromUrl.last)) _cross = { ..._cross, competition: fromUrl.competition || "", last: fromUrl.last || "" };
+        if (t === "contextos" && fromUrl.team) _cross = { team: fromUrl.team.toUpperCase(), side: fromUrl.side || "ataque", dimX: fromUrl.dim_x || "tramo", dimY: fromUrl.dim_y || "origen",
+                                                          metric: fromUrl.metric || "ppp", limit: Number(fromUrl.limit) || 8, color: fromUrl.color || "", competition: fromUrl.competition || "", last: fromUrl.last || "" };
         setSection("search", { sync: false });
         await renderSearch();
         break;
+      }
       case "preparar":
         setSection("preparar", { sync: false });
         renderPrepare(document.getElementById("preparar-main"), { onOpenGame: showGame });
@@ -1965,6 +1998,8 @@ function _applyTeamData(main, data) {
   syncRoute();
   if (_tab.team === "enfrentamiento") _renderVersus();
   if (_tab.team === "gamelog") _renderTrends("team");
+  if (_tab.team === "eventos") _renderEvents("team");
+  if (_tab.team === "quintetos") _renderSynergy();
   _mountCtxBar(main, _teamComp, () => _reloadTeam(), data.team_code);
   mountContextHeader(document.getElementById("team-ctx-header"), {
     entity: "team", id: data.team_code, competition: _teamComp, last: _teamLastN, excludeTeam: data.team_code,
@@ -2481,6 +2516,8 @@ function _applyPlayerData(main, data) {
   syncRoute();
   if (_tab.player === "similares") _renderSimilar();
   if (_tab.player === "tendencias") _renderTrends("player");
+  if (_tab.player === "eventos") _renderEvents("player");
+  if (_tab.player === "impacto") _renderImpactTab();
   // RF-1: la identidad se dibuja antes que cualquier card de métricas.
   if (data.player_id != null) {
     renderPlayerHeader(document.getElementById("player-identity"), data.player_id, {
@@ -2708,8 +2745,74 @@ function _playerCompLabel() {
   return "";
 }
 
-// ── Search section (T-06: migrada a createDataTable con rowFilter) ─────────────
-let _searchComp = "";   // id de competencia del último fetch ("" = todas)
+// ── Explorar (X-01, F-10): pestañas Jugadores · Quintetos · Consultas ───────────
+const SEARCH_TABS = [["jugadores", "Jugadores"], ["quintetos", "Quintetos"], ["contextos", "Contextos"], ["consultas", "Consultas"]];
+let _cross = { team: "", side: "ataque", dimX: "tramo", dimY: "origen", metric: "ppp", limit: 8, color: "", competition: "", last: "" };   // A-06
+let _searchTab = "jugadores";
+let _searchInit = null;          // parámetros a restaurar al abrir la pestaña (consulta guardada o dirección)
+let _searchStale = false;        // la consulta que se abre se guardó con otros datos o configuración
+let _searchLastParams = null;    // última búsqueda de quintetos (la pestaña la recuerda al volver)
+let _searchKeys = new Set();     // claves de la búsqueda que hoy están en la dirección
+const _SEARCH_URL_KEYS = /^(competition|team|include|exclude|min_poss|adjusted|last|side|dim_x|dim_y|metric|limit|color|(min|max)\..+)$/;
+
+function _searchParamsFromUrl() {
+  const out = {};
+  try { for (const [k, v] of new URL(location.href).searchParams) if (_SEARCH_URL_KEYS.test(k) && v !== "") out[k] = v; } catch { /* sin dirección */ }
+  return out;
+}
+
+// Parámetros de la búsqueda de quintetos en la dirección; al salir de Explorar se quitan para que no queden colgados.
+function _searchUrlQuery(section) {
+  const q = {};
+  if (section === "search" && _searchTab === "quintetos" && _searchLastParams)
+    for (const [k, v] of Object.entries(_searchLastParams)) if (_SEARCH_URL_KEYS.test(k)) q[k] = v;
+  if (section === "search" && _searchTab === "contextos" && _cross.team)
+    Object.assign(q, { competition: _cross.competition, last: _cross.last, team: _cross.team, side: _cross.side, dim_x: _cross.dimX, dim_y: _cross.dimY,
+                       metric: _cross.metric, limit: _cross.limit === 8 ? "" : _cross.limit, color: _cross.color });
+  const current = new Set(Object.keys(q));
+  for (const k of _searchKeys) if (!current.has(k)) q[k] = null;
+  _searchKeys = current;
+  return q;
+}
+
+async function renderSearch() {
+  renderTabs(document.getElementById("search-tabs"), SEARCH_TABS, _searchTab, t => {
+    _searchInit = null; _searchStale = false; _searchTab = t;
+    renderSearch();
+    syncRoute();
+  });
+  const main = document.getElementById("search-main");
+  if (_searchTable) { _searchTable.destroy?.(); _searchTable = null; }
+  if (_searchTab === "quintetos") {
+    const initial = _searchInit || _searchLastParams || {}, stale = _searchStale;
+    _searchInit = null; _searchStale = false;
+    return renderLineupSearch(main, {
+      initial, stale,
+      onState: p => { _searchLastParams = p; syncRoute(); },
+      onSave: p => saveQueryDialog({ kind: "quintetos", params: p, notify: toast }),
+    });
+  }
+  if (_searchTab === "contextos") {
+    return renderCross(main, {
+      ..._cross, params: { competition: _cross.competition || null, last: _cross.last || null, ...contextParams() },
+      onChange: s => { _cross = { ..._cross, ...s }; renderSearch(); syncRoute(); },
+    });
+  }
+  if (_searchTab === "consultas") return renderSavedQueries(main, { onRun: openSavedQuery, notify: toast });
+  return _renderSearchPlayers();
+}
+
+// Ejecuta una consulta guardada: abre la pestaña de su tipo con los filtros restaurados.
+async function openSavedQuery(q) {
+  const { _saved, ...params } = q.params || {};
+  _searchTab = q.kind; _searchInit = params; _searchStale = !!q.stale;
+  setSection("search", { sync: false });
+  await renderSearch();
+  syncRoute();
+}
+
+// ── Buscador de jugadores (T-06: migrado a createDataTable con rowFilter) ──────
+let _searchComp = ""   // id de competencia del último fetch ("" = todas)
 let _searchTable = null;        // handle de createDataTable
 let _searchPayload = null;      // payload actual (para el mapa de índices de columnas)
 let _searchColIdx = {};         // key → índice en payload.columns
@@ -2753,8 +2856,13 @@ async function _loadSearchPayload() {
   return _searchPayload;
 }
 
-async function renderSearch() {
+async function _renderSearchPlayers() {
   const main = document.getElementById("search-main");
+  const init = _searchTab === "jugadores" ? _searchInit : null;
+  if (init) {   // consulta guardada: la competencia se resuelve antes de pedir los promedios
+    _searchInit = null;
+    if ((init.competition || "") !== _searchComp) { _searchComp = init.competition || ""; _searchPayload = null; }
+  }
   if (!_searchPayload) {
     main.innerHTML = '<p class="empty"><span class="spinner"></span>Cargando buscador...</p>';
     try { await _loadSearchPayload(); }
@@ -2789,6 +2897,7 @@ async function renderSearch() {
       <div class="search-actions">
         <button class="btn" id="sf-apply">Buscar</button>
         <button class="btn btn-ghost" id="sf-clear">Limpiar</button>
+        <button class="btn btn-ghost" id="sf-save">Guardar búsqueda</button>
         <span id="sf-count" class="td-muted"></span>
       </div>
     </div>
@@ -2814,7 +2923,7 @@ async function renderSearch() {
     box.innerHTML = '<p class="empty"><span class="spinner"></span>Cargando buscador...</p>';
     try { await _loadSearchPayload(); }
     catch { box.innerHTML = '<p class="empty below-avg">No se pudo cargar el buscador</p>'; return; }
-    renderSearch();
+    _renderSearchPlayers();
   });
   document.getElementById("sf-clear").addEventListener("click", async () => {
     main.querySelectorAll(".search-filters input, .search-ranges input").forEach(i => i.value = "");
@@ -2822,12 +2931,47 @@ async function renderSearch() {
     if (_searchComp) {   // volver a "todas las competencias"
       _searchComp = "";
       try { await _loadSearchPayload(); } catch { return; }
-      renderSearch();
+      _renderSearchPlayers();
       return;
     }
     _applySearch();
   });
+  document.getElementById("sf-save").addEventListener("click", () =>
+    saveQueryDialog({ kind: "jugadores", params: _searchParamsFromForm(), notify: toast }));
+  if (init) _restoreSearchForm(init);
   _applySearch();
+}
+
+// Filtros del buscador de jugadores como parámetros planos (porcentajes como fracción).
+function _searchParamsFromForm() {
+  const p = {};
+  const name = document.getElementById("sf-name").value.trim();
+  if (name) p.name = name;
+  const team = document.getElementById("sf-team").value;
+  if (team) p.team = team;
+  if (_searchComp) p.competition = String(_searchComp);
+  const pos = document.getElementById("sf-pos").value;
+  if (pos) p.position = pos;
+  for (const op of ["min", "max"]) {
+    document.querySelectorAll(`.sf-${op}`).forEach(inp => {
+      if (inp.value.trim() === "") return;
+      const v = parseFloat(inp.value);
+      p[`${op}.${inp.dataset.key}`] = String(inp.dataset.pct === "1" ? Math.round(v * 10000) / 1000000 : v);
+    });
+  }
+  return p;
+}
+
+function _restoreSearchForm(p) {
+  document.getElementById("sf-name").value = p.name || "";
+  document.getElementById("sf-team").value = p.team || "";
+  document.getElementById("sf-pos").value = p.position || "";
+  for (const op of ["min", "max"]) {
+    document.querySelectorAll(`.sf-${op}`).forEach(inp => {
+      const v = p[`${op}.${inp.dataset.key}`];
+      inp.value = v == null ? "" : String(inp.dataset.pct === "1" ? Math.round(Number(v) * 10000) / 100 : Number(v));
+    });
+  }
 }
 
 function _applySearch() {
@@ -2991,6 +3135,8 @@ function renderApp() {
         <div id="team-clutch" data-tabs="momentos"></div>
         <div id="team-versus" data-tabs="enfrentamiento"></div>
         <div id="team-trends" data-tabs="gamelog"></div>
+        <div id="team-events" data-tabs="eventos"></div>
+        <div id="team-synergy" data-tabs="quintetos"></div>
       </div>
 
       <!-- Compare -->
@@ -3023,11 +3169,14 @@ function renderApp() {
         <div id="player-insights" data-tabs="resumen"></div>
         <div id="player-similar" data-tabs="similares"></div>
         <div id="player-trends" data-tabs="tendencias"></div>
+        <div id="player-events" data-tabs="eventos"></div>
+        <div id="player-impact" data-tabs="impacto"></div>
         <div id="player-main"><p class="empty">Selecciona un jugador desde la vista de equipo.</p></div>
       </div>
 
       <!-- Search -->
       <div class="section" id="sec-search">
+        <div id="search-tabs" class="tabs-host"></div>
         <div id="search-main"><p class="empty"><span class="spinner"></span>Cargando buscador...</p></div>
       </div>
 

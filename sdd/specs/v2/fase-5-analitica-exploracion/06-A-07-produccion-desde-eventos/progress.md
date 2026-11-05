@@ -1,78 +1,35 @@
 # Progress — A-07: Producción desde eventos
 
-> **Estado:** ⬜ No iniciado
-> Reglas: `sdd/04-implement.md`. Tareas: [tasks.md](tasks.md). Spec: [spec.md](spec.md). Plan: [plan.md](plan.md).
+> **Estado:** 🔶 Implementado para equipo y jugador (pestaña Eventos, `GET /api/events-production`). Faltan la entidad `chain` de T-05, la tabla `events_production`, las fichas de T-01 y el vínculo de respaldo.
+> **Fecha:** 2026-11-05
 
-## Estado de tareas
-### Grupo A — Backend: posesiones y enriquecedor
-- [ ] T-A1 · Campos `steal_event`, `steal_by_id`, `dreb_event`, `dreb_by_id` en `Possession`
-- [ ] T-A2 · `team_possessions(include_incomplete=…)`
-- [ ] T-A3 · `enrich_chains` (vínculo FIBA + respaldo)
-- [ ] T-A4 [P] · `stats_engine.chain_rates`
-- [ ] T-A5 [P] · 9 `MetricDef` y tipos `chain`/`chain_player`
-### Grupo B — Backend: análisis, loader, tabla y ruta
-- [ ] T-B1 · `_finish_kind` y `_outcome_after`
-- [ ] T-B2 · `assist_pairs_from_events`
-- [ ] T-B3 · `_assist_block`
-- [ ] T-B4 · `_oreb_block` (coherente con A-04)
-- [ ] T-B5 · `_dreb_block`
-- [ ] T-B6 · `_steal_block`
-- [ ] T-B7 · `_turnover_block` y `_next_poss`
-- [ ] T-B8 · `events_report`
-- [ ] T-B9 · `reconcile_chains` y check `chains_tov_mismatch`
-- [ ] T-B10 · `chain_bundles`, `table_rows`, tabla `events_production`
-- [ ] T-B11 · `GET /api/events-production`
-### Grupo C — Frontend: api.js
-- [ ] T-C1 · `api.eventsProduction`
-### Grupo D — Frontend: UI
-- [ ] T-D1 · `components/events-panel.js`
-- [ ] T-D2 · Pestañas `eventos` de S3/S4 + tabla T-06
-- [ ] T-D3 [P] · Estilos
-### Grupo E — Errores, estados vacíos, offline/SW
-- [ ] T-E1 · Estados de UI
-- [ ] T-E2 · `sw.js` (`STATIC` y `CACHE`)
-### Grupo F — Verificación de feature
-- [ ] T-F1 · Backend arranca sin traceback
-- [ ] T-F2 · `database.py` idempotente
-- [ ] T-F3 · Endpoints probados con curl
-- [ ] T-F4 · Consola del navegador sin errores
-- [ ] T-F5 · Recorrido de CA
-- [ ] T-F6 … T-F22 · Verificación de CA-1…CA-17
-- [ ] T-F23 · Coherencia con A-12
+## Qué se hizo
+- `backend/events_production.py` y `GET /api/events-production`: cinco bloques con la consecuencia en puntos de cada evento, cuadre contra el play-by-play y control de `pts_from_tov` del box.
+- `components/events-panel.js` y la pestaña **Eventos** en Equipo y en Jugador. `sw.js` v61.
 
-## Estado de CA (gate de aceptación)
+## Estado de CA
+`a07_sim.py` 33/33 y `a07_browser.py` 40/40 (1280 y 360 px), con el equipo ALB de la base de ejemplo.
+
 | CA | Estado | Evidencia |
 |---|---|---|
-| CA-1 (propuesto; el cliente no define CA para A-07) | ⬜ | |
-| CA-2 | ⬜ | |
-| CA-3 | ⬜ | |
-| CA-4 | ⬜ | |
-| CA-5 | ⬜ | |
-| CA-6 | ⬜ | |
-| CA-7 | ⬜ | |
-| CA-8 | ⬜ | |
-| CA-9 | ⬜ | |
-| CA-10 | ⬜ | |
-| CA-11 | ⬜ | |
-| CA-12 | ⬜ | |
-| CA-13 | ⬜ | |
-| CA-14 | ⬜ | |
-| CA-15 | ⬜ | |
-| CA-16 | ⬜ | |
-| CA-17 | ⬜ | |
+| CA-1 (propuesto) | ✅ | resultado y puntos de cada evento, no solo la cantidad |
+| CA-2, CA-3 | ✅ | doble + triple + 2+1 = vinculadas; vinculadas + sin vínculo + incompletas = pbp (33 + 5 + 0 = 38); puntos y promedio recalculados |
+| CA-4 | ✅ | rebotes ofensivos, puntos, conversión y segundas oportunidades iguales a A-04 |
+| CA-5 | ✅ | contraataque ≤ rebotes y anotación ≤ contraataque; rebotes defensivos = posesiones con ese origen en A-02 |
+| CA-6 | ✅ | robos = posesiones con origen robo de A-02; 14 vinculados + 1 sin vínculo = 15 del pbp |
+| CA-7 | ✅ | categorías suman las pérdidas (24 = 24 del pbp); costo y % castigadas recalculados |
+| CA-8 | ✅ | jugadores + eventos de equipo = equipo en cada bloque |
+| CA-9 | ✅ | `last=1` usa un partido |
+| CA-10 | ✅ | jugador sin robos: conteo 0 y tasas «—» con razón |
+| CA-11 | ✅ | badge por bloque con los eventos como unidad |
+| CA-12, CA-13 | ⬜ | ficha T-01 por tasa y entidad `chain` de T-05 |
+| CA-14 | ⬜ | tabla `events_production` y su exportación |
+| CA-15 | ⬜ | no hay vínculo de respaldo: `link_fallback` es 0 |
+| CA-16 | 🔶 | control con `pts_from_tov` implementado; en la base de ejemplo no hay diferencias |
+| CA-17 | ✅ | 0,13 s en frío y 0,00 s en caliente |
 
-## Gates técnicos
-- Backend arranca sin traceback: ⬜
-- `upgrade_db()` idempotente (A-07 no toca esquema): ⬜
-- Endpoints probados manualmente: ⬜
-- Consola del navegador sin errores JS: ⬜
-
-## Desviaciones respecto a docs/ o plan
-
-## Docs a actualizar
-- [ ] `docs/api.md` — `GET /api/events-production`, tabla `events_production`, tipos `chain`/`chain_player`
-- [ ] `docs/metrics.md` — consecuencia por evento, partición doble/triple/2+1, "castigada", horizonte de una posesión, fuente derivada
-- [ ] `docs/frontend.md` — pestaña Eventos de S3/S4, `events-panel.js`, copy nuevo (para extracción en F-21)
-- [ ] `docs/architecture.md` — `chains.py` (análisis completo), campos nuevos de `Possession`
-
-## Deuda / TODO
+## Desviaciones
+- Los robos se identifican por el origen `robo` de la posesión (A-02), no por el evento `steal`; un robo seguido de tiempo muerto queda como robo sin vínculo.
+- Los filtros de nivel evento de T-03 no se aplican.
+- Sin tabla, entidad `chain` ni ranking.
+- Copy sin `t()` (F-21).
