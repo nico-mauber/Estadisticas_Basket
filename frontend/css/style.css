@@ -1879,3 +1879,60 @@ input.ld-min, .tr-controls input { background: var(--surface2); color: var(--tex
   .rp-bar-row { grid-template-columns: 70px minmax(0, 1fr); }
   .rp-bar-val { grid-column: 1 / -1; flex-direction: row; gap: 8px; align-items: baseline; }
 }
+
+/* ── mi-equipo (F-12) ── */
+.mt-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: start; }
+.mt-grid > .card { margin: 0; }
+.mt-span, .mt-shortcuts { grid-column: 1 / -1; }
+.mt-shortcuts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; align-items: start; }
+.mt-shortcuts > .card { margin: 0; }
+.mt-head { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; align-items: center; }
+.mt-record { margin-top: 6px; font-size: 14px; }
+.mt-head-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.mt-next { display: flex; justify-content: space-between; gap: 12px; align-items: center; flex-wrap: wrap; }
+.mt-next-main { display: flex; flex-direction: column; gap: 2px; }
+.mt-rival { font-size: 20px; font-weight: 700; }
+.mt-window { margin: 0 0 6px; font-size: 13px; }
+.mt-sub { font-size: 12px; font-weight: 700; text-transform: uppercase; color: var(--muted); margin: 10px 0 4px; }
+.mt-list { margin: 0; padding-left: 18px; font-size: 13px; }
+.mt-list li { margin: 4px 0; }
+.mt-changes { list-style: none; padding-left: 0; }
+.mt-arrow { font-weight: 700; }
+.mt-change-mejora .mt-arrow { color: var(--green); }
+.mt-change-empeora .mt-arrow { color: var(--red); }
+.mt-change-nums { font-size: 12px; }
+.mt-table { width: 100%; font-size: 13px; }
+.mt-win { color: var(--green); font-weight: 700; }
+.mt-loss { color: var(--red); font-weight: 700; }
+.mt-lineup-list { list-style: none; padding-left: 0; }
+.mt-players { display: flex; flex-direction: column; gap: 8px; }
+.mt-player { border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-size: 13px; }
+.mt-player-name { font-weight: 700; }
+.mt-player-stats { margin: 4px 0; }
+.mt-gone { opacity: .7; }
+.mt-follow-add { margin-top: 8px; }
+.mt-follow-add select { width: 100%; }
+.mt-pick-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.mt-skel { display: grid; gap: 12px; }
+.mt-home.mt-on, .mt-follow.mt-on { color: var(--accent); border-color: var(--accent); }
+.ph-follow { margin-left: auto; }
+/* calendario (F-12) */
+.fx-form { margin: 8px 0 12px; }
+.fx-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(180px, 100%), 1fr)); gap: 8px; }
+.fx-grid label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+.fx-grid .fx-wide { grid-column: 1 / -1; }
+.fx-grid input, .fx-grid select { min-width: 0; }
+.fx-form-actions { display: flex; gap: 8px; align-items: center; margin-top: 8px; flex-wrap: wrap; }
+.fx-msg { font-size: 13px; }
+.fx-filters { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 8px 0; }
+.fx-check { font-size: 13px; display: flex; gap: 4px; align-items: center; }
+.fx-table { width: 100%; font-size: 13px; }
+.fx-played td { opacity: .75; }
+.fx-actions { white-space: nowrap; }
+.fx-notes { font-size: 11px; }
+.fx-add summary { cursor: pointer; font-weight: 600; margin: 6px 0; }
+@media (max-width: 767px) {
+  .mt-grid, .mt-shortcuts { grid-template-columns: minmax(0, 1fr); }
+  .fx-actions { white-space: normal; }
+}
+.mt-card a:not(.btn), .fx-table a { color: var(--accent); }

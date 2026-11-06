@@ -761,6 +761,31 @@ Cabecera de contexto: cómo quedó la selección activa de una entidad. Auth: `l
 
 Response 200: `entity {type, id, name}`, `label` (etiqueta legible de los filtros aplicados), `record` ("V-D"; `null` en competencia), `wins`, `losses`, `avg_margin` (diferencia media de puntos con 1 decimal; `null` sin partidos), `games` (N: partidos de la selección), `games_total` (M: partidos de la entidad en la competencia **sin ningún otro filtro**), `sample` (badge de T-02: partidos para equipo, minutos para jugador) y `context` (eco de T-03 con `games_excluded` e `ignored`). Récord y diferencia salen del resultado final: victoria = puntos propios > puntos del rival; en un jugador cuentan solo los partidos que jugó. Errores: 400 `parametro_invalido` (tipo o id inválidos), 400 `contexto_invalido`, 400 `competencia_inexistente`, 404 `no_encontrado`.
 
+## GET `/api/my-team` — NUEVO (F-12)
+
+Pantalla Mi equipo en una llamada. Auth: `login_required`. Query: `team` (opcional; si falta se usa el equipo fijado del usuario, preferencia `ui · home_team`), `competition` (opcional; la más reciente del equipo) y `today` (`YYYY-MM-DD`, para verificar; por defecto hoy en Uruguay, UTC−3). No acepta otros filtros: es la vista «sin filtros».
+
+Response 200:
+- Sin equipo fijado: `{team: null, reason: "sin_equipo_fijado", can_edit_fixtures}`. Equipo fijado sin partidos: `{team: {code}, reason: "equipo_sin_partidos"}`.
+- Completo: `team {code, name, source: pref|param}`, `competition {id, label}`, `today`, `header {record {wins, losses, text}, avg_margin {value, reason}, games, games_total, sample}`, `next_fixture` (`{fixture_id, date, time, days_left, is_home, rival {code, name}, competition_id, notes, source_url, prepare_link}` o `null`) con `next_fixture_reason` (`sin_calendario` | `sin_proximos` | `null`), `game_plan` (el de F-17 contra el rival del próximo partido —`reference.type: "rival_proximo"`— o contra la competencia, más `next_available`), `alerts`, `last_games[] {game_id, date, rival, is_home, score_own, score_rival, result G|P, link}`, `top_lineups {rows[] {lineup_id, names, minutes, possessions, games, net_rating {value, reason, adj}, sample, link}, reason}` (los `my_team.top_lineups` quintetos con más minutos), `followed_players {rows[], truncated, max}` (cada fila: `player_id`, `name`, `team_code`, `available`, `games`, `recent {games, metrics {pts, trb, ast, minutes, ts_pct}}` de sus últimos 5 partidos jugados y `link`; un id inexistente vuelve como `{player_id, available: false, reason: "no_encontrado"}`), `can_edit_fixtures`, `blocks_failed {bloque: {code, error}}` (un bloque que falla queda `null` y el resto se sirve) y `context`.
+- `alerts`: `window {days, from, to, games, game_ids, sample}` (partidos del equipo de los últimos `alerts.lookback_days` días), `insights` (los de A-10 con `last = n`, n = partidos de la ventana) con `insights_reason`, `changes[] {metric, label, fmt, direction mejora|empeora, week_value, rest_value, rest_sd, delta, z, games_week, games_rest, sample, text}` y `reason` (`sin_partidos_en_ventana`). Un cambio brusco: `z = s · (valor agrupado de la ventana − media del resto) / desvío muestral del resto` (valores por partido de los partidos anteriores a la ventana; `s` = +1 si más es mejor, −1 si menos es mejor); alerta si `|z| ≥ alerts.change_z`. Hacen falta al menos `max(2, sample.team.min)` partidos en el resto; una métrica nula nunca alerta.
+
+Errores: 400 `parametro_invalido` (fecha inválida, competencia `all`), 400 `competencia_inexistente`, 404 `no_encontrado` (equipo pasado por parámetro sin partidos).
+
+## GET `/api/fixtures` · POST · PATCH/DELETE `/api/fixtures/<id>` — NUEVO (F-12)
+
+Calendario manual. `GET` (`login_required`): query `competition`, `team`, `from` (`YYYY-MM-DD`) → `{fixtures[], today, can_edit}`; cada fila `{id, competition_id, competition_label, date, time, home_code, home_name, away_code, away_name, game_id, played, source_url, notes, created_by, created_at}`, ordenadas por fecha y hora.
+
+`POST` (`admin_required`): body `{date, time?, home_code, away_code, competition_id?, source_url?, notes?}` → 201 con la fila (si el partido ya estaba importado queda vinculado de entrada). `PATCH /<id>` (`admin_required`): campos parciales, más `game_id` para vincular o desvincular a mano (`null`). `DELETE /<id>` (`admin_required`): `{ok: true}`. Toda escritura sube `data_version`.
+
+Errores: 400 `parametro_invalido` ("Elegí la fecha del partido.", "La hora debe tener el formato HH:MM.", "Elegí dos equipos distintos.", "Equipo desconocido: importá al menos un partido de ese equipo antes de cargarlo en el calendario." con `details.team`, enlace que no es de FIBA LiveStats, notas de más de 300 caracteres), 400 `competencia_inexistente`, 403 `requiere_admin`, 404 `no_encontrado`, 409 `conflicto` ("Ya hay un partido cargado con esa fecha y esos equipos.").
+
+Vinculación: al importar o reprocesar un partido (`ingest.persist_game`) se vincula el partido del calendario con el mismo local y visitante y fecha a ±1 día (el más cercano; empate → menor id). `DELETE /api/games` desvincula antes de borrar. Un partido vinculado deja de ser «próximo».
+
+**`GET /api/game-plan` (F-17, tocado):** `reference=rival_proximo` resuelve el rival del próximo partido del calendario (`reference.type: "rival_proximo"`, `fixture_id`, `rival_code`); sin próximo partido → 404 `sin_proximo_partido` (antes 400 `referencia_no_disponible`).
+
+**Configuración:** `alerts.lookback_days` (1–90, 7) y `alerts.change_z` (0,5–5, 1,5) pasan a activas; nuevas `my_team.last_games` (5), `my_team.top_lineups` (3) y `my_team.max_followed` (12), sección Preferencias.
+
 ## GET `/api/rapm` — NUEVO (A-11)
 
 Impacto ajustado (RAPM) de los jugadores de una competencia. Auth: `login_required`. **Solo lee** el resultado calculado: nunca dispara el cálculo. Query: `competition` (obligatoria salvo con `player`; `all` → 400), `player` (`player_id`, agrega su fila en `player`; sin `competition` usa la competencia de su partido más reciente), `top` (filas de `players`, 0 = todas; por defecto 25, máximo 500). Los demás filtros de contexto se aceptan y vuelven en `context.ignored` con razón `no_aplica` (el universo es la competencia completa).

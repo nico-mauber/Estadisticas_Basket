@@ -33,6 +33,10 @@ import { renderCross } from "./components/cross-panel.js";
 import { renderEvents } from "./components/events-panel.js";
 import { renderSynergy, renderImpact } from "./components/synergy-panel.js";
 import { renderRapm } from "./components/rapm-panel.js";
+import { renderMyTeam } from "./components/my-team.js";
+import { renderFixtures } from "./components/fixtures-manager.js";
+import { homeTeamButton, followButton } from "./components/my-team-controls.js";
+import { loadPrefs, getPref } from "./core/prefs.js";
 import { renderSavedQueries, saveQueryDialog } from "./components/saved-queries.js";
 import { renderCompareLineups, lineupsFromUrl } from "./components/compare-lineups.js";
 import { renderLeaders, renderCompetitionProfile } from "./components/leaders-panel.js";
@@ -331,7 +335,7 @@ async function refreshCompareSelectors() {
 }
 
 // ── Nav ────────────────────────────────────────────────────────────────────
-const sections = ["import", "league", "team", "compare", "player", "search", "preparar", "partido", "config"];
+const sections = ["myteam", "import", "league", "team", "compare", "player", "search", "preparar", "partido", "config"];
 let activeSection = "import";
 let _lastSection = "import";
 let _routing = false;      // true mientras se aplica una dirección: la vista no la vuelve a escribir (X-01)
@@ -421,15 +425,24 @@ function _renderLeagueExtras() {
   }
 }
 
-// Abre Preparar con el cruce ya elegido (F-20).
-function showPrepare(team, rival, focus = null) {
-  setSection("preparar");
+// Abre Preparar con el cruce ya elegido (F-20; desde el calendario y Mi equipo, F-12). La dirección lleva el cruce.
+function showPrepare(team, rival, focus = null, fixture = null) {
+  setSection("preparar", { sync: false });
+  writeRoute({ section: "preparar", id: null, tab: null }, { team, rival, fixture, competition: null, last: null });
   renderPrepare(document.getElementById("preparar-main"), { onOpenGame: showGame, team, rival, focus });
+}
+
+// Mi equipo (F-12, S8).
+function renderMyTeamView() {
+  renderMyTeam(document.getElementById("myteam-main"), {
+    toast, onPrepare: (team, rival, fixture) => showPrepare(team, rival, null, fixture),
+  });
 }
 
 // Abre una sección desde la barra de navegación.
 function goSection(id) {
   setSection(id, { sync: !["team", "player"].includes(id) });
+  if (id === "myteam")  renderMyTeamView();
   if (id === "import")  renderImport();
   if (id === "league")  renderLeague();
   if (id === "team")    { refreshTeamSelector(); syncRoute(); }
@@ -499,7 +512,9 @@ function syncRoute() {
         min_minutes: _tab.league === "lideres" ? _leaders.min : null }
     : r.section === "search" ? {}
     : { competition: null, last: null };
-  writeRoute(r, { ..._searchUrlQuery(r.section), ...query });
+  // El cruce de Preparar (team, rival, fixture) viaja solo en su dirección (F-12).
+  const clear = r.section === "preparar" ? {} : { team: null, fixture: null, ...(r.section === "team" ? {} : { rival: null }) };
+  writeRoute(r, { ...clear, ..._searchUrlQuery(r.section), ...query });
 }
 
 const _notice = msg => toast(msg, "err");
@@ -593,7 +608,12 @@ async function applyRoute({ initial = false } = {}) {
       }
       case "preparar":
         setSection("preparar", { sync: false });
-        renderPrepare(document.getElementById("preparar-main"), { onOpenGame: showGame });
+        renderPrepare(document.getElementById("preparar-main"), { onOpenGame: showGame,
+          team: q.team ? q.team.toUpperCase() : null, rival: q.rival ? q.rival.toUpperCase() : null });
+        break;
+      case "myteam":
+        setSection("myteam", { sync: false });
+        renderMyTeamView();
         break;
       case "partido":
         if (p.id && /^\d+$/.test(p.id)) showGame(p.id); else setSection("partido", { sync: false });
@@ -611,9 +631,13 @@ async function applyRoute({ initial = false } = {}) {
   return true;
 }
 
-// Sin dirección: Datos si la base no tiene partidos; si tiene, Liga › Tabla (RF-16).
+// Sin dirección: Mi equipo si el usuario fijó su equipo (F-12); si no, Datos si la base no tiene partidos y Liga › Tabla
+// si tiene (X-01 RF-16).
 async function openInitialSection() {
   const seen = _navCount;
+  await loadPrefs("ui");
+  if (seen !== _navCount) return;
+  if (getPref("ui", "home_team", null)) { goSection("myteam"); return; }
   let n = 0;
   try { n = (await api.games()).length; } catch { /* sin conexión: queda Datos */ }
   if (seen !== _navCount) return;   // el usuario ya eligió una sección mientras se consultaban los partidos
@@ -831,7 +855,7 @@ async function _runReprocess(target, onProgress) {
   _afterDataChange();
 }
 
-const IMPORT_TABS = [["importar", "Importar"], ["calidad", "Calidad de datos"], ["competencias", "Competencias"]];
+const IMPORT_TABS = [["importar", "Importar"], ["calendario", "Calendario"], ["calidad", "Calidad de datos"], ["competencias", "Competencias"]];
 
 // Sección Datos (F-11): pestañas Importar · Calidad de datos · Competencias.
 function renderImport() {
@@ -850,6 +874,7 @@ function renderImport() {
   const el = document.getElementById("import-tab");
   if (_importTab === "calidad") return _renderQualityTab(el);
   if (_importTab === "competencias") return _renderCompetitionsTab(el);
+  if (_importTab === "calendario") return renderFixtures(el, { isAdmin: _isAdmin, toast, onPrepare: (team, rival, fixture) => showPrepare(team, rival, null, fixture) });
   return _renderImportTab(el);
 }
 
@@ -1996,6 +2021,7 @@ function _applyTeamData(main, data) {
     compSel.innerHTML = _compOptions(data.competitions, _teamComp, "Todas las competencias", "all");
   }
   _renderTeamContent(main, data);
+  homeTeamButton(document.getElementById("team-home-btn"), { teamCode: data.team_code, toast });
   _drawTabs("team");
   applyTabs(document.getElementById("sec-team"), _tab.team);
   syncRoute();
@@ -2525,6 +2551,7 @@ function _applyPlayerData(main, data) {
   if (data.player_id != null) {
     renderPlayerHeader(document.getElementById("player-identity"), data.player_id, {
       params: _playerParams(),
+      afterRender: host => followButton(host.querySelector(".ph-follow"), { playerId: data.player_id, toast }),
       onSaved: () => toast("Ficha actualizada"),
     });
   }
@@ -3027,6 +3054,7 @@ function _applySearch() {
 
 // ── Bootstrap ──────────────────────────────────────────────────────────────
 const NAV_ITEMS = {
+  myteam:  { icon: "⭐", label: "Mi equipo" },
   import:  { icon: "📥", label: "Datos" },
   league:  { icon: "🏆", label: "Liga" },
   team:    { icon: "📊", label: "Equipo" },
@@ -3038,8 +3066,9 @@ const NAV_ITEMS = {
   config:  { icon: "⚙", label: "Configuración" },
 };
 // En pantallas chicas la barra muestra las cuatro secciones principales y "Más" abre el resto (X-01 RF-11).
-const NAV_ORDER = ["import", "league", "team", "player", "compare", "search", "preparar"];
-const NAV_EXTRA = ["import", "search", "preparar"];
+// Mi equipo (F-12) va primera; en el teléfono Comparar pasa a "Más" para dejar lugar.
+const NAV_ORDER = ["myteam", "import", "league", "team", "player", "compare", "search", "preparar"];
+const NAV_EXTRA = ["import", "compare", "search", "preparar"];
 
 // ── F-07: Analizar partido ──────────────────────────────────────────────────
 function showGame(gameId) {
@@ -3089,6 +3118,8 @@ function renderApp() {
       ${[...NAV_EXTRA, "config"].map(s => `<button type="button" data-section="${s}"><span class="nav-icon">${NAV_ITEMS[s].icon}</span>${NAV_ITEMS[s].label}</button>`).join("")}
     </div>
     <main>
+      <!-- Mi equipo (F-12) -->
+      <div class="section" id="sec-myteam"><div id="myteam-main"></div></div>
       <div class="section" id="sec-import"></div>
       <div class="section" id="sec-league"></div>
 
@@ -3101,6 +3132,7 @@ function renderApp() {
             <button class="btn btn-ghost" id="btn-show-player">Ver jugador</button>
             <button class="btn btn-ghost" id="btn-show-shotmap">Ver mapa de tiro</button>
             <button class="btn btn-ghost" id="btn-show-onoff">Ver ON/OFF</button>
+            <span id="team-home-btn"></span>
           </div>
           <div class="filter-pills" id="team-filter-pills" style="display:none;margin-top:12px">
             <span style="color:var(--muted);font-size:12px;align-self:center;margin-right:4px">Período:</span>

@@ -33,10 +33,11 @@ log = logging.getLogger(__name__)
 PHRASES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "phrases")
 LANGS = ("es",)
 MARKERS = ("entidad", "metrica", "valor", "referencia", "delta", "p", "media", "rival")
-WHEN_VALUES = ("ventaja", "riesgo", "extremo_alto", "extremo_bajo")
+WHEN_VALUES = ("ventaja", "riesgo", "extremo_alto", "extremo_bajo", "cambio_mejora", "cambio_empeora")
 REFERENCES = ("competencia", "rival", "periodo_anterior", "rival_proximo")
 MODES = ("perfil", "matchup")
-MAX_LEN = {"ventaja": 100, "riesgo": 100, "extremo_alto": 160, "extremo_bajo": 160}   # A-10 agrega los de insights
+MAX_LEN = {"ventaja": 100, "riesgo": 100, "extremo_alto": 160, "extremo_bajo": 160,   # A-10 agrega los de insights
+           "cambio_mejora": 160, "cambio_empeora": 160}                                   # F-12: cambios bruscos
 
 
 class PhraseError(Exception):
@@ -271,7 +272,7 @@ def _member_label(pop, team_code):
 
 
 def game_plan(entity_type: str, entity_id: str, *, reference: str = "competencia", rival: str | None = None,
-              comp_id: int | None, ctx: Context, mode: str = "perfil") -> dict:
+              comp_id: int | None, ctx: Context, mode: str = "perfil", today: str | None = None) -> dict:
     """Plan de juego de un equipo (F-17). `mode="matchup"` es la entrada de F-03: la referencia es siempre el rival y la
     muestra baja se advierte en vez de excluir al equipo."""
     if entity_type != "team":
@@ -282,10 +283,17 @@ def game_plan(entity_type: str, entity_id: str, *, reference: str = "competencia
         raise PhraseError("parametro_invalido", f"Modo inválido: {mode}", 400)
     if mode == "matchup":
         reference = "rival"
-    if reference == "rival_proximo":
-        raise PhraseError("referencia_no_disponible",
-                          "Todavía no hay calendario cargado para resolver el rival del próximo partido", 400)
     team_code = str(entity_id).upper()
+    if reference == "rival_proximo":
+        # F-12: el rival es el del próximo partido del calendario manual.
+        import fixtures
+        f = fixtures.next_fixture(team_code, today or fixtures.today_uy())
+        if f is None:
+            raise PhraseError("sin_proximo_partido", "No hay un próximo partido cargado para este equipo", 404)
+        rival = f.away_code if f.home_code == team_code else f.home_code
+        out = game_plan(entity_type, team_code, reference="rival", rival=rival, comp_id=comp_id, ctx=ctx, mode=mode)
+        return {**out, "reference": {**(out.get("reference") or {}), "type": "rival_proximo", "fixture_id": f.id,
+                                     "rival_code": rival}}
     rival = (rival or "").strip().upper() or None
     if reference == "rival":
         if not rival:

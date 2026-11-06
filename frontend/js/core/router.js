@@ -5,7 +5,7 @@
 
 // id de sección interno → nombre en la dirección
 export const SLUGS = {
-  import: "datos", league: "liga", team: "equipo", player: "jugador", compare: "comparar",
+  myteam: "mi-equipo", import: "datos", league: "liga", team: "equipo", player: "jugador", compare: "comparar",
   search: "explorar", preparar: "preparar", partido: "partido", config: "configuracion",
 };
 const SECTION_OF = Object.fromEntries(Object.entries(SLUGS).map(([k, v]) => [v, k]));
@@ -69,8 +69,9 @@ export function writeRoute(route, query = {}) {
 export function routeQuery() {
   try {
     const q = new URL(location.href).searchParams;
-    return { competition: q.get("competition"), last: q.get("last"), rival: q.get("rival"), metric: q.get("metric"), min_minutes: q.get("min_minutes") };
-  } catch { return { competition: null, last: null, rival: null, metric: null, min_minutes: null }; }
+    return { competition: q.get("competition"), last: q.get("last"), rival: q.get("rival"), metric: q.get("metric"), min_minutes: q.get("min_minutes"),
+             team: q.get("team"), fixture: q.get("fixture") };
+  } catch { return { competition: null, last: null, rival: null, metric: null, min_minutes: null, team: null, fixture: null }; }
 }
 
 /** Llama a `fn` cuando el usuario cambia la dirección (Atrás, Adelante o edición manual). */

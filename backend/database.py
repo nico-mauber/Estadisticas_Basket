@@ -282,6 +282,24 @@ class SavedQuery(db.Model):
     updated_at = db.Column(db.String, nullable=False)
 
 
+class Fixture(db.Model):
+    """Partido del calendario cargado a mano (F-12): FIBA no publica el fixture. `game_id` se completa al importar el
+    partido real (mismos equipos, fecha ±1 día) y se borra al eliminarlo."""
+    __tablename__ = "fixtures"
+
+    id             = db.Column(db.Integer, primary_key=True)
+    competition_id = db.Column(db.Integer)
+    date           = db.Column(db.String, nullable=False, index=True)   # YYYY-MM-DD
+    time           = db.Column(db.String)                               # HH:MM
+    home_code      = db.Column(db.String, nullable=False)
+    away_code      = db.Column(db.String, nullable=False)
+    game_id        = db.Column(db.String)
+    source_url     = db.Column(db.String)
+    notes          = db.Column(db.String)
+    created_at     = db.Column(db.String, nullable=False)
+    created_by     = db.Column(db.String)
+
+
 class GameSource(db.Model):
     """JSON crudo de FIBA archivado (gzip) para reprocesar sin volver a descargarlo (F-11, DA-12)."""
     __tablename__ = "game_sources"

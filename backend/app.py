@@ -680,6 +680,103 @@ def synergy_route(team_code: str):
     return jsonify(out)
 
 
+# ── Mi equipo y calendario (F-12) ───────────────────────────────────────────
+
+@app.route("/api/my-team")
+@login_required
+def my_team_route():
+    """Pantalla S8 en una llamada (F-12). `team` (si falta, el equipo fijado del usuario: `ui · home_team`),
+    `competition` (si falta, la más reciente del equipo) y `today` (YYYY-MM-DD, para verificar; por defecto hoy en
+    Uruguay). No acepta otros filtros: Mi equipo es «sin filtros»."""
+    import fixtures
+    import my_team
+    team = (request.args.get("team") or "").strip().upper() or None
+    source = "param"
+    if team is None:
+        team = str(prefs.get_prefs("ui").get("home_team") or "").strip().upper() or None
+        source = "pref"
+    if not team:
+        return jsonify({"team": None, "reason": "sin_equipo_fijado", "can_edit_fixtures": is_admin()})
+    today = (request.args.get("today") or "").strip() or fixtures.today_uy()
+    if fixtures.parse_day(today) is None:
+        return jsonify({"error": "Fecha inválida", "code": "parametro_invalido", "details": {"param": "today"}}), 400
+    if not any(r["team_code"] == team for r in repository.team_game_rows(None).values()):
+        if source == "pref":
+            return jsonify({"team": {"code": team, "source": source}, "reason": "equipo_sin_partidos", "can_edit_fixtures": is_admin()})
+        return jsonify({"error": "Equipo no encontrado", "code": "no_encontrado"}), 404
+    comp = (request.args.get("competition") or "").strip() or None
+    try:
+        ctx = context.parse_context({"competition": comp} if comp else {}, team_code=team)
+    except ContextError as e:
+        return jsonify(e.payload()), e.status
+    if ctx.competition_all or ctx.competition_id is None:
+        return jsonify({"error": "Elegí una competencia.", "code": "parametro_invalido"}), 400
+    out = my_team.payload(team, ctx.competition_id, today)
+    out = {**out, "team": {**out["team"], "source": source}, "blocks_failed": dict(out["blocks_failed"]),
+           "can_edit_fixtures": is_admin()}
+    try:
+        out["followed_players"] = my_team.followed_players(prefs.get_prefs("ui").get("followed_players") or [])
+    except Exception:
+        app.logger.exception("Mi equipo: falló el bloque de jugadores seguidos")
+        out["followed_players"] = None
+        out["blocks_failed"]["followed_players"] = {"code": "error_interno", "error": "No se pudo calcular este bloque."}
+    return jsonify(out)
+
+
+@app.route("/api/fixtures")
+@login_required
+def list_fixtures_route():
+    """Calendario manual (F-12). `competition`, `team` y `from` (YYYY-MM-DD) opcionales."""
+    import fixtures
+    comp = (request.args.get("competition") or "").strip()
+    if comp and not comp.isdigit():
+        return jsonify({"error": "La competencia debe ser un id numérico.", "code": "parametro_invalido"}), 400
+    frm = (request.args.get("from") or "").strip() or None
+    if frm and fixtures.parse_day(frm) is None:
+        return jsonify({"error": "Fecha inválida", "code": "parametro_invalido", "details": {"param": "from"}}), 400
+    team = (request.args.get("team") or "").strip().upper() or None
+    return jsonify({"fixtures": fixtures.list_fixtures(int(comp) if comp else None, team, date_from=frm),
+                    "today": fixtures.today_uy(), "can_edit": is_admin()})
+
+
+@app.route("/api/fixtures", methods=["POST"])
+@admin_required
+def create_fixture_route():
+    import fixtures
+    try:
+        out = fixtures.create_fixture(request.get_json(silent=True) or {}, user=prefs.current_owner())
+    except fixtures.FixtureError as e:
+        db.session.rollback()
+        return jsonify(e.payload()), e.status
+    cache.bump_data_version("fixtures")
+    return jsonify(out), 201
+
+
+@app.route("/api/fixtures/<int:fixture_id>", methods=["PATCH"])
+@admin_required
+def update_fixture_route(fixture_id: int):
+    import fixtures
+    try:
+        out = fixtures.update_fixture(fixture_id, request.get_json(silent=True) or {})
+    except fixtures.FixtureError as e:
+        db.session.rollback()
+        return jsonify(e.payload()), e.status
+    cache.bump_data_version("fixtures")
+    return jsonify(out)
+
+
+@app.route("/api/fixtures/<int:fixture_id>", methods=["DELETE"])
+@admin_required
+def delete_fixture_route(fixture_id: int):
+    import fixtures
+    try:
+        fixtures.delete_fixture(fixture_id)
+    except fixtures.FixtureError as e:
+        return jsonify(e.payload()), e.status
+    cache.bump_data_version("fixtures")
+    return jsonify({"ok": True})
+
+
 _RAPM_OWN_PARAMS = {"competition", "player", "top", "diagnostics"}
 
 
@@ -2173,6 +2270,8 @@ def delete_games():
         return jsonify({"error": "Se requiere game_ids[]"}), 400
 
     games = Game.query.filter(Game.game_id.in_(ids)).all()
+    import fixtures
+    fixtures.unlink_games([g.game_id for g in games])   # F-12: el partido del calendario vuelve a quedar pendiente
     for g in games:
         db.session.delete(g)  # cascade: stats, tiros, pbp y JSON archivado
     db.session.commit()
