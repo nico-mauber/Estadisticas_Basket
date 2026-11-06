@@ -40,6 +40,12 @@ services:
 | `SESSION_SECURE` | `true` | Marca la cookie de sesión como `Secure` (solo HTTPS). `true` en Render; sin setear en local (para probar login sobre http) |
 | `AUTH_USERS` | `{"nico":"<hash>", ...}` | JSON usuario→hash. **Presencia activa el login** en toda la app. Prod: 2 cuentas fuertes. Dev: 1 clave simple. Local: sin setear → app abierta. Generar hash: `python -c "from werkzeug.security import generate_password_hash as g;print(g('miclave'))"` |
 | `ADMIN_USERS` | opcional | Usuarios (de `AUTH_USERS`) separados por coma que pueden **modificar datos**: borrar y reasignar partidos, editar/fusionar competencias, reprocesar, **editar configuración global (F-13)**. Sin la variable, todo usuario logueado puede. Importar partidos no requiere admin. |
+| `LLM_ENABLED` | opcional | `true` habilita las sugerencias de quinteto asistidas por IA (F-15). Sin la variable la función queda apagada y el panel no se muestra |
+| `ANTHROPIC_API_KEY` | secreto, opcional | Clave de la API de Claude para F-15. **Solo en el panel de Render** (nunca en el repo). Sin ella la función queda apagada |
+| `LLM_MODEL` | opcional | Modelo de F-15. Por defecto `claude-opus-5-5`; alternativas de menor costo: `claude-sonnet-5-5` o `claude-haiku-5-5` (decisión de costo del cliente) |
+| `LLM_EFFORT` | opcional | `low` · `medium` (por defecto) · `high` · `xhigh` · `max`: profundidad (y costo) de la respuesta |
+| `LLM_TIMEOUT_SECS` / `LLM_MAX_RETRIES` | opcional | 60 s y 1 reintento por defecto (120 s en total, por debajo del `--timeout 180` de gunicorn) |
+| `LLM_FALLBACKS` | opcional | `off` desactiva el reintento del lado del servidor ante una negativa del modelo (`fallbacks: "default"`); con Haiku no se envía |
 | `SEED_ENABLED` | **solo dev** | `true` habilita `POST /api/seed` y el botón "Agregar partidos". **No definir en producción** — sin la var, el endpoint responde 403. (También exige sesión iniciada.) |
 
 **Login:** ver diseño en [superpowers/specs/2026-06-06-login-auth-design.md](superpowers/specs/2026-06-06-login-auth-design.md). Se retiró `ADMIN_TOKEN` — el borrado ahora exige login como el resto.
@@ -136,6 +142,7 @@ python backend/database.py
 | `flask-sqlalchemy` | 3.1.1 | ORM sobre SQLite |
 | `playwright` | 1.44.0 | Fallback headless para FIBA URLs bloqueadas |
 | `gunicorn` | latest | WSGI server para producción |
+| `anthropic` | `>=1.17,<2` | SDK oficial de la API de Claude, **opcional** (F-15). Solo se usa con `LLM_ENABLED` y `ANTHROPIC_API_KEY`; sin el paquete la app arranca igual y la función queda apagada |
 
 **Nota:** Playwright requiere instalar el navegador por separado (`playwright install chromium`). En Render no está disponible sin configuración extra, por lo que el fallback Playwright no funciona en producción — solo el fetch directo con `urllib`.
 

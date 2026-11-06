@@ -34,6 +34,7 @@ import { renderEvents } from "./components/events-panel.js";
 import { renderSynergy, renderImpact } from "./components/synergy-panel.js";
 import { renderRapm } from "./components/rapm-panel.js";
 import { renderMyTeam } from "./components/my-team.js";
+import { renderLineupSuggestions } from "./components/lineup-suggestions.js";
 import { renderFixtures } from "./components/fixtures-manager.js";
 import { homeTeamButton, followButton } from "./components/my-team-controls.js";
 import { loadPrefs, getPref } from "./core/prefs.js";
@@ -386,6 +387,8 @@ function _renderTrends(section) {
 function _renderSynergy() {
   const code = _teamData?.team_code;
   if (code) renderSynergy(document.getElementById("team-synergy"), code, { params: _teamParams() });
+  // Sugerencias asistidas por IA (F-15): el panel solo existe si el servidor tiene la función habilitada.
+  if (code) renderLineupSuggestions(document.getElementById("team-ai"), { teamCode: code, enabled: _llmEnabled, params: _teamParams() });
 }
 function _renderImpactTab() {
   if (_playerData?.player_id == null) return;
@@ -653,6 +656,7 @@ let _seedEnabled  = false;  // dev-only seed button (set from /api/me at boot)
 let _authRequired = false;  // whether the backend requires login
 let _authUser     = null;   // logged-in username (when auth required)
 let _isAdmin      = false;  // puede modificar datos (F-11, /api/me → is_admin)
+let _llmEnabled   = false;  // sugerencias asistidas por IA disponibles (F-15, /api/me → llm_enabled)
 let _importTab    = "importar";   // importar · calidad · competencias (F-11)
 let _catalogComp  = "";     // filtro del catálogo por competencia
 let _qualityComp  = "";     // competencia elegida en Calidad de datos
@@ -3162,6 +3166,7 @@ function renderApp() {
         <div id="team-insights" data-tabs="resumen"></div>
         <div id="team-roster" data-tabs="plantel"></div>
         <div id="team-lineups-block" data-tabs="quintetos"></div>
+        <div id="team-ai" data-tabs="quintetos"></div>
         <div id="team-periods" data-tabs="momentos"></div>
         <div id="team-origins" data-tabs="posesion"></div>
         <div id="team-transition" data-tabs="posesion"></div>
@@ -3509,6 +3514,7 @@ async function boot() {
   _authUser     = me.user || null;
   _seedEnabled  = me.seed_enabled === true;
   _isAdmin      = me.is_admin === true;
+  _llmEnabled   = me.llm_enabled === true;
 
   if (_authRequired && !me.authenticated) {
     showLogin();

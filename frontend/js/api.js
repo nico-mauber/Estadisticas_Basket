@@ -96,6 +96,7 @@ export const api = {
   possessionClock: (params = {}) => apiFetch(`/api/possession-clock${qs(params)}`),
   gamePlan:      (params = {}) => apiFetch(`/api/game-plan${qs(params)}`),
   eventsProduction: (params = {}) => apiFetch(`/api/events-production${qs(params)}`),
+  aiLineupSuggestions: body => send("/api/ai/lineup-suggestions", "POST", body),
   myTeam:        (params = {}) => apiFetch(`/api/my-team${qs(params)}`),
   fixtures:      (params = {}) => apiFetch(`/api/fixtures${qs(params)}`),
   createFixture: body => send("/api/fixtures", "POST", body),

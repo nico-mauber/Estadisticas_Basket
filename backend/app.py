@@ -777,6 +777,34 @@ def delete_fixture_route(fixture_id: int):
     return jsonify({"ok": True})
 
 
+@app.route("/api/ai/lineup-suggestions", methods=["POST"])
+@login_required
+def ai_lineup_suggestions_route():
+    """Sugerencias de quinteto asistidas por IA (F-15), bajo demanda. Body `{team, goal, rival?, competition?, last?,
+    refresh?}`. El modelo solo redacta sobre un resumen ya calculado; las cifras se validan contra ese resumen."""
+    import llm
+    body = request.get_json(silent=True) or {}
+    if not llm.suggestions_enabled():
+        return jsonify({"error": "Las sugerencias asistidas por IA no están disponibles.", "code": "llm_deshabilitado"}), 503
+    team = str(body.get("team") or "").strip().upper()
+    if not team or not any(r["team_code"] == team for r in repository.team_game_rows(None).values()):
+        return jsonify({"error": "Equipo no encontrado", "code": "no_encontrado"}), 404
+    rival = str(body.get("rival") or "").strip().upper() or None
+    args = {k: str(body[k]) for k in ("competition", "last") if body.get(k) not in (None, "")}
+    try:
+        ctx = context.parse_context(args, team_code=team)
+    except ContextError as e:
+        return jsonify(e.payload()), e.status
+    if ctx.competition_all or ctx.competition_id is None:
+        return jsonify({"error": "Elegí una competencia.", "code": "parametro_invalido"}), 400
+    try:
+        out = llm.lineup_suggestions(team, ctx.competition_id, ctx, str(body.get("goal") or ""), rival,
+                                     owner=prefs.current_owner(), refresh=bool(body.get("refresh")))
+    except llm.LlmError as e:
+        return jsonify(e.payload()), e.status
+    return jsonify(out)
+
+
 _RAPM_OWN_PARAMS = {"competition", "player", "top", "diagnostics"}
 
 
@@ -2315,7 +2343,17 @@ def me():
         "auth_required": auth_enabled(),
         "seed_enabled":  _seed_enabled(),
         "is_admin":      is_admin(),
+        "llm_enabled":   _llm_enabled(),
     })
+
+
+def _llm_enabled() -> bool:
+    try:
+        import llm
+        return llm.suggestions_enabled()
+    except Exception:
+        app.logger.exception("IA: no se pudo evaluar la disponibilidad")
+        return False
 
 
 # ── Seed (dev-only) ──────────────────────────────────────────────────────────

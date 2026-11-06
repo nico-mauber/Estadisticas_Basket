@@ -1936,3 +1936,20 @@ input.ld-min, .tr-controls input { background: var(--surface2); color: var(--tex
   .fx-actions { white-space: normal; }
 }
 .mt-card a:not(.btn), .fx-table a { color: var(--accent); }
+
+/* ── sugerencias IA (F-15) ── */
+.ai-head { display: flex; justify-content: space-between; align-items: center; }
+.ai-limits { margin: 0 0 8px; padding-left: 18px; font-size: 12px; color: var(--muted); }
+.ai-ondemand { font-size: 12px; margin: 0 0 8px; }
+.ai-controls { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }
+.ai-controls label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+.ai-card { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin: 10px 0; }
+.ai-tag { display: inline-block; font-size: 11px; color: var(--accent); border: 1px solid var(--accent); border-radius: 10px; padding: 1px 8px; }
+.ai-title { margin: 6px 0 4px; font-size: 15px; }
+.ai-text { margin: 0 0 8px; font-size: 14px; }
+.ai-sub { font-size: 12px; font-weight: 700; text-transform: uppercase; color: var(--muted); margin: 6px 0 4px; }
+.ai-support { font-size: 12px; width: 100%; }
+.ai-val { white-space: nowrap; margin-right: 8px; }
+.ai-link { color: var(--accent); }
+.ai-foot, .ai-disclaimer { font-size: 12px; }
+@media (max-width: 767px) { .ai-controls { flex-direction: column; align-items: stretch; } .ai-val { white-space: normal; } }

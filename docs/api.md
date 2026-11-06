@@ -761,6 +761,16 @@ Cabecera de contexto: cómo quedó la selección activa de una entidad. Auth: `l
 
 Response 200: `entity {type, id, name}`, `label` (etiqueta legible de los filtros aplicados), `record` ("V-D"; `null` en competencia), `wins`, `losses`, `avg_margin` (diferencia media de puntos con 1 decimal; `null` sin partidos), `games` (N: partidos de la selección), `games_total` (M: partidos de la entidad en la competencia **sin ningún otro filtro**), `sample` (badge de T-02: partidos para equipo, minutos para jugador) y `context` (eco de T-03 con `games_excluded` e `ignored`). Récord y diferencia salen del resultado final: victoria = puntos propios > puntos del rival; en un jugador cuentan solo los partidos que jugó. Errores: 400 `parametro_invalido` (tipo o id inválidos), 400 `contexto_invalido`, 400 `competencia_inexistente`, 404 `no_encontrado`.
 
+## POST `/api/ai/lineup-suggestions` — NUEVO (F-15)
+
+Sugerencias de quinteto asistidas por IA, **solo bajo demanda**. Auth: `login_required`. Body `{team, goal, rival?, competition?, last?, refresh?}`; `goal` ∈ `anotar | defender | reboteear | frenar_ritmo | cerrar | vs_rival | infrautilizados | a_evitar | cambio_pieza | lectura_cierres` (`rival` obligatorio y distinto del equipo con `vs_rival`); `refresh: true` fuerza una generación nueva.
+
+El backend arma un resumen determinista con las mismas funciones que las tablas de Quintetos (`team_lineups` con base total, `team_clutch_lineups`, `matchups.team_matchups` para el rival y `synergy` para los impactos): solo quintetos con muestra que no es baja (cierres: muestra alta), hasta `ai.top_n` filas, valores ya formateados (coma decimal) y sin nulos. El modelo recibe nombres y valores (sin ids, eventos ni partidos) y solo redacta: cita cada valor con `{m:R<k>.<clave>}` y el backend lo reemplaza; una sugerencia con una cifra que no esté en el resumen, una fila no listada o un marcador inexistente se descarta. Si ningún quinteto califica no se llama al modelo.
+
+Response 200: `team`, `goal`, `rival`, `competition`, `context`, `disclaimer`, `considered {rows, eligible, lineups, min_poss}`, `generated`, `cached` (resultado reutilizado), `discarded`, `reason` (`sin_quintetos_sobre_umbral` | `validacion_fallida` | `rechazo_modelo` | `null`), `model`, `generated_at` y `suggestions[] {title, text, supporting_rows[] {row_id, lineup_id, names, sample, badge, table_link, values {clave: {label, display}}, change?, rival_lineup?}}` (máximo 3). La misma consulta con los mismos datos se reutiliza sin llamar al modelo; un fallo no se guarda.
+
+Errores: 400 `parametro_invalido` (`goal` o `rival`), 404 `no_encontrado`, 429 `limite_ia` (más de `ai.max_calls_per_hour` generaciones reales por usuario en una hora), 502 `llm_error` / `timeout_externo`, 503 `llm_deshabilitado`. **`GET /api/me`** agrega `llm_enabled` (entorno completo y `ai.suggestions_enabled` activa).
+
 ## GET `/api/my-team` — NUEVO (F-12)
 
 Pantalla Mi equipo en una llamada. Auth: `login_required`. Query: `team` (opcional; si falta se usa el equipo fijado del usuario, preferencia `ui · home_team`), `competition` (opcional; la más reciente del equipo) y `today` (`YYYY-MM-DD`, para verificar; por defecto hoy en Uruguay, UTC−3). No acepta otros filtros: es la vista «sin filtros».
