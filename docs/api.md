@@ -761,6 +761,27 @@ Cabecera de contexto: cómo quedó la selección activa de una entidad. Auth: `l
 
 Response 200: `entity {type, id, name}`, `label` (etiqueta legible de los filtros aplicados), `record` ("V-D"; `null` en competencia), `wins`, `losses`, `avg_margin` (diferencia media de puntos con 1 decimal; `null` sin partidos), `games` (N: partidos de la selección), `games_total` (M: partidos de la entidad en la competencia **sin ningún otro filtro**), `sample` (badge de T-02: partidos para equipo, minutos para jugador) y `context` (eco de T-03 con `games_excluded` e `ignored`). Récord y diferencia salen del resultado final: victoria = puntos propios > puntos del rival; en un jugador cuentan solo los partidos que jugó. Errores: 400 `parametro_invalido` (tipo o id inválidos), 400 `contexto_invalido`, 400 `competencia_inexistente`, 404 `no_encontrado`.
 
+## GET `/api/rapm` — NUEVO (A-11)
+
+Impacto ajustado (RAPM) de los jugadores de una competencia. Auth: `login_required`. **Solo lee** el resultado calculado: nunca dispara el cálculo. Query: `competition` (obligatoria salvo con `player`; `all` → 400), `player` (`player_id`, agrega su fila en `player`; sin `competition` usa la competencia de su partido más reciente), `top` (filas de `players`, 0 = todas; por defecto 25, máximo 500). Los demás filtros de contexto se aceptan y vuelven en `context.ignored` con razón `no_aplica` (el universo es la competencia completa).
+
+Response 200, según `status`:
+- `sin_calcular`: `{status, competition {id, label}, message, can_recompute}`.
+- `datos_insuficientes`: `{status, games, needed (= 2 × rapm.folds), reason (pocos_partidos | sin_stints), message, computed_at, lambdas, folds, can_recompute}`.
+- `listo`: `stale` (los datos o la configuración cambiaron desde el cálculo), `can_recompute`, `computed_at` (ISO UTC), `duration_s`, `lambda` (elegido), `lambdas`, `folds`, `cv[] {lambda, error}` (error cuadrático ponderado de validación por λ), `cv_baseline` (modelo vacío), `folds_by_game {game_id: pliegue}`, `model {rows, stints, players, games, possessions_total, possessions_used, coverage, excluded {incompletas, sin_quinteto, games_sin_pbp}, lineup_changed_share, intercept, fit {error_model, error_empty}, cg {solves, iterations_mean}}`, `players[]`, `players_total`, `player`, `diagnostics`, `warnings[] {code, message}` (`lambda_en_el_borde`, `sin_mejora_vs_modelo_vacio`, `muchos_cambios_de_quinteto`) y `context`.
+- Cada fila de `players`: `player_id`, `name`, `team_code`, `off`, `def`, `total` (`{value, reason}` en puntos por 100 posesiones sobre el promedio; con muestra suficiente agregan la ficha de T-01: `rank`, `rank_total`, `tied`, `percentile`, `avg`, `dist_avg`, `leader`, `dist_leader`; con muestra baja `pct_reason: "muestra_baja"`), `possessions`, `poss_off`, `poss_def`, `minutes`, `games`, `onoff_net` (Net con el jugador en cancha, crudo, por 100), `sample` (T-02, minutos) y `ranked`. Un jugador de la competencia sin posesiones en los stints usados tiene `off/def/total` nulos con razón `sin_datos`. Orden: con muestra suficiente por total, luego muestra baja, luego sin datos.
+- `diagnostics.dominance`: `ok` (el ranking no está dominado por muestras chicas: ningún jugador de muestra baja en el top 10, no más de `max_below_p25` del top 10 debajo del percentil 25 de posesiones —prueba binomial con α = 0,10— y correlación de rangos |impacto|–posesiones ≥ `spearman_floor`), `strict_ok` (criterio estricto: ninguno del top 10 debajo del p25), `top_n`, `top_min_possessions`, `top_below_p25`, `expected_below_p25`, `p25_possessions`, `ranked_players`, `spearman_abs_total_vs_possessions`. `diagnostics.compare_unregularized`: `lambda` (= mínimo de la grilla / 100), `top10_low_sample_unregularized`, `top10_low_sample_chosen`, `top10_overlap`, `top10_unregularized`.
+
+Errores: 400 `parametro_invalido` ("Elegí una competencia.", `player` o `top` inválidos), 400 `competencia_inexistente`, 404 `no_encontrado` (jugador inexistente o sin partidos en la competencia).
+
+## POST `/api/rapm/recompute` — NUEVO (A-11)
+
+Calcula el impacto ajustado de una competencia (síncrono, en memoria del proceso; no se persiste). Auth: `admin_required`. Body `{"competition": <id>}`. Response 200: el mismo payload que `GET /api/rapm` (`status: "listo"` o `"datos_insuficientes"`). Errores: 400 `parametro_invalido` / `competencia_inexistente`, 403 `requiere_admin`, 409 `en_curso` (ya hay un cálculo de esa competencia), 502 `timeout_externo` ("El cálculo superó el tiempo máximo. Reducí la grilla de λ en Configuración."; no guarda nada). El código `requiere_admin` ahora lo devuelve todo endpoint con `admin_required`.
+
+## GET `/api/table/rapm` — NUEVO (A-11)
+
+Tabla T-06 del impacto ajustado: una fila por jugador con valor (el conjunto estándar de T-05 más las columnas `_rapm_rank`, `_rapm_total`, `_rapm_off`, `_rapm_def`, `_rapm_poss`, `_rapm_minutes` y `_onoff_net`). Esas columnas son `type: "value"` con `fmt` (`int`, `signed_dec2`, `dec1`): formato propio, sin percentil. Orden por defecto: impacto total descendente (muestra baja al final). Sin cálculo: `rows: []`. `meta.filters` documenta λ, pliegues, fecha del cálculo y cobertura (van a la cabecera de la exportación).
+
 ## GET `/api/synergy/<team_code>` — NUEVO (A-08)
 
 Sinergias entre jugadores de un equipo. Auth: `login_required`. Query: el contexto de T-03 y `player` (`player_id`, agrega el recorte `player`).

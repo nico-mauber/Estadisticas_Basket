@@ -81,9 +81,13 @@ export function fmtSigned(v, decimals = 2) {
 import { metricDef } from "./catalog.js";
 
 export function fmtMetric(key, value) {
+  return fmtByFmt(metricDef(key)?.fmt, value);
+}
+
+// Formato por nombre (`pct`, `dec1`, `dec2`, `int`, `signed_int`, `signed_dec2`): métricas del catálogo y columnas
+// numéricas fuera de él (T-06 `type: "value"`).
+export function fmtByFmt(fmt, value) {
   if (isNull(value)) return "—";
-  const def = metricDef(key);
-  const fmt = def?.fmt;
   switch (fmt) {
     case "pct":         return PCT(value);
     case "dec1":        return DEC1(value);

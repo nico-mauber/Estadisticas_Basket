@@ -312,10 +312,14 @@ _register(
     _k("similar.top_n", type="int", default=10, min=3, max=50,
        label="Top N de jugadores similares", section="preferencias", consumer="A-09",
        status="activa"),
-    _k("rapm.lambdas", type="json", default=[500, 1000, 2000, 4000, 8000],
-       label="Lambdas de RAPM", section="umbrales", consumer="A-11"),
+    _k("rapm.lambdas", type="json", default=[500, 1000, 2000, 4000, 8000], min=1, max=100000,
+       label="Grilla de λ del impacto ajustado",
+       help="Valores de regularización que prueba la validación cruzada del impacto ajustado (RAPM); se elige el de menor error. Lista de 1 a 10 números.",
+       section="umbrales", consumer="A-11", status="activa"),
     _k("rapm.folds", type="int", default=5, min=2, max=10,
-       label="Folds de cross-validation RAPM", section="umbrales", consumer="A-11"),
+       label="Pliegues de validación del impacto ajustado",
+       help="Cantidad de grupos de partidos de la validación cruzada. Hacen falta al menos el doble de partidos con play-by-play.",
+       section="umbrales", consumer="A-11", status="activa"),
     _k("ai.suggestions_enabled", type="bool", default=True,
        label="Sugerencias de IA habilitadas", section="preferencias", consumer="F-15"),
     _k("ui.default_language", type="enum", default="es", choices=("es", "en", "pt"),
@@ -431,13 +435,22 @@ def _validate_value(spec: ConfigKey, raw) -> tuple[Any, str | None]:
 
     if t == "json":
         if isinstance(raw, (dict, list)):
-            return raw, None
-        if isinstance(raw, str):
+            v = raw
+        elif isinstance(raw, str):
             try:
-                return json.loads(raw), None
+                v = json.loads(raw)
             except json.JSONDecodeError:
                 return None, "JSON inválido"
-        return None, "Debe ser un objeto o lista JSON"
+        else:
+            return None, "Debe ser un objeto o lista JSON"
+        if spec.min is not None:
+            # Lista de números acotada (p. ej. rapm.lambdas): de 1 a 10 valores, cada uno en [min, max].
+            if (not isinstance(v, list) or not 1 <= len(v) <= 10
+                    or any(isinstance(x, bool) or not isinstance(x, (int, float)) for x in v)):
+                return None, "Debe ser una lista de 1 a 10 números"
+            if any(x < spec.min or (spec.max is not None and x > spec.max) for x in v):
+                return None, f"Cada valor debe estar entre {spec.min:g} y {spec.max:g}"
+        return v, None
 
     return None, f"Tipo desconocido: {t}"
 

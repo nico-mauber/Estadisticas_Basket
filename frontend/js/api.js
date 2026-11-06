@@ -96,6 +96,8 @@ export const api = {
   possessionClock: (params = {}) => apiFetch(`/api/possession-clock${qs(params)}`),
   gamePlan:      (params = {}) => apiFetch(`/api/game-plan${qs(params)}`),
   eventsProduction: (params = {}) => apiFetch(`/api/events-production${qs(params)}`),
+  rapm:          (params = {}) => apiFetch(`/api/rapm${qs(params)}`),
+  rapmRecompute: body => send("/api/rapm/recompute", "POST", body),
   synergy:       (team, params = {}) => apiFetch(`/api/synergy/${encodeURIComponent(team)}${qs(params)}`),
   cross:         (params = {}) => apiFetch(`/api/cross${qs(params)}`),
   savedQueries:  (kind) => apiFetch(`/api/saved-queries${qs({ kind })}`),

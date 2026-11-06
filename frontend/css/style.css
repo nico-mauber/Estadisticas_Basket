@@ -1849,3 +1849,33 @@ input.ld-min, .tr-controls input { background: var(--surface2); color: var(--tex
 .ev-rec { font-size: 12px; margin: 6px 0 0; }
 .ev-scroll { overflow-x: auto; max-width: 100%; }
 .ev-table td:first-child { white-space: normal; }
+
+/* ── rapm (A-11) ── */
+.rp-comp { display: block; font-size: 12px; margin: -4px 0 10px; }
+.rp-card { margin: 4px 0 12px; }
+.rp-card.rp-low { opacity: .72; filter: grayscale(.6); }
+.rp-low-note { font-size: 13px; color: var(--muted); margin: 0 0 8px; }
+.rp-bar-row { display: grid; grid-template-columns: 90px minmax(0, 1fr) minmax(120px, auto); gap: 10px; align-items: center; margin: 6px 0; }
+.rp-bar-label { font-size: 13px; color: var(--muted); }
+.rp-bar { position: relative; height: 14px; background: var(--surface2); border-radius: 7px; overflow: hidden; }
+.rp-axis { position: absolute; left: 50%; top: 0; bottom: 0; width: 1px; background: var(--muted2); }
+.rp-fill { position: absolute; top: 2px; bottom: 2px; border-radius: 4px; }
+.rp-fill.rp-pos { left: 50%; background: var(--green); }
+.rp-fill.rp-neg { right: 50%; background: var(--red); }
+.rp-bar-val { display: flex; flex-direction: column; font-size: 14px; }
+.rp-rank { font-size: 11px; }
+.rp-poss { font-size: 13px; margin: 10px 0 4px; }
+.rp-onoff, .rp-unit { font-size: 12px; margin: 4px 0; }
+.rp-section { margin-top: 12px; }
+.rp-sub { font-size: 12px; font-weight: 700; text-transform: uppercase; color: var(--muted); margin-bottom: 6px; }
+.rp-top tr.rp-me td, .rp-details tr.rp-me td { background: var(--surface3); font-weight: 700; }
+.rp-stale, .rp-warn { font-size: 13px; color: var(--warn, #b7791f); border: 1px solid var(--warn, #b7791f); border-radius: 6px; padding: 6px 10px; margin: 6px 0; }
+.rp-details { margin-top: 12px; }
+.rp-details summary { cursor: pointer; font-weight: 600; }
+.rp-facts { font-size: 13px; margin: 6px 0; padding-left: 18px; }
+.rp-check { font-size: 13px; }
+.rp-actions { margin-top: 10px; }
+@media (max-width: 767px) {
+  .rp-bar-row { grid-template-columns: 70px minmax(0, 1fr); }
+  .rp-bar-val { grid-column: 1 / -1; flex-direction: row; gap: 8px; align-items: baseline; }
+}

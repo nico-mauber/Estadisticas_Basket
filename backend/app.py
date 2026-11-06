@@ -680,6 +680,69 @@ def synergy_route(team_code: str):
     return jsonify(out)
 
 
+_RAPM_OWN_PARAMS = {"competition", "player", "top", "diagnostics"}
+
+
+def _rapm_competition(raw, pid=None):
+    """Competencia concreta del RAPM: `(comp_id, None)` o `(None, (payload, status))`."""
+    raw = (str(raw).strip() if raw is not None else "") or None
+    if raw == "all" or (raw is None and pid is None):
+        return None, ({"error": "Elegí una competencia.", "code": "parametro_invalido"}, 400)
+    try:
+        ctx = context.parse_context({"competition": raw} if raw else {}, player_id=pid)
+    except ContextError as e:
+        return None, (e.payload(), e.status)
+    if ctx.competition_all or ctx.competition_id is None:
+        return None, ({"error": "Elegí una competencia.", "code": "parametro_invalido"}, 400)
+    return ctx.competition_id, None
+
+
+@app.route("/api/rapm")
+@login_required
+def rapm_route():
+    """Impacto ajustado (A-11): lee el resultado calculado (nunca calcula). `competition` (obligatoria salvo con `player`),
+    `player=<player_id>` (agrega su fila), `top` (filas de `players`, 0 = todas; por defecto 25)."""
+    import rapm
+    player = (request.args.get("player") or "").strip() or None
+    pid = None
+    if player is not None:
+        if not player.isdigit():
+            return jsonify({"error": "El jugador debe ser un id numérico.", "code": "parametro_invalido"}), 400
+        pid = identity.canonical_id(int(player))
+        if pid is None or identity.player_card(pid) is None:
+            return jsonify({"error": "No encontramos ese jugador.", "code": "no_encontrado"}), 404
+    comp_id, err = _rapm_competition(request.args.get("competition"), pid)
+    if err:
+        return jsonify(err[0]), err[1]
+    top_raw = (request.args.get("top") or "25").strip()
+    if not top_raw.isdigit() or int(top_raw) > 500:
+        return jsonify({"error": "top debe ser un entero entre 0 y 500.", "code": "parametro_invalido"}), 400
+    if pid is not None and not rapm.player_in_competition(comp_id, pid):
+        return jsonify({"error": "No encontramos ese jugador en la competencia.", "code": "no_encontrado"}), 404
+    ignored = [{"param": k, "reason": "no_aplica"} for k in request.args if k not in _RAPM_OWN_PARAMS]
+    return jsonify(rapm.view(comp_id, player=pid, top=int(top_raw), can_recompute=is_admin(), ignored=ignored))
+
+
+@app.route("/api/rapm/recompute", methods=["POST"])
+@admin_required
+def rapm_recompute_route():
+    """Recalcula el impacto ajustado de una competencia (A-11, administradores). Body `{competition}`."""
+    import rapm
+    body = request.get_json(silent=True) or {}
+    comp_id, err = _rapm_competition(body.get("competition"))
+    if err:
+        return jsonify(err[0]), err[1]
+    try:
+        rapm.recompute(comp_id)
+    except rapm.RapmTimeout:
+        return jsonify({"error": "El cálculo superó el tiempo máximo. Reducí la grilla de λ en Configuración.",
+                        "code": "timeout_externo"}), 502
+    except rapm.RapmBusy:
+        return jsonify({"error": "Ya hay un cálculo en curso para esta competencia. Esperá a que termine.",
+                        "code": "en_curso"}), 409
+    return jsonify(rapm.view(comp_id, can_recompute=True))
+
+
 @app.route("/api/similar/<int:player_id>")
 @login_required
 def similar_route(player_id: int):

@@ -1,4 +1,4 @@
-const CACHE = "smart-basket-v62";
+const CACHE = "smart-basket-v63";
 const STATIC = [
   "/",
   "/manifest.json",
@@ -33,6 +33,7 @@ const STATIC = [
   "/js/components/cross-panel.js",
   "/js/components/events-panel.js",
   "/js/components/synergy-panel.js",
+  "/js/components/rapm-panel.js",
   "/js/components/saved-queries.js",
   "/js/components/lineups-block.js",
   "/js/components/compare-players.js",

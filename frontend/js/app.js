@@ -32,6 +32,7 @@ import { renderLineupSearch } from "./components/lineup-search.js";
 import { renderCross } from "./components/cross-panel.js";
 import { renderEvents } from "./components/events-panel.js";
 import { renderSynergy, renderImpact } from "./components/synergy-panel.js";
+import { renderRapm } from "./components/rapm-panel.js";
 import { renderSavedQueries, saveQueryDialog } from "./components/saved-queries.js";
 import { renderCompareLineups, lineupsFromUrl } from "./components/compare-lineups.js";
 import { renderLeaders, renderCompetitionProfile } from "./components/leaders-panel.js";
@@ -383,7 +384,9 @@ function _renderSynergy() {
   if (code) renderSynergy(document.getElementById("team-synergy"), code, { params: _teamParams() });
 }
 function _renderImpactTab() {
-  if (_playerData?.player_id == null || !_playerData.team_code) return;
+  if (_playerData?.player_id == null) return;
+  renderRapm(document.getElementById("player-rapm"), _playerData.player_id, { params: _playerParams(), toast });
+  if (!_playerData.team_code) return;
   renderImpact(document.getElementById("player-impact"), _playerData.team_code, _playerData.player_id, { params: _playerParams() });
 }
 // Producción desde eventos (A-07): pestaña Eventos de Equipo y de Jugador.
@@ -3170,6 +3173,7 @@ function renderApp() {
         <div id="player-similar" data-tabs="similares"></div>
         <div id="player-trends" data-tabs="tendencias"></div>
         <div id="player-events" data-tabs="eventos"></div>
+        <div id="player-rapm" data-tabs="impacto"></div>
         <div id="player-impact" data-tabs="impacto"></div>
         <div id="player-main"><p class="empty">Selecciona un jugador desde la vista de equipo.</p></div>
       </div>

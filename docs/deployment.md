@@ -97,6 +97,10 @@ Fijada en `backend/.python-version`:
 
 Razón: `greenlet` (dependencia de Playwright) es incompatible con Python 3.14+ en Render.
 
+### Impacto ajustado (A-11) tras un deploy
+
+El impacto ajustado (RAPM) se calcula bajo demanda y vive en la memoria del proceso: un deploy o un reinicio lo borra. Después de cada deploy, un administrador abre Jugador › Impacto y pulsa "Calcular impacto ajustado". Con más de un worker de gunicorn cada proceso tendría su propio resultado: se mantiene 1 worker (DA-28). El cálculo corta a los 150 s (`MAX_SECS`), por debajo del `--timeout 180` de gunicorn.
+
 ### Deploy automático
 
 Render detecta pushes a la rama `main` y redeploya automáticamente. Si no se dispara, usar **Manual Deploy** en el dashboard.
