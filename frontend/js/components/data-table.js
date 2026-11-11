@@ -3,7 +3,7 @@
 // totales y promedio de competencia, y expone getState() para la exportación. NINGÚN
 // número se calcula acá (RF-20): todo viene del payload de /api/table/<id>.
 
-import { fmtMetric, nullDisplay, NULL_REASON_LABELS, cmpNullsLast, DEC2 } from "../core/format.js";
+import { fmtMetric, fmtByFmt, nullDisplay, NULL_REASON_LABELS, cmpNullsLast, DEC2 } from "../core/format.js";
 import { metricLabel, metricDef, groupsFor } from "../core/catalog.js";
 import { percentileBg } from "../core/colors.js";
 import { getPref, setPref } from "../core/prefs.js";
@@ -109,7 +109,9 @@ export function createDataTable(el, {
   // (partidos, minutos, posesiones) ordenan sin esa separación: ahí la muestra ES el dato.
   const SAMPLE_KEYS = new Set(["games", "minutes", "possessions", "_sample"]);
   function _lowSampleLast(col) {
-    return col.type === "metric" && !SAMPLE_KEYS.has(col.key)
+    // Columnas `value` con signo (p. ej. el impacto ajustado de A-11) también son de rendimiento.
+    const perf = (col.type === "metric" && !SAMPLE_KEYS.has(col.key)) || (col.type === "value" && /^signed/.test(col.fmt || ""));
+    return perf
       && _payload.rows.some(r => r.sample && r.sample.ranked === false);
   }
 
@@ -256,7 +258,8 @@ export function createDataTable(el, {
         const reason = row.reasons?.[col.key];
         return `<td class="${stickyCls}">${nullDisplay(reason)}</td>`;
       }
-      return `<td class="${stickyCls}">${_escHtml(v)}</td>`;
+      const shown = col.fmt && typeof v === "number" ? fmtByFmt(col.fmt, v) : v;
+      return `<td class="${stickyCls}">${_escHtml(shown)}</td>`;
     }
     // Métrica
     if (v == null) {

@@ -144,7 +144,7 @@ def admin_required(fn):
         if auth_enabled() and "user" not in session:
             return jsonify({"error": "No autenticado"}), 401
         if not is_admin():
-            return jsonify({"error": "Tu usuario no tiene permiso para esta acción."}), 403
+            return jsonify({"error": "Tu usuario no tiene permiso para esta acción.", "code": "requiere_admin"}), 403
         return fn(*args, **kwargs)
     return wrapper
 

@@ -3,3 +3,5 @@ flask-cors==4.0.1
 flask-sqlalchemy==3.1.1
 playwright==1.44.0
 gunicorn
+# F-15 (opcional): sugerencias de IA. Sin LLM_ENABLED y ANTHROPIC_API_KEY no se usa.
+anthropic>=1.17,<2

@@ -337,6 +337,24 @@
         "player"
       ],
       "text": "{entidad} tiene de los valores más bajos de {metrica} de la competencia: {valor} frente a {media} de promedio"
+    },
+    {
+      "id": "cambio_mejora",
+      "metric": "*",
+      "when": "cambio_mejora",
+      "entities": [
+        "team"
+      ],
+      "text": "{entidad} mejoró su {metrica} en los últimos días: {valor} frente a {media} en el resto de la temporada"
+    },
+    {
+      "id": "cambio_empeora",
+      "metric": "*",
+      "when": "cambio_empeora",
+      "entities": [
+        "team"
+      ],
+      "text": "{entidad} empeoró su {metrica} en los últimos días: {valor} frente a {media} en el resto de la temporada"
     }
   ]
 }

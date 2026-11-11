@@ -1,0 +1,360 @@
+{
+  "lang": "en",
+  "version": 1,
+  "templates": [
+    {
+      "id": "ventaja_oer",
+      "metric": "oer",
+      "when": "ventaja",
+      "entities": [
+        "team"
+      ],
+      "text": "Efficient offense: keep running the situations that generate the most points"
+    },
+    {
+      "id": "riesgo_oer",
+      "metric": "oer",
+      "when": "riesgo",
+      "entities": [
+        "team"
+      ],
+      "text": "Inefficient offense: look for better shots before chasing more volume"
+    },
+    {
+      "id": "ventaja_der",
+      "metric": "der",
+      "when": "ventaja",
+      "entities": [
+        "team"
+      ],
+      "text": "Solid defense: keep up the pressure and the contests on opposing shots"
+    },
+    {
+      "id": "riesgo_der",
+      "metric": "der",
+      "when": "riesgo",
+      "entities": [
+        "team"
+      ],
+      "text": "Vulnerable defense: adjust the coverage to limit the opponent's comfortable shots"
+    },
+    {
+      "id": "ventaja_net_rating",
+      "metric": "net_rating",
+      "when": "ventaja",
+      "entities": [
+        "team"
+      ],
+      "text": "Positive efficiency margin: protect the rotations that sustain it"
+    },
+    {
+      "id": "riesgo_net_rating",
+      "metric": "net_rating",
+      "when": "riesgo",
+      "entities": [
+        "team"
+      ],
+      "text": "Negative efficiency margin: review the rotations that hurt it the most"
+    },
+    {
+      "id": "ventaja_efg_pct",
+      "metric": "efg_pct",
+      "when": "ventaja",
+      "entities": [
+        "team"
+      ],
+      "text": "Shooting advantage: look for volume in the half court"
+    },
+    {
+      "id": "riesgo_efg_pct",
+      "metric": "efg_pct",
+      "when": "riesgo",
+      "entities": [
+        "team"
+      ],
+      "text": "Ineffective shooting: prioritize better-quality shots and attacks on the rim"
+    },
+    {
+      "id": "ventaja_ts_pct",
+      "metric": "ts_pct",
+      "when": "ventaja",
+      "entities": [
+        "team"
+      ],
+      "text": "You score with total efficiency: keep the shot mix and the trips to the line"
+    },
+    {
+      "id": "riesgo_ts_pct",
+      "metric": "ts_pct",
+      "when": "riesgo",
+      "entities": [
+        "team"
+      ],
+      "text": "Low total efficiency: add free throws and avoid low-quality shots"
+    },
+    {
+      "id": "ventaja_ppt",
+      "metric": "ppt",
+      "when": "ventaja",
+      "entities": [
+        "team"
+      ],
+      "text": "Every field-goal attempt pays off: keep the volume of the highest-value shots"
+    },
+    {
+      "id": "riesgo_ppt",
+      "metric": "ppt",
+      "when": "riesgo",
+      "entities": [
+        "team"
+      ],
+      "text": "Every field-goal attempt pays little: replace low-value shots with better options"
+    },
+    {
+      "id": "ventaja_fg2_pct",
+      "metric": "fg2_pct",
+      "when": "ventaja",
+      "entities": [
+        "team"
+      ],
+      "text": "Effective on two-pointers: keep attacking the rim and the paint"
+    },
+    {
+      "id": "riesgo_fg2_pct",
+      "metric": "fg2_pct",
+      "when": "riesgo",
+      "entities": [
+        "team"
+      ],
+      "text": "Ineffective on two-pointers: improve shot selection near the rim"
+    },
+    {
+      "id": "ventaja_fg3_pct",
+      "metric": "fg3_pct",
+      "when": "ventaja",
+      "entities": [
+        "team"
+      ],
+      "text": "Reliable from three: create advantages to open up three-point shots"
+    },
+    {
+      "id": "riesgo_fg3_pct",
+      "metric": "fg3_pct",
+      "when": "riesgo",
+      "entities": [
+        "team"
+      ],
+      "text": "Unreliable from three: limit forced threes and take only the open ones"
+    },
+    {
+      "id": "ventaja_ft_pct",
+      "metric": "ft_pct",
+      "when": "ventaja",
+      "entities": [
+        "team"
+      ],
+      "text": "Good free-throw percentage: draw fouls and close out games from the line"
+    },
+    {
+      "id": "riesgo_ft_pct",
+      "metric": "ft_pct",
+      "when": "riesgo",
+      "entities": [
+        "team"
+      ],
+      "text": "Unreliable free throws: do not depend on the line to close out games"
+    },
+    {
+      "id": "ventaja_ft_rate",
+      "metric": "ft_rate",
+      "when": "ventaja",
+      "entities": [
+        "team"
+      ],
+      "text": "You reach the line often: keep attacking the rim to draw fouls"
+    },
+    {
+      "id": "riesgo_ft_rate",
+      "metric": "ft_rate",
+      "when": "riesgo",
+      "entities": [
+        "team"
+      ],
+      "text": "You rarely reach the line: attack the rim more to draw fouls"
+    },
+    {
+      "id": "ventaja_to_pct",
+      "metric": "to_pct",
+      "when": "ventaja",
+      "entities": [
+        "team"
+      ],
+      "text": "You take care of the ball: keep the movement calm and unhurried"
+    },
+    {
+      "id": "riesgo_to_pct",
+      "metric": "to_pct",
+      "when": "riesgo",
+      "entities": [
+        "team"
+      ],
+      "text": "You turn the ball over too much: simplify decisions and secure the pass"
+    },
+    {
+      "id": "ventaja_or_pct",
+      "metric": "or_pct",
+      "when": "ventaja",
+      "entities": [
+        "team"
+      ],
+      "text": "You dominate the offensive glass: send players to the boards for second chances"
+    },
+    {
+      "id": "riesgo_or_pct",
+      "metric": "or_pct",
+      "when": "riesgo",
+      "entities": [
+        "team"
+      ],
+      "text": "Little offensive rebounding: decide how many players to send to the boards per opponent"
+    },
+    {
+      "id": "ventaja_dr_pct",
+      "metric": "dr_pct",
+      "when": "ventaja",
+      "entities": [
+        "team"
+      ],
+      "text": "You finish the defensive rebound well: use it to get out and run"
+    },
+    {
+      "id": "riesgo_dr_pct",
+      "metric": "dr_pct",
+      "when": "riesgo",
+      "entities": [
+        "team"
+      ],
+      "text": "You give up defensive rebounds: reinforce the box-out to deny second chances"
+    },
+    {
+      "id": "ventaja_ast_to",
+      "metric": "ast_to",
+      "when": "ventaja",
+      "entities": [
+        "team"
+      ],
+      "text": "Orderly ball movement, more assists than turnovers: keep moving the ball"
+    },
+    {
+      "id": "riesgo_ast_to",
+      "metric": "ast_to",
+      "when": "riesgo",
+      "entities": [
+        "team"
+      ],
+      "text": "More turnovers than assists: lower the risk in your passes"
+    },
+    {
+      "id": "ventaja_as_pct",
+      "metric": "as_pct",
+      "when": "ventaja",
+      "entities": [
+        "team"
+      ],
+      "text": "A large share of baskets come off passes: keep the ball movement going"
+    },
+    {
+      "id": "riesgo_as_pct",
+      "metric": "as_pct",
+      "when": "riesgo",
+      "entities": [
+        "team"
+      ],
+      "text": "Few baskets come off passes: look for more passes before the shot"
+    },
+    {
+      "id": "insight_alto_higher",
+      "metric": "*",
+      "direction": "higher",
+      "when": "extremo_alto",
+      "entities": [
+        "team",
+        "player"
+      ],
+      "text": "{entidad} ranks in percentile {p} for {metrica} in the competition ({valor} versus a {media} average)"
+    },
+    {
+      "id": "insight_bajo_higher",
+      "metric": "*",
+      "direction": "higher",
+      "when": "extremo_bajo",
+      "entities": [
+        "team",
+        "player"
+      ],
+      "text": "{entidad} ranks in percentile {p} for {metrica} in the competition ({valor} versus a {media} average)"
+    },
+    {
+      "id": "insight_alto_lower",
+      "metric": "*",
+      "direction": "lower",
+      "when": "extremo_alto",
+      "entities": [
+        "team",
+        "player"
+      ],
+      "text": "{entidad} is among the best in {metrica}, at percentile {p}: {valor} versus a {media} average (lower is better)"
+    },
+    {
+      "id": "insight_bajo_lower",
+      "metric": "*",
+      "direction": "lower",
+      "when": "extremo_bajo",
+      "entities": [
+        "team",
+        "player"
+      ],
+      "text": "{entidad} is among the worst in {metrica}, at percentile {p}: {valor} versus a {media} average (lower is better)"
+    },
+    {
+      "id": "insight_alto_neutral",
+      "metric": "*",
+      "direction": "neutral",
+      "when": "extremo_alto",
+      "entities": [
+        "team",
+        "player"
+      ],
+      "text": "{entidad} has some of the highest values of {metrica} in the competition: {valor} versus a {media} average"
+    },
+    {
+      "id": "insight_bajo_neutral",
+      "metric": "*",
+      "direction": "neutral",
+      "when": "extremo_bajo",
+      "entities": [
+        "team",
+        "player"
+      ],
+      "text": "{entidad} has some of the lowest values of {metrica} in the competition: {valor} versus a {media} average"
+    },
+    {
+      "id": "cambio_mejora",
+      "metric": "*",
+      "when": "cambio_mejora",
+      "entities": [
+        "team"
+      ],
+      "text": "{entidad} improved its {metrica} in recent days: {valor} versus {media} over the rest of the season"
+    },
+    {
+      "id": "cambio_empeora",
+      "metric": "*",
+      "when": "cambio_empeora",
+      "entities": [
+        "team"
+      ],
+      "text": "{entidad} got worse in {metrica} in recent days: {valor} versus {media} over the rest of the season"
+    }
+  ]
+}

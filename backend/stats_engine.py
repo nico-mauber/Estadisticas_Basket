@@ -1709,3 +1709,42 @@ def _per100_dens(bundle: "StatBundle") -> dict:
             return None
         return (exact or 0) + est
     return {"own": (side("own"), estimated), "opp": (side("opp"), estimated)}
+
+
+# ── Helpers numéricos (A-11) ─────────────────────────────────────────────────
+
+def weighted_mean(values: list, weights: list) -> float | None:
+    """Σ w·v / Σ w; None si no hay peso."""
+    sw = sum(weights)
+    return sum(v * w for v, w in zip(values, weights)) / sw if sw else None
+
+
+def _ranks(xs: list) -> list:
+    """Rangos 1..n con empates promediados."""
+    order = sorted(range(len(xs)), key=lambda i: xs[i])
+    out = [0.0] * len(xs)
+    i = 0
+    while i < len(order):
+        j = i
+        while j + 1 < len(order) and xs[order[j + 1]] == xs[order[i]]:
+            j += 1
+        r = (i + j) / 2 + 1
+        for k in range(i, j + 1):
+            out[order[k]] = r
+        i = j + 1
+    return out
+
+
+def spearman(xs: list, ys: list) -> float | None:
+    """Correlación de rangos de Spearman (Pearson sobre rangos con empates promediados); None con < 3 pares o varianza 0."""
+    if len(xs) != len(ys) or len(xs) < 3:
+        return None
+    rx, ry = _ranks(xs), _ranks(ys)
+    n = len(rx)
+    mx, my = sum(rx) / n, sum(ry) / n
+    sxy = sum((a - mx) * (b - my) for a, b in zip(rx, ry))
+    sxx = sum((a - mx) ** 2 for a in rx)
+    syy = sum((b - my) ** 2 for b in ry)
+    if not sxx or not syy:
+        return None
+    return sxy / (sxx * syy) ** 0.5

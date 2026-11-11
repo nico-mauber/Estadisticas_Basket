@@ -290,6 +290,62 @@ def _matchup_rows(datas: list, own: str, opp: str, level: str) -> dict:
     return {"rows": rows, "matrix": matrix, "reason": None}
 
 
+# ── Stints para RAPM (A-11, Arq. §3.10) ──────────────────────────────────────
+
+def stints(comp_id: int) -> dict:
+    """Stints de la competencia: posesiones COMPLETAS de A-01 agrupadas por (partido, quinteto local, quinteto
+    visitante), con posesiones y puntos de cada lado. Las incompletas y las que no tienen los cinco jugadores de ambos
+    equipos identificados quedan fuera y se cuentan (nunca se imputan).
+
+    Devuelve `{"stints": [{game_id, home_on, away_on, poss_home, poss_away, pts_home, pts_away}], "summary": {...}}`.
+    Solo usa la competencia: el resto del contexto de T-03 no aplica (spec A-11 RF-6)."""
+    return cache.memo("matchups:stints", (comp_id,), lambda: _build_stints(comp_id))
+
+
+def _build_stints(comp_id):
+    import identity
+    import possessions
+
+    def canon(ids):
+        out = [identity.canonical_id(i) or i for i in ids]
+        return tuple(sorted(out)) if len(set(out)) == 5 else None
+
+    acc, game_ids = {}, []
+    total = incompletas = sin_quinteto = changed = sin_pbp = 0
+    for g in repository.competition_games(comp_id):
+        poss = possessions.game_possessions(g.game_id)
+        if not poss:
+            sin_pbp += 1
+            continue
+        game_ids.append(g.game_id)
+        for p in poss:
+            total += 1
+            if p.incomplete:
+                incompletas += 1
+                continue
+            own = canon(p.own_on_court) if p.own_on_court and len(p.own_on_court) == 5 else None
+            opp = canon(p.opp_on_court) if p.opp_on_court and len(p.opp_on_court) == 5 else None
+            if own is None or opp is None:
+                sin_quinteto += 1
+                continue
+            home = p.team == g.home_code
+            home_on, away_on = (own, opp) if home else (opp, own)
+            st = acc.get((g.game_id, home_on, away_on))
+            if st is None:
+                st = acc[(g.game_id, home_on, away_on)] = {
+                    "game_id": g.game_id, "home_on": list(home_on), "away_on": list(away_on),
+                    "poss_home": 0, "poss_away": 0, "pts_home": 0, "pts_away": 0}
+            side = "home" if home else "away"
+            st[f"poss_{side}"] += 1
+            st[f"pts_{side}"] += p.pts or 0
+            changed += 1 if p.lineup_changed else 0
+    used = total - incompletas - sin_quinteto
+    return {"stints": list(acc.values()),
+            "summary": {"games": len(game_ids), "game_ids": game_ids, "possessions_total": total, "possessions_used": used,
+                        "excluded": {"incompletas": incompletas, "sin_quinteto": sin_quinteto, "games_sin_pbp": sin_pbp},
+                        "lineup_changed": changed}}
+
+
 # ── Entity registration ──────────────────────────────────────────────────────
 
 def _register():

@@ -270,6 +270,24 @@ Búsquedas guardadas con nombre (F-10). Tabla nueva, creada por `db.create_all()
 | `params` | TEXT NOT NULL | JSON de un objeto plano `{clave: valor}` más `_saved` (versiones de datos y configuración al guardar) |
 | `created_at`, `updated_at` | TEXT NOT NULL | ISO-8601 |
 
+### `fixtures`
+Calendario manual (F-12): FIBA no publica el fixture. Tabla nueva, creada por `db.create_all()`; sin cambios en tablas existentes.
+
+| Columna | Tipo | Descripción |
+|---------|------|-------------|
+| `id` | INTEGER PK | |
+| `competition_id` | INTEGER | Opcional, sin FK dura (al fusionar competencias se reasigna) |
+| `date` | TEXT NOT NULL, índice | `YYYY-MM-DD` |
+| `time` | TEXT | `HH:MM` |
+| `home_code`, `away_code` | TEXT NOT NULL | Equipos con al menos un partido importado |
+| `game_id` | TEXT | Partido importado vinculado (mismos equipos, fecha ±1 día); `NULL` = pendiente. Se completa al importar o reprocesar y se borra al eliminar el partido |
+| `source_url` | TEXT | Enlace de FIBA para importarlo cuando se juegue |
+| `notes` | TEXT | Hasta 300 caracteres |
+| `created_at` | TEXT NOT NULL | ISO-8601 |
+| `created_by` | TEXT | Usuario de sesión o `"_open"` |
+
+Sin restricción única (un cruce puede repetirse); el duplicado exacto `(date, home_code, away_code)` se rechaza en la validación (409).
+
 ---
 
 ## Inicialización y migración

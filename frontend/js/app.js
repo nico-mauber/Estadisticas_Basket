@@ -1,5 +1,5 @@
 import { api, setUnauthorizedHandler } from "./api.js";
-import { drawRadar, drawEvolution, drawPlayerEvolution, drawLeagueScatter, drawCompareRadar, resetZoom } from "./charts.js";
+import { drawRadar, drawEvolution, drawPlayerEvolution, drawLeagueScatter, drawCompareRadar, resetZoom, applyChartLocale } from "./charts.js";
 import { PCT, PCT0, DEC1, DEC2, fmtNumber, isNull, nullDisplay, fmtOrNull, cmpNullsLast } from "./core/format.js";
 import { renderDuplicateItems } from "./components/identity-merge.js";
 import { renderSettingsForm } from "./components/settings-form.js";
@@ -32,6 +32,14 @@ import { renderLineupSearch } from "./components/lineup-search.js";
 import { renderCross } from "./components/cross-panel.js";
 import { renderEvents } from "./components/events-panel.js";
 import { renderSynergy, renderImpact } from "./components/synergy-panel.js";
+import { renderRapm } from "./components/rapm-panel.js";
+import { renderMyTeam } from "./components/my-team.js";
+import { renderLineupSuggestions } from "./components/lineup-suggestions.js";
+import { renderFixtures } from "./components/fixtures-manager.js";
+import { homeTeamButton, followButton } from "./components/my-team-controls.js";
+import { loadPrefs, getPref } from "./core/prefs.js";
+import { initI18n, getLanguage, onLanguageChange, deviceLanguage, isLanguage, tText } from "./core/i18n.js";
+import { mountLanguageSelector, chooseLanguage } from "./components/language-selector.js";
 import { renderSavedQueries, saveQueryDialog } from "./components/saved-queries.js";
 import { renderCompareLineups, lineupsFromUrl } from "./components/compare-lineups.js";
 import { renderLeaders, renderCompetitionProfile } from "./components/leaders-panel.js";
@@ -330,7 +338,7 @@ async function refreshCompareSelectors() {
 }
 
 // ── Nav ────────────────────────────────────────────────────────────────────
-const sections = ["import", "league", "team", "compare", "player", "search", "preparar", "partido", "config"];
+const sections = ["myteam", "import", "league", "team", "compare", "player", "search", "preparar", "partido", "config"];
 let activeSection = "import";
 let _lastSection = "import";
 let _routing = false;      // true mientras se aplica una dirección: la vista no la vuelve a escribir (X-01)
@@ -381,9 +389,13 @@ function _renderTrends(section) {
 function _renderSynergy() {
   const code = _teamData?.team_code;
   if (code) renderSynergy(document.getElementById("team-synergy"), code, { params: _teamParams() });
+  // Sugerencias asistidas por IA (F-15): el panel solo existe si el servidor tiene la función habilitada.
+  if (code) renderLineupSuggestions(document.getElementById("team-ai"), { teamCode: code, enabled: _llmEnabled, params: _teamParams() });
 }
 function _renderImpactTab() {
-  if (_playerData?.player_id == null || !_playerData.team_code) return;
+  if (_playerData?.player_id == null) return;
+  renderRapm(document.getElementById("player-rapm"), _playerData.player_id, { params: _playerParams(), toast });
+  if (!_playerData.team_code) return;
   renderImpact(document.getElementById("player-impact"), _playerData.team_code, _playerData.player_id, { params: _playerParams() });
 }
 // Producción desde eventos (A-07): pestaña Eventos de Equipo y de Jugador.
@@ -418,15 +430,24 @@ function _renderLeagueExtras() {
   }
 }
 
-// Abre Preparar con el cruce ya elegido (F-20).
-function showPrepare(team, rival, focus = null) {
-  setSection("preparar");
+// Abre Preparar con el cruce ya elegido (F-20; desde el calendario y Mi equipo, F-12). La dirección lleva el cruce.
+function showPrepare(team, rival, focus = null, fixture = null) {
+  setSection("preparar", { sync: false });
+  writeRoute({ section: "preparar", id: null, tab: null }, { team, rival, fixture, competition: null, last: null });
   renderPrepare(document.getElementById("preparar-main"), { onOpenGame: showGame, team, rival, focus });
+}
+
+// Mi equipo (F-12, S8).
+function renderMyTeamView() {
+  renderMyTeam(document.getElementById("myteam-main"), {
+    toast, onPrepare: (team, rival, fixture) => showPrepare(team, rival, null, fixture),
+  });
 }
 
 // Abre una sección desde la barra de navegación.
 function goSection(id) {
   setSection(id, { sync: !["team", "player"].includes(id) });
+  if (id === "myteam")  renderMyTeamView();
   if (id === "import")  renderImport();
   if (id === "league")  renderLeague();
   if (id === "team")    { refreshTeamSelector(); syncRoute(); }
@@ -496,7 +517,9 @@ function syncRoute() {
         min_minutes: _tab.league === "lideres" ? _leaders.min : null }
     : r.section === "search" ? {}
     : { competition: null, last: null };
-  writeRoute(r, { ..._searchUrlQuery(r.section), ...query });
+  // El cruce de Preparar (team, rival, fixture) viaja solo en su dirección (F-12).
+  const clear = r.section === "preparar" ? {} : { team: null, fixture: null, ...(r.section === "team" ? {} : { rival: null }) };
+  writeRoute(r, { ...clear, ..._searchUrlQuery(r.section), ...query });
 }
 
 const _notice = msg => toast(msg, "err");
@@ -590,7 +613,12 @@ async function applyRoute({ initial = false } = {}) {
       }
       case "preparar":
         setSection("preparar", { sync: false });
-        renderPrepare(document.getElementById("preparar-main"), { onOpenGame: showGame });
+        renderPrepare(document.getElementById("preparar-main"), { onOpenGame: showGame,
+          team: q.team ? q.team.toUpperCase() : null, rival: q.rival ? q.rival.toUpperCase() : null });
+        break;
+      case "myteam":
+        setSection("myteam", { sync: false });
+        renderMyTeamView();
         break;
       case "partido":
         if (p.id && /^\d+$/.test(p.id)) showGame(p.id); else setSection("partido", { sync: false });
@@ -608,9 +636,13 @@ async function applyRoute({ initial = false } = {}) {
   return true;
 }
 
-// Sin dirección: Datos si la base no tiene partidos; si tiene, Liga › Tabla (RF-16).
+// Sin dirección: Mi equipo si el usuario fijó su equipo (F-12); si no, Datos si la base no tiene partidos y Liga › Tabla
+// si tiene (X-01 RF-16).
 async function openInitialSection() {
   const seen = _navCount;
+  await loadPrefs("ui");
+  if (seen !== _navCount) return;
+  if (getPref("ui", "home_team", null)) { goSection("myteam"); return; }
   let n = 0;
   try { n = (await api.games()).length; } catch { /* sin conexión: queda Datos */ }
   if (seen !== _navCount) return;   // el usuario ya eligió una sección mientras se consultaban los partidos
@@ -626,6 +658,7 @@ let _seedEnabled  = false;  // dev-only seed button (set from /api/me at boot)
 let _authRequired = false;  // whether the backend requires login
 let _authUser     = null;   // logged-in username (when auth required)
 let _isAdmin      = false;  // puede modificar datos (F-11, /api/me → is_admin)
+let _llmEnabled   = false;  // sugerencias asistidas por IA disponibles (F-15, /api/me → llm_enabled)
 let _importTab    = "importar";   // importar · calidad · competencias (F-11)
 let _catalogComp  = "";     // filtro del catálogo por competencia
 let _qualityComp  = "";     // competencia elegida en Calidad de datos
@@ -828,7 +861,7 @@ async function _runReprocess(target, onProgress) {
   _afterDataChange();
 }
 
-const IMPORT_TABS = [["importar", "Importar"], ["calidad", "Calidad de datos"], ["competencias", "Competencias"]];
+const IMPORT_TABS = [["importar", "Importar"], ["calendario", "Calendario"], ["calidad", "Calidad de datos"], ["competencias", "Competencias"]];
 
 // Sección Datos (F-11): pestañas Importar · Calidad de datos · Competencias.
 function renderImport() {
@@ -847,6 +880,7 @@ function renderImport() {
   const el = document.getElementById("import-tab");
   if (_importTab === "calidad") return _renderQualityTab(el);
   if (_importTab === "competencias") return _renderCompetitionsTab(el);
+  if (_importTab === "calendario") return renderFixtures(el, { isAdmin: _isAdmin, toast, onPrepare: (team, rival, fixture) => showPrepare(team, rival, null, fixture) });
   return _renderImportTab(el);
 }
 
@@ -1993,6 +2027,7 @@ function _applyTeamData(main, data) {
     compSel.innerHTML = _compOptions(data.competitions, _teamComp, "Todas las competencias", "all");
   }
   _renderTeamContent(main, data);
+  homeTeamButton(document.getElementById("team-home-btn"), { teamCode: data.team_code, toast });
   _drawTabs("team");
   applyTabs(document.getElementById("sec-team"), _tab.team);
   syncRoute();
@@ -2522,6 +2557,7 @@ function _applyPlayerData(main, data) {
   if (data.player_id != null) {
     renderPlayerHeader(document.getElementById("player-identity"), data.player_id, {
       params: _playerParams(),
+      afterRender: host => followButton(host.querySelector(".ph-follow"), { playerId: data.player_id, toast }),
       onSaved: () => toast("Ficha actualizada"),
     });
   }
@@ -3024,6 +3060,7 @@ function _applySearch() {
 
 // ── Bootstrap ──────────────────────────────────────────────────────────────
 const NAV_ITEMS = {
+  myteam:  { icon: "⭐", label: "Mi equipo" },
   import:  { icon: "📥", label: "Datos" },
   league:  { icon: "🏆", label: "Liga" },
   team:    { icon: "📊", label: "Equipo" },
@@ -3035,8 +3072,9 @@ const NAV_ITEMS = {
   config:  { icon: "⚙", label: "Configuración" },
 };
 // En pantallas chicas la barra muestra las cuatro secciones principales y "Más" abre el resto (X-01 RF-11).
-const NAV_ORDER = ["import", "league", "team", "player", "compare", "search", "preparar"];
-const NAV_EXTRA = ["import", "search", "preparar"];
+// Mi equipo (F-12) va primera; en el teléfono Comparar pasa a "Más" para dejar lugar.
+const NAV_ORDER = ["myteam", "import", "league", "team", "player", "compare", "search", "preparar"];
+const NAV_EXTRA = ["import", "compare", "search", "preparar"];
 
 // ── F-07: Analizar partido ──────────────────────────────────────────────────
 function showGame(gameId) {
@@ -3069,6 +3107,7 @@ function renderApp() {
     <header>
       <span class="header-logo">🏀 Smart-Basket</span>
       <span class="header-sub">Basketball Advanced Analytics</span>
+      <span class="lang-slot" id="lang-slot"></span>
       <button class="header-gear" id="btn-config" aria-label="Configuración" title="Configuración">⚙</button>
       ${_authRequired ? `<span class="header-user">${_authUser || ""} · <button class="header-logout" id="btn-logout">Salir</button></span>` : ""}
     </header>
@@ -3086,6 +3125,8 @@ function renderApp() {
       ${[...NAV_EXTRA, "config"].map(s => `<button type="button" data-section="${s}"><span class="nav-icon">${NAV_ITEMS[s].icon}</span>${NAV_ITEMS[s].label}</button>`).join("")}
     </div>
     <main>
+      <!-- Mi equipo (F-12) -->
+      <div class="section" id="sec-myteam"><div id="myteam-main"></div></div>
       <div class="section" id="sec-import"></div>
       <div class="section" id="sec-league"></div>
 
@@ -3098,6 +3139,7 @@ function renderApp() {
             <button class="btn btn-ghost" id="btn-show-player">Ver jugador</button>
             <button class="btn btn-ghost" id="btn-show-shotmap">Ver mapa de tiro</button>
             <button class="btn btn-ghost" id="btn-show-onoff">Ver ON/OFF</button>
+            <span id="team-home-btn"></span>
           </div>
           <div class="filter-pills" id="team-filter-pills" style="display:none;margin-top:12px">
             <span style="color:var(--muted);font-size:12px;align-self:center;margin-right:4px">Período:</span>
@@ -3127,6 +3169,7 @@ function renderApp() {
         <div id="team-insights" data-tabs="resumen"></div>
         <div id="team-roster" data-tabs="plantel"></div>
         <div id="team-lineups-block" data-tabs="quintetos"></div>
+        <div id="team-ai" data-tabs="quintetos"></div>
         <div id="team-periods" data-tabs="momentos"></div>
         <div id="team-origins" data-tabs="posesion"></div>
         <div id="team-transition" data-tabs="posesion"></div>
@@ -3170,6 +3213,7 @@ function renderApp() {
         <div id="player-similar" data-tabs="similares"></div>
         <div id="player-trends" data-tabs="tendencias"></div>
         <div id="player-events" data-tabs="eventos"></div>
+        <div id="player-rapm" data-tabs="impacto"></div>
         <div id="player-impact" data-tabs="impacto"></div>
         <div id="player-main"><p class="empty">Selecciona un jugador desde la vista de equipo.</p></div>
       </div>
@@ -3286,6 +3330,7 @@ function renderApp() {
   }
 
   document.getElementById("btn-config").addEventListener("click", () => goSection("config"));
+  mountLanguageSelector(document.getElementById("lang-slot"), { onPick: lang => chooseLanguage(lang, { persist: true, toast }) });
 
   // Atrás, Adelante o una dirección editada a mano reconstruyen la vista (X-01 RF-4).
   onRouteChange(() => applyRoute());
@@ -3306,9 +3351,11 @@ async function renderConfig() {
   const sec = document.getElementById("sec-config");
   sec.innerHTML = `<div class="card"><div class="card-title">Configuración
     <button class="btn btn-ghost btn-back-config" id="btn-config-back">← Volver</button></div>
+    <div class="config-lang"><label>Idioma</label><span id="config-lang-slot" class="lang-slot"></span></div>
     <div id="config-body"><p class="empty"><span class="spinner"></span>Cargando configuración…</p></div>
   </div>
   <div id="config-calibrate-card"></div>`;
+  mountLanguageSelector(document.getElementById("config-lang-slot"), { onPick: lang => chooseLanguage(lang, { persist: true, toast }) });
   document.getElementById("btn-config-back").addEventListener("click", () => {
     goSection(_lastSection !== "config" ? _lastSection : "import");
   });
@@ -3430,6 +3477,7 @@ function showLogin(message = "") {
     <div class="login-wrap">
       <form class="login-card" id="login-form">
         <div class="login-logo">🏀 Smart-Basket</div>
+        <div class="login-lang" id="login-lang"></div>
         <div class="login-sub">Ingresá para continuar</div>
         ${message ? `<div class="login-msg">${message}</div>` : ""}
         <input id="login-user" type="text" placeholder="Usuario" autocomplete="username" required />
@@ -3438,6 +3486,7 @@ function showLogin(message = "") {
         <div class="login-err" id="login-err"></div>
       </form>
     </div>`;
+  mountLanguageSelector(document.getElementById("login-lang"), { onPick: lang => chooseLanguage(lang, { persist: false }) });
   const form  = document.getElementById("login-form");
   const errEl = document.getElementById("login-err");
   form.addEventListener("submit", async e => {
@@ -3473,12 +3522,30 @@ async function boot() {
   _authUser     = me.user || null;
   _seedEnabled  = me.seed_enabled === true;
   _isAdmin      = me.is_admin === true;
+  _llmEnabled   = me.llm_enabled === true;
 
-  if (_authRequired && !me.authenticated) {
+  // Idioma (F-21): preferencia del usuario → idioma del dispositivo → idioma por defecto de la configuración → español.
+  const loggedIn = !(_authRequired && !me.authenticated);
+  let lang = null;
+  if (loggedIn) {
+    try { await loadPrefs("ui"); lang = getPref("ui", "language", null); } catch { /* sin conexión: queda el dispositivo */ }
+  }
+  if (!isLanguage(lang)) lang = deviceLanguage() || me.default_language;
+  await initI18n(lang);
+
+  if (!loggedIn) {
     showLogin();
   } else {
     renderApp();
   }
 }
+
+// Al cambiar de idioma se vuelve a dibujar la vista actual (los textos y formatos que arma el servidor y los gráficos se
+// piden de nuevo en el idioma nuevo); la ruta y los filtros no cambian (F-21 RF-4).
+onLanguageChange(async () => {
+  try { applyChartLocale(); } catch { /* sin Chart.js */ }
+  if (!document.getElementById("sec-import")) return;     // pantalla de login: no hay vista que redibujar
+  try { await applyRoute({ initial: true }); } catch (e) { console.error(e); }
+});
 
 boot();

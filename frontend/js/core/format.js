@@ -3,16 +3,20 @@
 // (DA-36). Un valor nulo —null, undefined, NaN o ±Infinity— se muestra siempre "—",
 // nunca 0: el 0 real sí se muestra como número.
 
+import { getLocale } from "./i18n.js";
+
 const _formatters = new Map();
 function _nf(decimals) {
-  if (!_formatters.has(decimals)) {
-    _formatters.set(decimals, new Intl.NumberFormat("es-UY", {
+  // F-21: el separador decimal sigue al idioma (es-UY y pt-BR coma, en-US punto).
+  const key = `${getLocale()}|${decimals}`;
+  if (!_formatters.has(key)) {
+    _formatters.set(key, new Intl.NumberFormat(getLocale(), {
       minimumFractionDigits: decimals,
       maximumFractionDigits: decimals,
       useGrouping: false,
     }));
   }
-  return _formatters.get(decimals);
+  return _formatters.get(key);
 }
 
 export const isNull = v => v == null || !Number.isFinite(Number(v));
@@ -81,9 +85,13 @@ export function fmtSigned(v, decimals = 2) {
 import { metricDef } from "./catalog.js";
 
 export function fmtMetric(key, value) {
+  return fmtByFmt(metricDef(key)?.fmt, value);
+}
+
+// Formato por nombre (`pct`, `dec1`, `dec2`, `int`, `signed_int`, `signed_dec2`): métricas del catálogo y columnas
+// numéricas fuera de él (T-06 `type: "value"`).
+export function fmtByFmt(fmt, value) {
   if (isNull(value)) return "—";
-  const def = metricDef(key);
-  const fmt = def?.fmt;
   switch (fmt) {
     case "pct":         return PCT(value);
     case "dec1":        return DEC1(value);

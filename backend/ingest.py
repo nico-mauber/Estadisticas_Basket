@@ -153,6 +153,11 @@ def persist_game(game: dict) -> None:
     # C-08: cada jugador del partido queda asociado a su ficha en la misma transacción
     identity.assign_game(game_id)
 
+    # F-12: el partido del calendario que coincide (local, visitante, fecha ±1 día) queda vinculado
+    import fixtures
+    db.session.flush()
+    fixtures.link_game_to_fixture(game_id)
+
 
 def reprocess_games(game_ids: list[str]) -> dict:
     """Re-ejecuta la ingesta vigente sobre partidos ya importados.

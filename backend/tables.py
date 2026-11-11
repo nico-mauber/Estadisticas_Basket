@@ -253,7 +253,7 @@ def _compute(tdef: TableDef, treq: TableRequest) -> dict:
         row_values = []
         row_pct = []
         for c in columns:
-            if c["type"] == "text":
+            if c["type"] in ("text", "value"):
                 row_values.append(row.texts.get(c["key"]))
                 row_pct.append(None)
             elif c["key"] == "_sample":
@@ -325,6 +325,10 @@ def _build_columns(tdef: TableDef, has_sample: bool) -> list:
     for (key, label, fmt) in tdef.extra_columns:
         col = {"key": key, "label": label, "type": "text",
                "default_visible": key in tdef.default_columns}
+        if fmt.startswith("value:"):
+            # Columna numérica fuera del catálogo (p. ej. el impacto ajustado de A-11): el valor sale de `texts` y
+            # el cliente lo formatea con `fmt`.
+            col.update(type="value", fmt=fmt[len("value:"):])
         if not sticky_done:
             col["sticky"] = True
             sticky_done = True
@@ -690,7 +694,7 @@ def _payload_to_sheet(payload: dict, sheet_name: str) -> dict:
         elif c["key"] == "_sample":
             columns.append({"key": "_sample", "label": c.get("label", "Muestra"), "fmt": "text"})
         else:
-            columns.append({"key": c["key"], "label": c.get("label", c["key"]), "fmt": "text"})
+            columns.append({"key": c["key"], "label": c.get("label", c["key"]), "fmt": c.get("fmt") if c["type"] == "value" else "text"})
 
     rows = []
     for r in payload["rows"]:
@@ -1107,6 +1111,31 @@ register_table(
     default_sort={"key": "net_rating", "dir": "desc", "use_adjusted": True},
     totals_mode="none", payload_extras=_lineup_search_extras,
     title_fn=lambda treq: f"Buscador de quintetos — {_competition_label(treq.comp_id) or 'competencia'}",
+)
+
+def _build_rapm(treq: TableRequest) -> list:
+    import rapm
+    return rapm.table_rows(treq)
+
+
+def _rapm_extras(treq: TableRequest) -> dict:
+    import rapm
+    return rapm.table_extras(treq)
+
+
+register_table(
+    "rapm", entity_type="player", title="Impacto ajustado (RAPM)", builder=_build_rapm,
+    default_columns=("_name", "_team", "_sample", "_rapm_total", "_rapm_off", "_rapm_def", "_rapm_poss", "_rapm_minutes",
+                     "_onoff_net", "plus_minus"),
+    row_kind="entity",
+    extra_columns=(("_name", "Jugador", "text"), ("_team", "Equipo", "text"),
+                   ("_rapm_rank", "Puesto", "value:int"), ("_rapm_total", "Impacto total", "value:signed_dec2"),
+                   ("_rapm_off", "Impacto ofensivo", "value:signed_dec2"), ("_rapm_def", "Impacto defensivo", "value:signed_dec2"),
+                   ("_rapm_poss", "Posesiones (stints)", "value:int"), ("_rapm_minutes", "Minutos", "value:dec1"),
+                   ("_onoff_net", "ON/OFF crudo (Net/100)", "value:signed_dec2")),
+    default_sort={"key": "_rapm_total", "dir": "desc", "use_adjusted": False},
+    totals_mode="none", avg_mode="none", payload_extras=_rapm_extras,
+    title_fn=lambda treq: f"Impacto ajustado — {_competition_label(treq.comp_id) or 'competencia'}",
 )
 
 register_table(
