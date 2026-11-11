@@ -349,7 +349,9 @@ _register(
        help="Tope de llamadas al servicio de IA por usuario en una hora (controla el costo). Repetir la misma consulta no cuenta.",
        section="preferencias", consumer="F-15", status="activa"),
     _k("ui.default_language", type="enum", default="es", choices=("es", "en", "pt"),
-       label="Idioma por defecto", section="preferencias", consumer="F-21"),
+       label="Idioma por defecto",
+       help="Idioma de la interfaz para quienes todavía no eligieron uno (español, inglés o portugués). Cada usuario puede cambiarlo con el selector de idioma.",
+       section="preferencias", consumer="F-21", status="activa"),
 )
 
 

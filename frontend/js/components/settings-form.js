@@ -92,7 +92,7 @@ export function renderSettingsForm(el, payload, { onSave, onReset }) {
         const modified = s.modified ? `<span class="settings-modified">Modificado</span>` : "";
         const meta = s.updated_by ? `<span class="settings-meta">Modificado por ${s.updated_by} el ${_fmtDate(s.updated_at)}</span>` : "";
         const range = s.min != null && s.max != null ? `<span class="settings-range">entre ${s.min} y ${s.max}${s.unit ? " " + s.unit : ""}</span>` : "";
-        const defVal = s.default === null ? "Automática (la más reciente)" : s.default;
+        const defVal = s.default === null ? "Automática (la más reciente)" : (typeof s.default === "object" ? JSON.stringify(s.default) : s.default);
         const resetBtn = s.modified && !readonly ? `<button class="settings-reset-key" data-key="${s.key}" title="Restablecer">↺</button>` : "";
 
         return `<div class="settings-row" data-key="${s.key}">

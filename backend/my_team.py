@@ -212,7 +212,8 @@ def followed_players(ids: list) -> dict:
 
 def payload(team: str, comp_id: int, today: str) -> dict:
     """Parte compartida (cacheada por equipo, competencia y día) de `GET /api/my-team`."""
-    return cache.memo("my_team", (team, comp_id, today), lambda: _build(team, comp_id, today))
+    import i18n
+    return cache.memo("my_team", (team, comp_id, today, i18n.current_lang()), lambda: _build(team, comp_id, today))
 
 
 def _build(team, comp_id, today):

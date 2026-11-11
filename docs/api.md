@@ -1567,3 +1567,10 @@ Errores: 400 (body inválido), 413 (> 10 MB o > 50 000 filas en una hoja).
 | `competition` | sí | ID de competencia (no acepta `"all"`) |
 
 Response 200: XLSX con Portada + una hoja por tabla aplicable al scope. Errores: 400 (scope/competition inválido), 404 (sin datos).
+
+## Idioma de las respuestas (F-21)
+
+Toda petición puede indicar el idioma con el encabezado `X-Lang: es|en|pt` (o `?lang=`). Sin él se usa `ui.default_language`
+(config global) y, si falta, `es`. Afecta a los textos generados por el backend (frases de `phrases/<lang>.json`: plan de juego,
+insights, Mi equipo, sugerencias de IA) y al separador decimal de las frases. Las claves de caché incluyen el idioma.
+`GET /api/me` agrega `default_language`. Los mensajes de error siguen en español en el backend; el frontend los traduce con su diccionario.

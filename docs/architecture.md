@@ -306,3 +306,10 @@ Ver [database.md](database.md) para esquema completo.
 | Migración vía `upgrade_db()` | `ALTER TABLE ADD COLUMN` idempotente al arranque; evita dependencia de Alembic |
 | Credenciales en env var (no tabla `users`) | Sobreviven redeploys en dev (disco efímero) y prod por igual; sin schema nuevo |
 | Login gateado por entorno | Mismo código en dev/prod; la fuerza del login = qué `AUTH_USERS` se configura por servicio |
+
+## i18n (F-21)
+
+`backend/i18n.py`: `LANGS`, `valid`, `default_language`, `current_lang` (encabezado `X-Lang` → `?lang=` → config → `es`), `decimal_sep`.
+`phrases.py` carga `phrases/<lang>.json` (mismos ids y marcadores en los tres idiomas; lo valida `tools/i18n_audit.py`).
+`llm.py` pide al modelo redactar en el idioma actual. Los namespaces de `cache.memo` con texto (`gplan`, `insights`, `my_team`, `llm`)
+incluyen el idioma en la clave. El frontend usa un catálogo por texto fuente (ver `docs/frontend.md`).

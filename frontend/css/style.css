@@ -1953,3 +1953,22 @@ input.ld-min, .tr-controls input { background: var(--surface2); color: var(--tex
 .ai-link { color: var(--accent); }
 .ai-foot, .ai-disclaimer { font-size: 12px; }
 @media (max-width: 767px) { .ai-controls { flex-direction: column; align-items: stretch; } .ai-val { white-space: normal; } }
+
+/* ── i18n (F-21) ── */
+.lang-slot { position: relative; display: inline-flex; margin-left: auto; margin-right: 8px; }
+.lang-btn { display: inline-flex; align-items: center; gap: 4px; background: transparent; color: var(--muted); border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; font-size: 12px; font-weight: 600; cursor: pointer; }
+.lang-btn:hover { color: var(--text); }
+.lang-menu { position: absolute; right: 0; top: calc(100% + 4px); z-index: 60; min-width: 130px; margin: 0; padding: 4px; list-style: none; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 6px 18px rgba(0,0,0,.4); }
+.lang-menu[hidden] { display: none; }
+.lang-menu li { padding: 8px 10px; border-radius: 6px; font-size: 13px; cursor: pointer; }
+.lang-menu li:hover, .lang-menu li:focus { background: var(--surface3); outline: none; }
+.lang-menu li[aria-selected="true"] { color: var(--accent); font-weight: 700; }
+.login-lang { display: flex; justify-content: flex-end; margin-bottom: 8px; }
+.login-lang .lang-slot { margin: 0; }
+/* Los textos de otros idiomas pueden ser más largos: nada debe desbordar */
+button, .btn, .filter-pill, .tab-btn, label { overflow-wrap: anywhere; }
+.card-title, .tab-btn, nav button { min-width: 0; }
+@media (max-width: 767px) { .lang-btn .lang-globe { display: none; } .lang-slot { margin-right: 4px; } }
+
+.config-lang { display: flex; align-items: center; gap: 8px; margin: 4px 0 12px; flex-wrap: wrap; }
+.config-lang .lang-slot { margin: 0; }

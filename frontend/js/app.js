@@ -1,5 +1,5 @@
 import { api, setUnauthorizedHandler } from "./api.js";
-import { drawRadar, drawEvolution, drawPlayerEvolution, drawLeagueScatter, drawCompareRadar, resetZoom } from "./charts.js";
+import { drawRadar, drawEvolution, drawPlayerEvolution, drawLeagueScatter, drawCompareRadar, resetZoom, applyChartLocale } from "./charts.js";
 import { PCT, PCT0, DEC1, DEC2, fmtNumber, isNull, nullDisplay, fmtOrNull, cmpNullsLast } from "./core/format.js";
 import { renderDuplicateItems } from "./components/identity-merge.js";
 import { renderSettingsForm } from "./components/settings-form.js";
@@ -38,6 +38,8 @@ import { renderLineupSuggestions } from "./components/lineup-suggestions.js";
 import { renderFixtures } from "./components/fixtures-manager.js";
 import { homeTeamButton, followButton } from "./components/my-team-controls.js";
 import { loadPrefs, getPref } from "./core/prefs.js";
+import { initI18n, getLanguage, onLanguageChange, deviceLanguage, isLanguage, tText } from "./core/i18n.js";
+import { mountLanguageSelector, chooseLanguage } from "./components/language-selector.js";
 import { renderSavedQueries, saveQueryDialog } from "./components/saved-queries.js";
 import { renderCompareLineups, lineupsFromUrl } from "./components/compare-lineups.js";
 import { renderLeaders, renderCompetitionProfile } from "./components/leaders-panel.js";
@@ -3105,6 +3107,7 @@ function renderApp() {
     <header>
       <span class="header-logo">🏀 Smart-Basket</span>
       <span class="header-sub">Basketball Advanced Analytics</span>
+      <span class="lang-slot" id="lang-slot"></span>
       <button class="header-gear" id="btn-config" aria-label="Configuración" title="Configuración">⚙</button>
       ${_authRequired ? `<span class="header-user">${_authUser || ""} · <button class="header-logout" id="btn-logout">Salir</button></span>` : ""}
     </header>
@@ -3327,6 +3330,7 @@ function renderApp() {
   }
 
   document.getElementById("btn-config").addEventListener("click", () => goSection("config"));
+  mountLanguageSelector(document.getElementById("lang-slot"), { onPick: lang => chooseLanguage(lang, { persist: true, toast }) });
 
   // Atrás, Adelante o una dirección editada a mano reconstruyen la vista (X-01 RF-4).
   onRouteChange(() => applyRoute());
@@ -3347,9 +3351,11 @@ async function renderConfig() {
   const sec = document.getElementById("sec-config");
   sec.innerHTML = `<div class="card"><div class="card-title">Configuración
     <button class="btn btn-ghost btn-back-config" id="btn-config-back">← Volver</button></div>
+    <div class="config-lang"><label>Idioma</label><span id="config-lang-slot" class="lang-slot"></span></div>
     <div id="config-body"><p class="empty"><span class="spinner"></span>Cargando configuración…</p></div>
   </div>
   <div id="config-calibrate-card"></div>`;
+  mountLanguageSelector(document.getElementById("config-lang-slot"), { onPick: lang => chooseLanguage(lang, { persist: true, toast }) });
   document.getElementById("btn-config-back").addEventListener("click", () => {
     goSection(_lastSection !== "config" ? _lastSection : "import");
   });
@@ -3471,6 +3477,7 @@ function showLogin(message = "") {
     <div class="login-wrap">
       <form class="login-card" id="login-form">
         <div class="login-logo">🏀 Smart-Basket</div>
+        <div class="login-lang" id="login-lang"></div>
         <div class="login-sub">Ingresá para continuar</div>
         ${message ? `<div class="login-msg">${message}</div>` : ""}
         <input id="login-user" type="text" placeholder="Usuario" autocomplete="username" required />
@@ -3479,6 +3486,7 @@ function showLogin(message = "") {
         <div class="login-err" id="login-err"></div>
       </form>
     </div>`;
+  mountLanguageSelector(document.getElementById("login-lang"), { onPick: lang => chooseLanguage(lang, { persist: false }) });
   const form  = document.getElementById("login-form");
   const errEl = document.getElementById("login-err");
   form.addEventListener("submit", async e => {
@@ -3516,11 +3524,28 @@ async function boot() {
   _isAdmin      = me.is_admin === true;
   _llmEnabled   = me.llm_enabled === true;
 
-  if (_authRequired && !me.authenticated) {
+  // Idioma (F-21): preferencia del usuario → idioma del dispositivo → idioma por defecto de la configuración → español.
+  const loggedIn = !(_authRequired && !me.authenticated);
+  let lang = null;
+  if (loggedIn) {
+    try { await loadPrefs("ui"); lang = getPref("ui", "language", null); } catch { /* sin conexión: queda el dispositivo */ }
+  }
+  if (!isLanguage(lang)) lang = deviceLanguage() || me.default_language;
+  await initI18n(lang);
+
+  if (!loggedIn) {
     showLogin();
   } else {
     renderApp();
   }
 }
+
+// Al cambiar de idioma se vuelve a dibujar la vista actual (los textos y formatos que arma el servidor y los gráficos se
+// piden de nuevo en el idioma nuevo); la ruta y los filtros no cambian (F-21 RF-4).
+onLanguageChange(async () => {
+  try { applyChartLocale(); } catch { /* sin Chart.js */ }
+  if (!document.getElementById("sec-import")) return;     // pantalla de login: no hay vista que redibujar
+  try { await applyRoute({ initial: true }); } catch (e) { console.error(e); }
+});
 
 boot();

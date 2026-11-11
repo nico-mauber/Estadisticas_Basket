@@ -31,7 +31,9 @@ from context import Context
 log = logging.getLogger(__name__)
 
 PHRASES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "phrases")
-LANGS = ("es",)
+import i18n
+
+LANGS = i18n.LANGS
 MARKERS = ("entidad", "metrica", "valor", "referencia", "delta", "p", "media", "rival")
 WHEN_VALUES = ("ventaja", "riesgo", "extremo_alto", "extremo_bajo", "cambio_mejora", "cambio_empeora")
 REFERENCES = ("competencia", "rival", "periodo_anterior", "rival_proximo")
@@ -122,8 +124,10 @@ def validate_templates(data: dict, rules: dict, metrics: dict) -> list:
     return errors
 
 
-def load_templates(lang: str = "es") -> dict:
-    """`{lang, version, templates, by_id, by_key, generic}` validado. `by_key[(métrica, when, entidad)]`."""
+def load_templates(lang: str | None = None) -> dict:
+    """`{lang, version, templates, by_id, by_key, generic}` validado. `by_key[(métrica, when, entidad)]`.
+    Sin `lang` se usa el idioma de la petición (F-21)."""
+    lang = lang or i18n.current_lang()
     if lang not in LANGS:
         raise PhraseError("parametro_invalido", f"Idioma no soportado: {lang}", 400)
     data = _read_json(f"{lang}.json")
@@ -144,7 +148,7 @@ def load_templates(lang: str = "es") -> dict:
 
 
 def pick_template(metric_key: str, when: str, entity_type: str, *, mode: str = "perfil",
-                  direction: str | None = None, lang: str = "es") -> dict | None:
+                  direction: str | None = None, lang: str | None = None) -> dict | None:
     """Plantilla exacta de la métrica; si no hay, la genérica de esa dirección; si no, `None`. En modo `matchup` usa el
     texto alternativo `text_matchup` cuando la plantilla lo define."""
     tpl = load_templates(lang)
@@ -162,9 +166,9 @@ def _round_half_up(value: float, decimals: int) -> Decimal:
     return Decimal(repr(float(value))).quantize(q, rounding=ROUND_HALF_UP)
 
 
-def _num(value: float, decimals: int, *, signed: bool = False) -> str:
+def _num(value: float, decimals: int, *, signed: bool = False, lang: str | None = None) -> str:
     d = _round_half_up(value, decimals)
-    text = f"{abs(d):.{decimals}f}".replace(".", ",")
+    text = f"{abs(d):.{decimals}f}".replace(".", i18n.decimal_sep(lang))
     if d < 0:
         return "−" + text
     return ("+" + text) if signed else text
@@ -187,7 +191,7 @@ def format_value(metric_key: str, value, *, delta: bool = False) -> str:
     return _num(value, 2, signed=delta)
 
 
-def render(template_id: str, values: dict | None = None, *, lang: str = "es") -> str:
+def render(template_id: str, values: dict | None = None, *, lang: str | None = None) -> str:
     """Rellena los marcadores de la plantilla. Un marcador ausente en `values` es un error de programación."""
     values = values or {}
     t = load_templates(lang)["by_id"].get(template_id)
@@ -304,7 +308,7 @@ def game_plan(entity_type: str, entity_id: str, *, reference: str = "competencia
         raise PhraseError("parametro_invalido",
                           "Elegí un período (Últimos N) para comparar con el período anterior", 400)
 
-    key = (team_code, reference, rival, comp_id, context_mod.context_key(ctx), mode)
+    key = (team_code, reference, rival, comp_id, context_mod.context_key(ctx), mode, i18n.current_lang())
     return cache.memo("gplan", key, lambda: _build(team_code, reference, rival, comp_id, ctx, mode))
 
 
@@ -463,7 +467,7 @@ def insights(entity_type: str, entity_id, *, comp_id: int | None, ctx: Context) 
     if entity_type not in ("team", "player"):
         raise PhraseError("parametro_invalido", "Los insights solo existen para equipos y jugadores", 400)
     eid = str(entity_id).upper() if entity_type == "team" else str(entity_id)
-    key = (entity_type, eid, comp_id, context_mod.context_key(ctx))
+    key = (entity_type, eid, comp_id, context_mod.context_key(ctx), i18n.current_lang())
     return cache.memo("insights", key, lambda: _build_insights(entity_type, eid, comp_id, ctx))
 
 

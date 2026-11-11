@@ -3,16 +3,20 @@
 // (DA-36). Un valor nulo —null, undefined, NaN o ±Infinity— se muestra siempre "—",
 // nunca 0: el 0 real sí se muestra como número.
 
+import { getLocale } from "./i18n.js";
+
 const _formatters = new Map();
 function _nf(decimals) {
-  if (!_formatters.has(decimals)) {
-    _formatters.set(decimals, new Intl.NumberFormat("es-UY", {
+  // F-21: el separador decimal sigue al idioma (es-UY y pt-BR coma, en-US punto).
+  const key = `${getLocale()}|${decimals}`;
+  if (!_formatters.has(key)) {
+    _formatters.set(key, new Intl.NumberFormat(getLocale(), {
       minimumFractionDigits: decimals,
       maximumFractionDigits: decimals,
       useGrouping: false,
     }));
   }
-  return _formatters.get(decimals);
+  return _formatters.get(key);
 }
 
 export const isNull = v => v == null || !Number.isFinite(Number(v));

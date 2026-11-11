@@ -19,6 +19,7 @@ import identity
 import ingest
 import config
 import population
+import i18n
 import prefs
 import repository
 import metrics_catalog
@@ -2344,6 +2345,7 @@ def me():
         "seed_enabled":  _seed_enabled(),
         "is_admin":      is_admin(),
         "llm_enabled":   _llm_enabled(),
+        "default_language": i18n.default_language(),
     })
 
 

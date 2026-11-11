@@ -1,6 +1,6 @@
 # Progress — F-21: Multi-idioma
 
-> **Estado:** ⬜ No iniciado
+> **Estado:** ✅ Implementado (con desvíos documentados abajo)
 > Reglas: `sdd/04-implement.md`.
 
 ## Estado de tareas
@@ -119,3 +119,11 @@
 - `docs/metrics.md` — nota: siglas internacionales sin traducir y descripciones por idioma.
 
 ## Deuda / TODO
+
+## Implementación real y desvíos
+- **Catálogo por texto fuente en vez de `t("clave")`** y traductor del DOM (MutationObserver): cubre ~1200 textos sin tocar cada vista; ver `docs/frontend.md`. Pendiente de confirmar con el cliente.
+- **Errores:** no se creó `api_errors.py` ni códigos nuevos; los mensajes en español del backend se traducen en el frontend por diccionario.
+- **Backend:** `i18n.py`, `phrases/en.json` y `pt.json` (38 plantillas, paridad validada), `X-Lang`, claves de caché con idioma, `llm` en el idioma actual, `ui.default_language` activo.
+- **Frontend:** `core/i18n.js`, selector en cabecera/login/Configuración, formato de números por locale, charts con `tText`, `sw.js` v66.
+- **Verificación:** navegador 25/25 (1280 y 360 px: cambio es→en→pt→es, persistencia tras recarga, números con punto en `en`, Mi equipo y plan de juego), `i18n_audit.py` sin problemas.
+- **Pendiente con el cliente:** revisión nativa de las traducciones en/pt y lista exacta de siglas que no se traducen.

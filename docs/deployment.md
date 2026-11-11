@@ -189,3 +189,6 @@ basketball-analytics/
 ├── render.yaml             # Config deploy Render.com
 └── CLAUDE.md               # Instrucciones para Claude Code
 ```
+
+**Idioma por defecto (F-21):** clave de configuración `ui.default_language` (`es`/`en`/`pt`, editable por admins en Configuración);
+se usa cuando el usuario no tiene preferencia ni idioma de dispositivo soportado.

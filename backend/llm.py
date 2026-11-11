@@ -20,6 +20,7 @@ from datetime import datetime, timezone
 import cache
 import config
 import context as context_mod
+import i18n
 import metrics_catalog
 import phrases
 import repository
@@ -354,7 +355,7 @@ def build_summary(team: str, comp_id: int, ctx, goal: str, rival: str | None) ->
         rows.append(row)
     label = repository.competition_labels().get(comp_id)
     return {"goal": goal, "goal_label": GOALS[goal], "criterion": CRITERIA[goal], "team": team,
-            "team_name": _team_name(team), "rival": rival, "context_label": label or "", "lang": "es", "rows": rows,
+            "team_name": _team_name(team), "rival": rival, "context_label": label or "", "lang": i18n.current_lang(), "rows": rows,
             "considered": {"rows": len(rows), "eligible": len(elig), "lineups": len(lineups),
                            "min_poss": min_poss}}
 
@@ -435,7 +436,10 @@ def _request_kwargs(summary: dict) -> dict:
     effort = (os.environ.get("LLM_EFFORT") or "medium").strip().lower()
     if effort in ("low", "medium", "high", "xhigh", "max"):
         output_config["effort"] = effort
-    kw = {"model": model, "max_tokens": MAX_TOKENS, "system": SYSTEM, "output_config": output_config,
+    lang = summary.get("lang") or "es"
+    extra = f"8. Escribí el título y el texto de cada sugerencia en {i18n.NAMES[lang]} (el resumen viene en español: los marcadores no cambian)."
+    system = SYSTEM if lang == "es" else SYSTEM + "\n" + extra
+    kw = {"model": model, "max_tokens": MAX_TOKENS, "system": system, "output_config": output_config,
           "messages": [{"role": "user", "content": json.dumps(_model_input(summary), ensure_ascii=False)}]}
     # Reintento del lado del servidor ante una negativa (la elige Anthropic por categoría). Haiku no lo admite.
     if (os.environ.get("LLM_FALLBACKS") or "default").strip().lower() != "off" and not model.startswith("claude-haiku"):
@@ -546,7 +550,7 @@ def lineup_suggestions(team: str, comp_id: int, ctx, goal: str, rival: str | Non
             "context": context_mod.context_echo(ctx, games_used=0, games_total=0, games_excluded={}, ignored=[], competition_label=label)}
     if not summary["rows"]:
         return {**base, "suggestions": [], "generated": False, "reason": "sin_quintetos_sobre_umbral", "discarded": 0, "cached": False}
-    qkey = (team, comp_id, context_mod.context_key(ctx), goal, rival)
+    qkey = (team, comp_id, context_mod.context_key(ctx), goal, rival, i18n.current_lang())
     with _lock:
         if refresh:
             _nonce[qkey] = _nonce.get(qkey, 0) + 1

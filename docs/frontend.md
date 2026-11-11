@@ -523,3 +523,22 @@ strings con locale `es`. Migrado desde `app.js` (`_cmpNullsLast`).
 saltos de página. Clase `body.printing` oculta nav, header y footer.
 
 **`sw.js`**: CACHE v23, 3 módulos nuevos en STATIC (`data-table.js`, `export-menu.js`, `exporters.js`).
+
+## Multi-idioma (F-21)
+
+Idiomas: `es` (por defecto, locale es-UY), `en` (en-US), `pt` (pt-BR). Módulo `js/core/i18n.js`; selector `components/language-selector.js`
+(cabecera, pantalla de login y Configuración).
+
+- **Catálogo por texto fuente (desvío del spec):** en vez de llamadas explícitas `t("clave")`, el texto en español es la clave
+  (estilo gettext). Los diccionarios `frontend/i18n/en.json` y `pt.json` mapean español → idioma. `{#}` representa cada número del
+  texto fuente; los valores usan `{1}`, `{2}`…
+- **Traductor del DOM:** un `MutationObserver` traduce nodos de texto y los atributos `title`, `placeholder`, `aria-label`, `alt`.
+  En `es` está apagado (cero costo). Reglas extra: manejo de `:` final, cortes por ` · ` / ` | ` / ` — `, regla «Etiqueta: resto»,
+  prefijos `⁂` y espacios colapsados. Nombres de equipos, jugadores y siglas no se traducen.
+- **Números y fechas:** `format.js` usa `getLocale()`; en `en` el texto traducido pasa de coma decimal a punto y dd/mm/aaaa a mm/dd/aaaa.
+  Charts y exportaciones usan `tText()` (texto fuera del DOM).
+- **Resolución del idioma al arrancar:** preferencia `ui.language` → idioma del dispositivo (`sb.lang` en localStorage / navegador) →
+  `default_language` de `/api/me` → `es`. Cambiar de idioma no recarga: se re-renderiza la ruta actual (la URL se conserva).
+- **Textos sin traducir:** `i18nMisses()` en consola lista los textos visibles que faltan; `?i18n=debug` marca los traducidos con ⟦⟧.
+  `backend/tools/i18n_audit.py` verifica paridad de diccionarios, marcadores y plantillas; `--merge <dir>` fusiona fragmentos.
+- `api.js` envía `X-Lang` en cada petición. `sw.js` precachea el módulo y los diccionarios.
