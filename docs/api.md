@@ -761,6 +761,62 @@ Cabecera de contexto: cómo quedó la selección activa de una entidad. Auth: `l
 
 Response 200: `entity {type, id, name}`, `label` (etiqueta legible de los filtros aplicados), `record` ("V-D"; `null` en competencia), `wins`, `losses`, `avg_margin` (diferencia media de puntos con 1 decimal; `null` sin partidos), `games` (N: partidos de la selección), `games_total` (M: partidos de la entidad en la competencia **sin ningún otro filtro**), `sample` (badge de T-02: partidos para equipo, minutos para jugador) y `context` (eco de T-03 con `games_excluded` e `ignored`). Récord y diferencia salen del resultado final: victoria = puntos propios > puntos del rival; en un jugador cuentan solo los partidos que jugó. Errores: 400 `parametro_invalido` (tipo o id inválidos), 400 `contexto_invalido`, 400 `competencia_inexistente`, 404 `no_encontrado`.
 
+## POST `/api/ai/lineup-suggestions` — NUEVO (F-15)
+
+Sugerencias de quinteto asistidas por IA, **solo bajo demanda**. Auth: `login_required`. Body `{team, goal, rival?, competition?, last?, refresh?}`; `goal` ∈ `anotar | defender | reboteear | frenar_ritmo | cerrar | vs_rival | infrautilizados | a_evitar | cambio_pieza | lectura_cierres` (`rival` obligatorio y distinto del equipo con `vs_rival`); `refresh: true` fuerza una generación nueva.
+
+El backend arma un resumen determinista con las mismas funciones que las tablas de Quintetos (`team_lineups` con base total, `team_clutch_lineups`, `matchups.team_matchups` para el rival y `synergy` para los impactos): solo quintetos con muestra que no es baja (cierres: muestra alta), hasta `ai.top_n` filas, valores ya formateados (coma decimal) y sin nulos. El modelo recibe nombres y valores (sin ids, eventos ni partidos) y solo redacta: cita cada valor con `{m:R<k>.<clave>}` y el backend lo reemplaza; una sugerencia con una cifra que no esté en el resumen, una fila no listada o un marcador inexistente se descarta. Si ningún quinteto califica no se llama al modelo.
+
+Response 200: `team`, `goal`, `rival`, `competition`, `context`, `disclaimer`, `considered {rows, eligible, lineups, min_poss}`, `generated`, `cached` (resultado reutilizado), `discarded`, `reason` (`sin_quintetos_sobre_umbral` | `validacion_fallida` | `rechazo_modelo` | `null`), `model`, `generated_at` y `suggestions[] {title, text, supporting_rows[] {row_id, lineup_id, names, sample, badge, table_link, values {clave: {label, display}}, change?, rival_lineup?}}` (máximo 3). La misma consulta con los mismos datos se reutiliza sin llamar al modelo; un fallo no se guarda.
+
+Errores: 400 `parametro_invalido` (`goal` o `rival`), 404 `no_encontrado`, 429 `limite_ia` (más de `ai.max_calls_per_hour` generaciones reales por usuario en una hora), 502 `llm_error` / `timeout_externo`, 503 `llm_deshabilitado`. **`GET /api/me`** agrega `llm_enabled` (entorno completo y `ai.suggestions_enabled` activa).
+
+## GET `/api/my-team` — NUEVO (F-12)
+
+Pantalla Mi equipo en una llamada. Auth: `login_required`. Query: `team` (opcional; si falta se usa el equipo fijado del usuario, preferencia `ui · home_team`), `competition` (opcional; la más reciente del equipo) y `today` (`YYYY-MM-DD`, para verificar; por defecto hoy en Uruguay, UTC−3). No acepta otros filtros: es la vista «sin filtros».
+
+Response 200:
+- Sin equipo fijado: `{team: null, reason: "sin_equipo_fijado", can_edit_fixtures}`. Equipo fijado sin partidos: `{team: {code}, reason: "equipo_sin_partidos"}`.
+- Completo: `team {code, name, source: pref|param}`, `competition {id, label}`, `today`, `header {record {wins, losses, text}, avg_margin {value, reason}, games, games_total, sample}`, `next_fixture` (`{fixture_id, date, time, days_left, is_home, rival {code, name}, competition_id, notes, source_url, prepare_link}` o `null`) con `next_fixture_reason` (`sin_calendario` | `sin_proximos` | `null`), `game_plan` (el de F-17 contra el rival del próximo partido —`reference.type: "rival_proximo"`— o contra la competencia, más `next_available`), `alerts`, `last_games[] {game_id, date, rival, is_home, score_own, score_rival, result G|P, link}`, `top_lineups {rows[] {lineup_id, names, minutes, possessions, games, net_rating {value, reason, adj}, sample, link}, reason}` (los `my_team.top_lineups` quintetos con más minutos), `followed_players {rows[], truncated, max}` (cada fila: `player_id`, `name`, `team_code`, `available`, `games`, `recent {games, metrics {pts, trb, ast, minutes, ts_pct}}` de sus últimos 5 partidos jugados y `link`; un id inexistente vuelve como `{player_id, available: false, reason: "no_encontrado"}`), `can_edit_fixtures`, `blocks_failed {bloque: {code, error}}` (un bloque que falla queda `null` y el resto se sirve) y `context`.
+- `alerts`: `window {days, from, to, games, game_ids, sample}` (partidos del equipo de los últimos `alerts.lookback_days` días), `insights` (los de A-10 con `last = n`, n = partidos de la ventana) con `insights_reason`, `changes[] {metric, label, fmt, direction mejora|empeora, week_value, rest_value, rest_sd, delta, z, games_week, games_rest, sample, text}` y `reason` (`sin_partidos_en_ventana`). Un cambio brusco: `z = s · (valor agrupado de la ventana − media del resto) / desvío muestral del resto` (valores por partido de los partidos anteriores a la ventana; `s` = +1 si más es mejor, −1 si menos es mejor); alerta si `|z| ≥ alerts.change_z`. Hacen falta al menos `max(2, sample.team.min)` partidos en el resto; una métrica nula nunca alerta.
+
+Errores: 400 `parametro_invalido` (fecha inválida, competencia `all`), 400 `competencia_inexistente`, 404 `no_encontrado` (equipo pasado por parámetro sin partidos).
+
+## GET `/api/fixtures` · POST · PATCH/DELETE `/api/fixtures/<id>` — NUEVO (F-12)
+
+Calendario manual. `GET` (`login_required`): query `competition`, `team`, `from` (`YYYY-MM-DD`) → `{fixtures[], today, can_edit}`; cada fila `{id, competition_id, competition_label, date, time, home_code, home_name, away_code, away_name, game_id, played, source_url, notes, created_by, created_at}`, ordenadas por fecha y hora.
+
+`POST` (`admin_required`): body `{date, time?, home_code, away_code, competition_id?, source_url?, notes?}` → 201 con la fila (si el partido ya estaba importado queda vinculado de entrada). `PATCH /<id>` (`admin_required`): campos parciales, más `game_id` para vincular o desvincular a mano (`null`). `DELETE /<id>` (`admin_required`): `{ok: true}`. Toda escritura sube `data_version`.
+
+Errores: 400 `parametro_invalido` ("Elegí la fecha del partido.", "La hora debe tener el formato HH:MM.", "Elegí dos equipos distintos.", "Equipo desconocido: importá al menos un partido de ese equipo antes de cargarlo en el calendario." con `details.team`, enlace que no es de FIBA LiveStats, notas de más de 300 caracteres), 400 `competencia_inexistente`, 403 `requiere_admin`, 404 `no_encontrado`, 409 `conflicto` ("Ya hay un partido cargado con esa fecha y esos equipos.").
+
+Vinculación: al importar o reprocesar un partido (`ingest.persist_game`) se vincula el partido del calendario con el mismo local y visitante y fecha a ±1 día (el más cercano; empate → menor id). `DELETE /api/games` desvincula antes de borrar. Un partido vinculado deja de ser «próximo».
+
+**`GET /api/game-plan` (F-17, tocado):** `reference=rival_proximo` resuelve el rival del próximo partido del calendario (`reference.type: "rival_proximo"`, `fixture_id`, `rival_code`); sin próximo partido → 404 `sin_proximo_partido` (antes 400 `referencia_no_disponible`).
+
+**Configuración:** `alerts.lookback_days` (1–90, 7) y `alerts.change_z` (0,5–5, 1,5) pasan a activas; nuevas `my_team.last_games` (5), `my_team.top_lineups` (3) y `my_team.max_followed` (12), sección Preferencias.
+
+## GET `/api/rapm` — NUEVO (A-11)
+
+Impacto ajustado (RAPM) de los jugadores de una competencia. Auth: `login_required`. **Solo lee** el resultado calculado: nunca dispara el cálculo. Query: `competition` (obligatoria salvo con `player`; `all` → 400), `player` (`player_id`, agrega su fila en `player`; sin `competition` usa la competencia de su partido más reciente), `top` (filas de `players`, 0 = todas; por defecto 25, máximo 500). Los demás filtros de contexto se aceptan y vuelven en `context.ignored` con razón `no_aplica` (el universo es la competencia completa).
+
+Response 200, según `status`:
+- `sin_calcular`: `{status, competition {id, label}, message, can_recompute}`.
+- `datos_insuficientes`: `{status, games, needed (= 2 × rapm.folds), reason (pocos_partidos | sin_stints), message, computed_at, lambdas, folds, can_recompute}`.
+- `listo`: `stale` (los datos o la configuración cambiaron desde el cálculo), `can_recompute`, `computed_at` (ISO UTC), `duration_s`, `lambda` (elegido), `lambdas`, `folds`, `cv[] {lambda, error}` (error cuadrático ponderado de validación por λ), `cv_baseline` (modelo vacío), `folds_by_game {game_id: pliegue}`, `model {rows, stints, players, games, possessions_total, possessions_used, coverage, excluded {incompletas, sin_quinteto, games_sin_pbp}, lineup_changed_share, intercept, fit {error_model, error_empty}, cg {solves, iterations_mean}}`, `players[]`, `players_total`, `player`, `diagnostics`, `warnings[] {code, message}` (`lambda_en_el_borde`, `sin_mejora_vs_modelo_vacio`, `muchos_cambios_de_quinteto`) y `context`.
+- Cada fila de `players`: `player_id`, `name`, `team_code`, `off`, `def`, `total` (`{value, reason}` en puntos por 100 posesiones sobre el promedio; con muestra suficiente agregan la ficha de T-01: `rank`, `rank_total`, `tied`, `percentile`, `avg`, `dist_avg`, `leader`, `dist_leader`; con muestra baja `pct_reason: "muestra_baja"`), `possessions`, `poss_off`, `poss_def`, `minutes`, `games`, `onoff_net` (Net con el jugador en cancha, crudo, por 100), `sample` (T-02, minutos) y `ranked`. Un jugador de la competencia sin posesiones en los stints usados tiene `off/def/total` nulos con razón `sin_datos`. Orden: con muestra suficiente por total, luego muestra baja, luego sin datos.
+- `diagnostics.dominance`: `ok` (el ranking no está dominado por muestras chicas: ningún jugador de muestra baja en el top 10, no más de `max_below_p25` del top 10 debajo del percentil 25 de posesiones —prueba binomial con α = 0,10— y correlación de rangos |impacto|–posesiones ≥ `spearman_floor`), `strict_ok` (criterio estricto: ninguno del top 10 debajo del p25), `top_n`, `top_min_possessions`, `top_below_p25`, `expected_below_p25`, `p25_possessions`, `ranked_players`, `spearman_abs_total_vs_possessions`. `diagnostics.compare_unregularized`: `lambda` (= mínimo de la grilla / 100), `top10_low_sample_unregularized`, `top10_low_sample_chosen`, `top10_overlap`, `top10_unregularized`.
+
+Errores: 400 `parametro_invalido` ("Elegí una competencia.", `player` o `top` inválidos), 400 `competencia_inexistente`, 404 `no_encontrado` (jugador inexistente o sin partidos en la competencia).
+
+## POST `/api/rapm/recompute` — NUEVO (A-11)
+
+Calcula el impacto ajustado de una competencia (síncrono, en memoria del proceso; no se persiste). Auth: `admin_required`. Body `{"competition": <id>}`. Response 200: el mismo payload que `GET /api/rapm` (`status: "listo"` o `"datos_insuficientes"`). Errores: 400 `parametro_invalido` / `competencia_inexistente`, 403 `requiere_admin`, 409 `en_curso` (ya hay un cálculo de esa competencia), 502 `timeout_externo` ("El cálculo superó el tiempo máximo. Reducí la grilla de λ en Configuración."; no guarda nada). El código `requiere_admin` ahora lo devuelve todo endpoint con `admin_required`.
+
+## GET `/api/table/rapm` — NUEVO (A-11)
+
+Tabla T-06 del impacto ajustado: una fila por jugador con valor (el conjunto estándar de T-05 más las columnas `_rapm_rank`, `_rapm_total`, `_rapm_off`, `_rapm_def`, `_rapm_poss`, `_rapm_minutes` y `_onoff_net`). Esas columnas son `type: "value"` con `fmt` (`int`, `signed_dec2`, `dec1`): formato propio, sin percentil. Orden por defecto: impacto total descendente (muestra baja al final). Sin cálculo: `rows: []`. `meta.filters` documenta λ, pliegues, fecha del cálculo y cobertura (van a la cabecera de la exportación).
+
 ## GET `/api/synergy/<team_code>` — NUEVO (A-08)
 
 Sinergias entre jugadores de un equipo. Auth: `login_required`. Query: el contexto de T-03 y `player` (`player_id`, agrega el recorte `player`).
@@ -1511,3 +1567,10 @@ Errores: 400 (body inválido), 413 (> 10 MB o > 50 000 filas en una hoja).
 | `competition` | sí | ID de competencia (no acepta `"all"`) |
 
 Response 200: XLSX con Portada + una hoja por tabla aplicable al scope. Errores: 400 (scope/competition inválido), 404 (sin datos).
+
+## Idioma de las respuestas (F-21)
+
+Toda petición puede indicar el idioma con el encabezado `X-Lang: es|en|pt` (o `?lang=`). Sin él se usa `ui.default_language`
+(config global) y, si falta, `es`. Afecta a los textos generados por el backend (frases de `phrases/<lang>.json`: plan de juego,
+insights, Mi equipo, sugerencias de IA) y al separador decimal de las frases. Las claves de caché incluyen el idioma.
+`GET /api/me` agrega `default_language`. Los mensajes de error siguen en español en el backend; el frontend los traduce con su diccionario.

@@ -199,6 +199,8 @@ def merge(target_id: int, source_id: int) -> dict:
     moved_games = Game.query.filter_by(competition_id=source.id).update({"competition_id": target.id})
     moved_aliases = CompetitionAlias.query.filter_by(competition_id=source.id).update(
         {"competition_id": target.id})
+    from database import Fixture   # F-12: el calendario sigue a la competencia fusionada
+    Fixture.query.filter_by(competition_id=source.id).update({"competition_id": target.id})
     db.session.delete(source)
     db.session.commit()
     _bump_data_version("competition.merge")

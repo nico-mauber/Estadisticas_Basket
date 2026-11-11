@@ -3,6 +3,7 @@
  * All functions destroy previous instance before re-creating.
  */
 import { PCT, PCT0, DEC2, fmtNumber } from "./core/format.js";
+import { getLocale, tText } from "./core/i18n.js";
 
 const _instances = {};
 
@@ -35,8 +36,13 @@ function _applyDefaults() {
   Chart.defaults.color = C.text;
   Chart.defaults.font.family = "Inter, system-ui, sans-serif";
   Chart.defaults.font.size = 12;
-  // Ticks y tooltips por defecto con coma decimal es-UY (DA-36)
-  Chart.defaults.locale = "es-UY";
+  // Ticks y tooltips por defecto con el separador decimal del idioma (DA-36, F-21)
+  Chart.defaults.locale = getLocale();
+}
+
+/** Vuelve a aplicar el idioma a los gráficos (F-21): el locale de Chart.js y los rótulos se leen al dibujar. */
+export function applyChartLocale() {
+  if (typeof Chart !== "undefined") Chart.defaults.locale = getLocale();
 }
 
 // ── Normalize a value to 0-100 relative to league ──────────────────────────
@@ -59,21 +65,21 @@ function _norm(value, leagueKey, league, higherIsBetter = true) {
 }
 
 // ── Radar ───────────────────────────────────────────────────────────────────
-export function drawRadar(canvasId, averages, league, label = "Equipo") {
+export function drawRadar(canvasId, averages, league, label = tText("Equipo")) {
   _applyDefaults();
   _destroy(canvasId);
   const canvas = document.getElementById(canvasId);
   if (!canvas) return;
 
   const dims = [
-    { key: "oer",     label: "Ataque",      hib: true  },
-    { key: "der",     label: "Defensa",     hib: false },
+    { key: "oer",     label: tText("Ataque"),      hib: true  },
+    { key: "der",     label: tText("Defensa"),     hib: false },
     { key: "efg_pct", label: "eFG%",        hib: true  },
     { key: "ts_pct",  label: "TS%",         hib: true  },
-    { key: "or_pct",  label: "Reb. Of.",    hib: true  },
-    { key: "dr_pct",  label: "Reb. Def.",   hib: true  },
-    { key: "to_pct",  label: "Cuida pelota",hib: false },
-    { key: "as_pct",  label: "Asistencias", hib: true  },
+    { key: "or_pct",  label: tText("Reb. Of."),    hib: true  },
+    { key: "dr_pct",  label: tText("Reb. Def."),   hib: true  },
+    { key: "to_pct",  label: tText("Cuida pelota"),hib: false },
+    { key: "as_pct",  label: tText("Asistencias"), hib: true  },
   ];
 
   const teamScores = dims.map(d => _norm(averages[d.key], d.key, league, d.hib));
@@ -94,7 +100,7 @@ export function drawRadar(canvasId, averages, league, label = "Equipo") {
           pointRadius: 3,
         },
         {
-          label: "Promedio liga",
+          label: tText("Promedio liga"),
           data: avgScores,
           borderColor: C.muted,
           backgroundColor: C.mutedA,
@@ -137,14 +143,14 @@ export function drawCompareRadar(canvasId, avgA, avgB, league, labelA, labelB) {
   if (!canvas) return;
 
   const dims = [
-    { key: "oer",     label: "Ataque",       hib: true  },
-    { key: "der",     label: "Defensa",      hib: false },
+    { key: "oer",     label: tText("Ataque"),       hib: true  },
+    { key: "der",     label: tText("Defensa"),      hib: false },
     { key: "efg_pct", label: "eFG%",         hib: true  },
     { key: "ts_pct",  label: "TS%",          hib: true  },
-    { key: "or_pct",  label: "Reb. Of.",     hib: true  },
-    { key: "dr_pct",  label: "Reb. Def.",    hib: true  },
-    { key: "to_pct",  label: "Cuida pelota", hib: false },
-    { key: "as_pct",  label: "Asistencias",  hib: true  },
+    { key: "or_pct",  label: tText("Reb. Of."),     hib: true  },
+    { key: "dr_pct",  label: tText("Reb. Def."),    hib: true  },
+    { key: "to_pct",  label: tText("Cuida pelota"), hib: false },
+    { key: "as_pct",  label: tText("Asistencias"),  hib: true  },
   ];
 
   _instances[canvasId] = new Chart(canvas, {
@@ -165,7 +171,7 @@ export function drawCompareRadar(canvasId, avgA, avgB, league, labelA, labelB) {
           borderWidth: 2, pointBackgroundColor: C.blue, pointRadius: 3,
         },
         {
-          label: "Promedio liga",
+          label: tText("Promedio liga"),
           data: Array(dims.length).fill(50),
           borderColor: C.muted, backgroundColor: C.mutedA,
           borderDash: [4, 4], borderWidth: 1.5,
@@ -218,7 +224,7 @@ export function drawComparePlayersRadar(canvasId, pctA, pctB, labels, labelA, la
           borderWidth: 2, pointBackgroundColor: C.blue, pointRadius: 3,
         },
         {
-          label: "Promedio de su liga",
+          label: tText("Promedio de su liga"),
           data: Array(labels.length).fill(50),
           borderColor: C.muted, backgroundColor: C.mutedA,
           borderDash: [4, 4], borderWidth: 1.5,
@@ -290,7 +296,7 @@ export function drawEvolution(canvasId, gameLog, leagueOerAvg) {
           yAxisID: "y2",
         },
         ...(leagueOerAvg != null ? [{
-          label: "OER liga Ø",
+          label: tText("OER liga Ø"),
           data: sorted.map(() => +leagueOerAvg.toFixed(3)),
           borderColor: C.muted,
           backgroundColor: "transparent",
@@ -341,7 +347,7 @@ export function drawPlayerEvolution(canvasId, gameLog, leagueOerAvg) {
       labels,
       datasets: [
         {
-          label: "Puntos",
+          label: tText("Puntos"),
           // Partido sin dato o DNP: se omite el punto, no se dibuja en 0 (C-11 RF-10).
           // El partido queda en el eje: el hueco muestra que no jugó.
           data: sorted.map(g => g.played === false ? null : (g.pts ?? null)),
@@ -365,7 +371,7 @@ export function drawPlayerEvolution(canvasId, gameLog, leagueOerAvg) {
         },
         // Promedio de OER de los jugadores de la competencia: el mismo valor que la card OER (C-02 RF-10)
         ...(leagueOerAvg != null ? [{
-          label: "OER liga Ø",
+          label: tText("OER liga Ø"),
           data: sorted.map(() => +leagueOerAvg.toFixed(3)),
           borderColor: C.muted,
           backgroundColor: "transparent",
@@ -398,7 +404,7 @@ export function drawPlayerEvolution(canvasId, gameLog, leagueOerAvg) {
         tooltip: {
           callbacks: {
             title: items => items.length
-              ? labels[items[0].dataIndex] + (sorted[items[0].dataIndex].played === false ? " · No jugó (DNP)" : "")
+              ? labels[items[0].dataIndex] + (sorted[items[0].dataIndex].played === false ? tText(" · No jugó (DNP)") : "")
               : "",
           },
         },
@@ -410,7 +416,7 @@ export function drawPlayerEvolution(canvasId, gameLog, leagueOerAvg) {
 // ── Scatter de liga (ejes configurables) ───────────────────────────────────
 // `axis` lo arma app.js (`_mapAxis`): títulos con la flecha del mejor rendimiento y rótulos de las
 // líneas de promedio. Este archivo no escribe flechas (C-10).
-export function drawScoreTimeline(canvasId, timeline, { homeName = "Local", awayName = "Visitante" } = {}) {
+export function drawScoreTimeline(canvasId, timeline, { homeName = tText("Local"), awayName = tText("Visitante") } = {}) {
   _applyDefaults();
   _destroy(canvasId);
   const canvas = document.getElementById(canvasId);
@@ -581,7 +587,7 @@ export function drawLeagueScatter(canvasId, teams, axis) {
     type: "scatter",
     data: {
       datasets: [{
-        label: "Equipos",
+        label: tText("Equipos"),
         data: points,
         backgroundColor: points.map(() => C.accentA.replace("0.15", "0.7")),
         borderColor: C.accent,

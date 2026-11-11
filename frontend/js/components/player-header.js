@@ -48,6 +48,7 @@ function _headerHTML(p) {
         <div class="ph-name">${bits.join(" · ")}</div>
         <div class="td-muted ph-context">${esc(p.context_line || "")}</div>
       </div>
+      <span class="ph-follow"></span>
       ${p.editable ? '<button type="button" class="btn btn-ghost btn-sm ph-edit">Editar ficha</button>' : ""}
     </div>
     <div class="ph-fields">
@@ -101,6 +102,7 @@ export async function renderPlayerHeader(el, playerId, opts = {}) {
   if (token !== _token) return null;
 
   el.innerHTML = _headerHTML(p);
+  opts.afterRender?.(el);
   const formHost = el.querySelector(".ph-form");
 
   el.querySelector(".ph-edit")?.addEventListener("click", () => {

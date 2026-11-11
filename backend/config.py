@@ -296,9 +296,19 @@ _register(
        label="Máximo de insights", section="preferencias", consumer="A-10",
        status="activa"),
     _k("alerts.lookback_days", type="int", default=7, min=1, max=90,
-       unit="días", label="Días de lookback de alertas", section="preferencias", consumer="F-12"),
+       unit="días", label="Ventana de alertas de Mi equipo",
+       help="Días hacia atrás (desde hoy) que mira Mi equipo para los insights y las variaciones bruscas.",
+       section="preferencias", consumer="F-12", status="activa"),
     _k("alerts.change_z", type="float", default=1.5, min=0.5, max=5,
-       label="Z de cambio significativo", section="preferencias", consumer="F-12"),
+       label="Umbral de variación brusca (desvíos)",
+       help="Una métrica alerta si el valor de la ventana se aparta del resto de la temporada en al menos estos desvíos.",
+       section="preferencias", consumer="F-12", status="activa"),
+    _k("my_team.last_games", type="int", default=5, min=1, max=20,
+       label="Últimos partidos en Mi equipo", section="preferencias", consumer="F-12", status="activa"),
+    _k("my_team.top_lineups", type="int", default=3, min=1, max=10,
+       label="Quintetos más usados en Mi equipo", section="preferencias", consumer="F-12", status="activa"),
+    _k("my_team.max_followed", type="int", default=12, min=1, max=50,
+       label="Máximo de jugadores seguidos", section="preferencias", consumer="F-12", status="activa"),
     _k("trends.default_ma", type="int", default=5, min=2, max=20,
        label="Media móvil por defecto", section="preferencias", consumer="F-18", status="activa"),
     _k("trends.last_n", type="int", default=5, min=1, max=50,
@@ -312,14 +322,36 @@ _register(
     _k("similar.top_n", type="int", default=10, min=3, max=50,
        label="Top N de jugadores similares", section="preferencias", consumer="A-09",
        status="activa"),
-    _k("rapm.lambdas", type="json", default=[500, 1000, 2000, 4000, 8000],
-       label="Lambdas de RAPM", section="umbrales", consumer="A-11"),
+    _k("rapm.lambdas", type="json", default=[500, 1000, 2000, 4000, 8000], min=1, max=100000,
+       label="Grilla de λ del impacto ajustado",
+       help="Valores de regularización que prueba la validación cruzada del impacto ajustado (RAPM); se elige el de menor error. Lista de 1 a 10 números.",
+       section="umbrales", consumer="A-11", status="activa"),
     _k("rapm.folds", type="int", default=5, min=2, max=10,
-       label="Folds de cross-validation RAPM", section="umbrales", consumer="A-11"),
+       label="Pliegues de validación del impacto ajustado",
+       help="Cantidad de grupos de partidos de la validación cruzada. Hacen falta al menos el doble de partidos con play-by-play.",
+       section="umbrales", consumer="A-11", status="activa"),
     _k("ai.suggestions_enabled", type="bool", default=True,
-       label="Sugerencias de IA habilitadas", section="preferencias", consumer="F-15"),
+       label="Sugerencias de IA habilitadas",
+       help="Muestra el panel de sugerencias de quintetos asistidas por IA. Además requiere que el servidor tenga configurado el servicio (LLM_ENABLED y ANTHROPIC_API_KEY).",
+       section="preferencias", consumer="F-15", status="activa"),
+    _k("ai.perf_pct", type="int", default=70, min=50, max=99,
+       label="Percentil mínimo de «infrautilizado»",
+       help="Un quinteto infrautilizado tiene Net Rating ajustado en este percentil o más.",
+       section="preferencias", consumer="F-15", status="activa"),
+    _k("ai.low_usage_share", type="float", default=5.0, min=0.5, max=25,
+       unit="%", label="Participación máxima de «infrautilizado»",
+       help="Porcentaje máximo del tiempo en cancha del equipo para considerar a un quinteto infrautilizado.",
+       section="preferencias", consumer="F-15", status="activa"),
+    _k("ai.top_n", type="int", default=3, min=1, max=5,
+       label="Quintetos por sugerencia de IA", section="preferencias", consumer="F-15", status="activa"),
+    _k("ai.max_calls_per_hour", type="int", default=20, min=1, max=200,
+       label="Generaciones de IA por usuario y hora",
+       help="Tope de llamadas al servicio de IA por usuario en una hora (controla el costo). Repetir la misma consulta no cuenta.",
+       section="preferencias", consumer="F-15", status="activa"),
     _k("ui.default_language", type="enum", default="es", choices=("es", "en", "pt"),
-       label="Idioma por defecto", section="preferencias", consumer="F-21"),
+       label="Idioma por defecto",
+       help="Idioma de la interfaz para quienes todavía no eligieron uno (español, inglés o portugués). Cada usuario puede cambiarlo con el selector de idioma.",
+       section="preferencias", consumer="F-21", status="activa"),
 )
 
 
@@ -431,13 +463,22 @@ def _validate_value(spec: ConfigKey, raw) -> tuple[Any, str | None]:
 
     if t == "json":
         if isinstance(raw, (dict, list)):
-            return raw, None
-        if isinstance(raw, str):
+            v = raw
+        elif isinstance(raw, str):
             try:
-                return json.loads(raw), None
+                v = json.loads(raw)
             except json.JSONDecodeError:
                 return None, "JSON inválido"
-        return None, "Debe ser un objeto o lista JSON"
+        else:
+            return None, "Debe ser un objeto o lista JSON"
+        if spec.min is not None:
+            # Lista de números acotada (p. ej. rapm.lambdas): de 1 a 10 valores, cada uno en [min, max].
+            if (not isinstance(v, list) or not 1 <= len(v) <= 10
+                    or any(isinstance(x, bool) or not isinstance(x, (int, float)) for x in v)):
+                return None, "Debe ser una lista de 1 a 10 números"
+            if any(x < spec.min or (spec.max is not None and x > spec.max) for x in v):
+                return None, f"Cada valor debe estar entre {spec.min:g} y {spec.max:g}"
+        return v, None
 
     return None, f"Tipo desconocido: {t}"
 

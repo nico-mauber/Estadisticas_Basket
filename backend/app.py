@@ -19,6 +19,7 @@ import identity
 import ingest
 import config
 import population
+import i18n
 import prefs
 import repository
 import metrics_catalog
@@ -678,6 +679,194 @@ def synergy_route(team_code: str):
     except synergy.SynergyError as e:
         return jsonify(e.payload()), e.status
     return jsonify(out)
+
+
+# ── Mi equipo y calendario (F-12) ───────────────────────────────────────────
+
+@app.route("/api/my-team")
+@login_required
+def my_team_route():
+    """Pantalla S8 en una llamada (F-12). `team` (si falta, el equipo fijado del usuario: `ui · home_team`),
+    `competition` (si falta, la más reciente del equipo) y `today` (YYYY-MM-DD, para verificar; por defecto hoy en
+    Uruguay). No acepta otros filtros: Mi equipo es «sin filtros»."""
+    import fixtures
+    import my_team
+    team = (request.args.get("team") or "").strip().upper() or None
+    source = "param"
+    if team is None:
+        team = str(prefs.get_prefs("ui").get("home_team") or "").strip().upper() or None
+        source = "pref"
+    if not team:
+        return jsonify({"team": None, "reason": "sin_equipo_fijado", "can_edit_fixtures": is_admin()})
+    today = (request.args.get("today") or "").strip() or fixtures.today_uy()
+    if fixtures.parse_day(today) is None:
+        return jsonify({"error": "Fecha inválida", "code": "parametro_invalido", "details": {"param": "today"}}), 400
+    if not any(r["team_code"] == team for r in repository.team_game_rows(None).values()):
+        if source == "pref":
+            return jsonify({"team": {"code": team, "source": source}, "reason": "equipo_sin_partidos", "can_edit_fixtures": is_admin()})
+        return jsonify({"error": "Equipo no encontrado", "code": "no_encontrado"}), 404
+    comp = (request.args.get("competition") or "").strip() or None
+    try:
+        ctx = context.parse_context({"competition": comp} if comp else {}, team_code=team)
+    except ContextError as e:
+        return jsonify(e.payload()), e.status
+    if ctx.competition_all or ctx.competition_id is None:
+        return jsonify({"error": "Elegí una competencia.", "code": "parametro_invalido"}), 400
+    out = my_team.payload(team, ctx.competition_id, today)
+    out = {**out, "team": {**out["team"], "source": source}, "blocks_failed": dict(out["blocks_failed"]),
+           "can_edit_fixtures": is_admin()}
+    try:
+        out["followed_players"] = my_team.followed_players(prefs.get_prefs("ui").get("followed_players") or [])
+    except Exception:
+        app.logger.exception("Mi equipo: falló el bloque de jugadores seguidos")
+        out["followed_players"] = None
+        out["blocks_failed"]["followed_players"] = {"code": "error_interno", "error": "No se pudo calcular este bloque."}
+    return jsonify(out)
+
+
+@app.route("/api/fixtures")
+@login_required
+def list_fixtures_route():
+    """Calendario manual (F-12). `competition`, `team` y `from` (YYYY-MM-DD) opcionales."""
+    import fixtures
+    comp = (request.args.get("competition") or "").strip()
+    if comp and not comp.isdigit():
+        return jsonify({"error": "La competencia debe ser un id numérico.", "code": "parametro_invalido"}), 400
+    frm = (request.args.get("from") or "").strip() or None
+    if frm and fixtures.parse_day(frm) is None:
+        return jsonify({"error": "Fecha inválida", "code": "parametro_invalido", "details": {"param": "from"}}), 400
+    team = (request.args.get("team") or "").strip().upper() or None
+    return jsonify({"fixtures": fixtures.list_fixtures(int(comp) if comp else None, team, date_from=frm),
+                    "today": fixtures.today_uy(), "can_edit": is_admin()})
+
+
+@app.route("/api/fixtures", methods=["POST"])
+@admin_required
+def create_fixture_route():
+    import fixtures
+    try:
+        out = fixtures.create_fixture(request.get_json(silent=True) or {}, user=prefs.current_owner())
+    except fixtures.FixtureError as e:
+        db.session.rollback()
+        return jsonify(e.payload()), e.status
+    cache.bump_data_version("fixtures")
+    return jsonify(out), 201
+
+
+@app.route("/api/fixtures/<int:fixture_id>", methods=["PATCH"])
+@admin_required
+def update_fixture_route(fixture_id: int):
+    import fixtures
+    try:
+        out = fixtures.update_fixture(fixture_id, request.get_json(silent=True) or {})
+    except fixtures.FixtureError as e:
+        db.session.rollback()
+        return jsonify(e.payload()), e.status
+    cache.bump_data_version("fixtures")
+    return jsonify(out)
+
+
+@app.route("/api/fixtures/<int:fixture_id>", methods=["DELETE"])
+@admin_required
+def delete_fixture_route(fixture_id: int):
+    import fixtures
+    try:
+        fixtures.delete_fixture(fixture_id)
+    except fixtures.FixtureError as e:
+        return jsonify(e.payload()), e.status
+    cache.bump_data_version("fixtures")
+    return jsonify({"ok": True})
+
+
+@app.route("/api/ai/lineup-suggestions", methods=["POST"])
+@login_required
+def ai_lineup_suggestions_route():
+    """Sugerencias de quinteto asistidas por IA (F-15), bajo demanda. Body `{team, goal, rival?, competition?, last?,
+    refresh?}`. El modelo solo redacta sobre un resumen ya calculado; las cifras se validan contra ese resumen."""
+    import llm
+    body = request.get_json(silent=True) or {}
+    if not llm.suggestions_enabled():
+        return jsonify({"error": "Las sugerencias asistidas por IA no están disponibles.", "code": "llm_deshabilitado"}), 503
+    team = str(body.get("team") or "").strip().upper()
+    if not team or not any(r["team_code"] == team for r in repository.team_game_rows(None).values()):
+        return jsonify({"error": "Equipo no encontrado", "code": "no_encontrado"}), 404
+    rival = str(body.get("rival") or "").strip().upper() or None
+    args = {k: str(body[k]) for k in ("competition", "last") if body.get(k) not in (None, "")}
+    try:
+        ctx = context.parse_context(args, team_code=team)
+    except ContextError as e:
+        return jsonify(e.payload()), e.status
+    if ctx.competition_all or ctx.competition_id is None:
+        return jsonify({"error": "Elegí una competencia.", "code": "parametro_invalido"}), 400
+    try:
+        out = llm.lineup_suggestions(team, ctx.competition_id, ctx, str(body.get("goal") or ""), rival,
+                                     owner=prefs.current_owner(), refresh=bool(body.get("refresh")))
+    except llm.LlmError as e:
+        return jsonify(e.payload()), e.status
+    return jsonify(out)
+
+
+_RAPM_OWN_PARAMS = {"competition", "player", "top", "diagnostics"}
+
+
+def _rapm_competition(raw, pid=None):
+    """Competencia concreta del RAPM: `(comp_id, None)` o `(None, (payload, status))`."""
+    raw = (str(raw).strip() if raw is not None else "") or None
+    if raw == "all" or (raw is None and pid is None):
+        return None, ({"error": "Elegí una competencia.", "code": "parametro_invalido"}, 400)
+    try:
+        ctx = context.parse_context({"competition": raw} if raw else {}, player_id=pid)
+    except ContextError as e:
+        return None, (e.payload(), e.status)
+    if ctx.competition_all or ctx.competition_id is None:
+        return None, ({"error": "Elegí una competencia.", "code": "parametro_invalido"}, 400)
+    return ctx.competition_id, None
+
+
+@app.route("/api/rapm")
+@login_required
+def rapm_route():
+    """Impacto ajustado (A-11): lee el resultado calculado (nunca calcula). `competition` (obligatoria salvo con `player`),
+    `player=<player_id>` (agrega su fila), `top` (filas de `players`, 0 = todas; por defecto 25)."""
+    import rapm
+    player = (request.args.get("player") or "").strip() or None
+    pid = None
+    if player is not None:
+        if not player.isdigit():
+            return jsonify({"error": "El jugador debe ser un id numérico.", "code": "parametro_invalido"}), 400
+        pid = identity.canonical_id(int(player))
+        if pid is None or identity.player_card(pid) is None:
+            return jsonify({"error": "No encontramos ese jugador.", "code": "no_encontrado"}), 404
+    comp_id, err = _rapm_competition(request.args.get("competition"), pid)
+    if err:
+        return jsonify(err[0]), err[1]
+    top_raw = (request.args.get("top") or "25").strip()
+    if not top_raw.isdigit() or int(top_raw) > 500:
+        return jsonify({"error": "top debe ser un entero entre 0 y 500.", "code": "parametro_invalido"}), 400
+    if pid is not None and not rapm.player_in_competition(comp_id, pid):
+        return jsonify({"error": "No encontramos ese jugador en la competencia.", "code": "no_encontrado"}), 404
+    ignored = [{"param": k, "reason": "no_aplica"} for k in request.args if k not in _RAPM_OWN_PARAMS]
+    return jsonify(rapm.view(comp_id, player=pid, top=int(top_raw), can_recompute=is_admin(), ignored=ignored))
+
+
+@app.route("/api/rapm/recompute", methods=["POST"])
+@admin_required
+def rapm_recompute_route():
+    """Recalcula el impacto ajustado de una competencia (A-11, administradores). Body `{competition}`."""
+    import rapm
+    body = request.get_json(silent=True) or {}
+    comp_id, err = _rapm_competition(body.get("competition"))
+    if err:
+        return jsonify(err[0]), err[1]
+    try:
+        rapm.recompute(comp_id)
+    except rapm.RapmTimeout:
+        return jsonify({"error": "El cálculo superó el tiempo máximo. Reducí la grilla de λ en Configuración.",
+                        "code": "timeout_externo"}), 502
+    except rapm.RapmBusy:
+        return jsonify({"error": "Ya hay un cálculo en curso para esta competencia. Esperá a que termine.",
+                        "code": "en_curso"}), 409
+    return jsonify(rapm.view(comp_id, can_recompute=True))
 
 
 @app.route("/api/similar/<int:player_id>")
@@ -2110,6 +2299,8 @@ def delete_games():
         return jsonify({"error": "Se requiere game_ids[]"}), 400
 
     games = Game.query.filter(Game.game_id.in_(ids)).all()
+    import fixtures
+    fixtures.unlink_games([g.game_id for g in games])   # F-12: el partido del calendario vuelve a quedar pendiente
     for g in games:
         db.session.delete(g)  # cascade: stats, tiros, pbp y JSON archivado
     db.session.commit()
@@ -2153,7 +2344,18 @@ def me():
         "auth_required": auth_enabled(),
         "seed_enabled":  _seed_enabled(),
         "is_admin":      is_admin(),
+        "llm_enabled":   _llm_enabled(),
+        "default_language": i18n.default_language(),
     })
+
+
+def _llm_enabled() -> bool:
+    try:
+        import llm
+        return llm.suggestions_enabled()
+    except Exception:
+        app.logger.exception("IA: no se pudo evaluar la disponibilidad")
+        return False
 
 
 # ── Seed (dev-only) ──────────────────────────────────────────────────────────

@@ -1,3 +1,5 @@
+import { getLanguage } from "./core/i18n.js";
+
 const BASE = "";
 
 // Called when any gated request returns 401 (expired/missing session).
@@ -12,8 +14,11 @@ const qs = params => {
   return q ? `?${q}` : "";
 };
 
+// F-21: el idioma de la interfaz viaja en cada petición (el servidor genera frases y exportaciones en ese idioma).
+const _langHeaders = opts => ({ ...(opts.headers || {}), "X-Lang": getLanguage() });
+
 async function apiFetch(path, opts = {}) {
-  const res = await fetch(BASE + path, { credentials: "same-origin", ...opts });
+  const res = await fetch(BASE + path, { credentials: "same-origin", ...opts, headers: _langHeaders(opts) });
   if (res.status === 401 && _onUnauthorized && path !== "/api/login") {
     _onUnauthorized();
   }
@@ -39,7 +44,7 @@ function _fileNameFromDisposition(cd, fallback = "descarga") {
 
 // Igual manejo de 401/error JSON que apiFetch, pero devuelve {blob, fileName} (T-06).
 async function apiFetchBlob(path, opts = {}) {
-  const res = await fetch(BASE + path, { credentials: "same-origin", ...opts });
+  const res = await fetch(BASE + path, { credentials: "same-origin", ...opts, headers: _langHeaders(opts) });
   if (res.status === 401 && _onUnauthorized && path !== "/api/login") {
     _onUnauthorized();
   }
@@ -96,6 +101,14 @@ export const api = {
   possessionClock: (params = {}) => apiFetch(`/api/possession-clock${qs(params)}`),
   gamePlan:      (params = {}) => apiFetch(`/api/game-plan${qs(params)}`),
   eventsProduction: (params = {}) => apiFetch(`/api/events-production${qs(params)}`),
+  aiLineupSuggestions: body => send("/api/ai/lineup-suggestions", "POST", body),
+  myTeam:        (params = {}) => apiFetch(`/api/my-team${qs(params)}`),
+  fixtures:      (params = {}) => apiFetch(`/api/fixtures${qs(params)}`),
+  createFixture: body => send("/api/fixtures", "POST", body),
+  updateFixture: (id, body) => send(`/api/fixtures/${id}`, "PATCH", body),
+  deleteFixture: id => send(`/api/fixtures/${id}`, "DELETE", {}),
+  rapm:          (params = {}) => apiFetch(`/api/rapm${qs(params)}`),
+  rapmRecompute: body => send("/api/rapm/recompute", "POST", body),
   synergy:       (team, params = {}) => apiFetch(`/api/synergy/${encodeURIComponent(team)}${qs(params)}`),
   cross:         (params = {}) => apiFetch(`/api/cross${qs(params)}`),
   savedQueries:  (kind) => apiFetch(`/api/saved-queries${qs({ kind })}`),

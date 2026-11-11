@@ -43,12 +43,26 @@ const PANEL_ID = "equipo.game_plan";
 let _token = 0;
 let _prefsReady = null;
 const _teamsByComp = new Map();
+let _sessPrefix = "sb.gp.";   // cada panel (Equipo, Mi equipo) recuerda su propia referencia en la sesión
 
 function _session(key, def) {
-  try { return sessionStorage.getItem(`sb.gp.${key}`) ?? def; } catch { return def; }
+  try { return sessionStorage.getItem(`${_sessPrefix}${key}`) ?? def; } catch { return def; }
 }
 function _saveSession(key, value) {
-  try { value ? sessionStorage.setItem(`sb.gp.${key}`, value) : sessionStorage.removeItem(`sb.gp.${key}`); } catch { /* sin almacenamiento */ }
+  try { value ? sessionStorage.setItem(`${_sessPrefix}${key}`, value) : sessionStorage.removeItem(`${_sessPrefix}${key}`); } catch { /* sin almacenamiento */ }
+}
+
+// Próximo partido del equipo en el calendario manual (F-12): habilita la referencia «Rival del próximo partido».
+async function _nextFixture(teamCode) {
+  try {
+    const r = await api.fixtures({ team: teamCode });
+    return (r.fixtures || []).find(f => !f.played && f.date >= r.today) || null;
+  } catch { return null; }
+}
+function _rivalName(next, teamCode) {
+  if (!next) return "";
+  if (next.rival) return next.rival.name || next.rival.code;
+  return next.home_code === teamCode ? (next.away_name || next.away_code) : (next.home_name || next.home_code);
 }
 
 async function _teams(competition) {
@@ -118,14 +132,14 @@ function _column(title, items, emptyText, kind) {
     ? `<ul class="gp-list">${items.map(renderPlanItem).join("")}</ul>` : `<p class="td-muted">${esc(emptyText)}</p>`}</div>`;
 }
 
-function _controls({ reference, rival, teams, teamCode, hasLast, error }) {
+function _controls({ reference, rival, teams, teamCode, hasLast, error, next }) {
   const opt = (v, disabled = false, title = "") =>
-    `<option value="${v}"${reference === v ? " selected" : ""}${disabled ? " disabled" : ""}${title ? ` title="${esc(title)}"` : ""}>${esc(COPY.refs[v])}${v === "rival_proximo" ? ` (${esc(COPY.refNeedsCalendar)})` : ""}</option>`;
+    `<option value="${v}"${reference === v ? " selected" : ""}${disabled ? " disabled" : ""}${title ? ` title="${esc(title)}"` : ""}>${esc(COPY.refs[v])}${v === "rival_proximo" ? ` (${esc(next ? _rivalName(next, teamCode) : COPY.refNeedsCalendar)})` : ""}</option>`;
   const rivals = (teams || []).filter(t => t.code !== teamCode);
   return `<div class="gp-controls">
     <label class="gp-lbl">Referencia
       <select class="gp-ref map-select" aria-label="Referencia del plan de juego">
-        ${opt("competencia")}${opt("rival")}${opt("periodo_anterior", !hasLast, COPY.refNeedsLast)}${opt("rival_proximo", true, COPY.refNeedsCalendar)}
+        ${opt("competencia")}${opt("rival")}${opt("periodo_anterior", !hasLast, COPY.refNeedsLast)}${opt("rival_proximo", !next, next ? "" : COPY.refNeedsCalendar)}
       </select></label>
     ${reference === "rival" ? `<label class="gp-lbl">Rival
       <select class="gp-rival map-select" aria-label="Rival de referencia">
@@ -136,25 +150,32 @@ function _controls({ reference, rival, teams, teamCode, hasLast, error }) {
   </div>`;
 }
 
-// `opts.params`: contexto de la vista ({competition, last, venue, …}).
+// `opts.params`: contexto de la vista ({competition, last, venue, …}). `opts.panelId`: panel plegable (Equipo o Mi
+// equipo). `opts.nextFixture`: próximo partido ya conocido (`null` = no hay); si no se pasa, se consulta el calendario.
+// `opts.defaultReference`: la referencia inicial cuando el panel no tiene una recordada.
 export async function renderGamePlan(el, teamCode, opts = {}) {
   if (!el) return;
   const token = ++_token;
   const params = opts.params || {};
   const hasLast = !!params.last;
+  const panelId = opts.panelId || PANEL_ID;
+  _sessPrefix = panelId === PANEL_ID ? "sb.gp." : `sb.gp.${panelId}.`;
   _prefsReady ??= loadPrefs("panel.collapsed");
   await _prefsReady;
   if (token !== _token) return;
 
-  let reference = _session("reference", "competencia");
-  if (!["competencia", "rival", "periodo_anterior"].includes(reference)) reference = "competencia";
+  const next = opts.nextFixture !== undefined ? opts.nextFixture : await _nextFixture(teamCode);
+  if (token !== _token) return;
+  let reference = _session("reference", opts.defaultReference || "competencia");
+  if (!["competencia", "rival", "periodo_anterior", "rival_proximo"].includes(reference)) reference = "competencia";
   if (reference === "periodo_anterior" && !hasLast) reference = "competencia";   // sin período no se puede pedir
+  if (reference === "rival_proximo" && !next) reference = "competencia";        // sin calendario no hay próximo rival
   let rival = _session("rival", "");
   const teams = await _teams(params.competition);
   if (token !== _token) return;
-  const state = { reference, rival, teams, teamCode, hasLast, error: "" };
+  const state = { reference, rival, teams, teamCode, hasLast, error: "", next };
 
-  const collapsed = getPref("panel.collapsed", PANEL_ID, false) === true;
+  const collapsed = getPref("panel.collapsed", panelId, false) === true;
   el.innerHTML = `<div class="card gp-card${collapsed ? " gp-collapsed" : ""}">
     <div class="card-title gp-head"><span>${esc(COPY.title)}</span>
       <button type="button" class="cd-toggle gp-toggle" aria-expanded="${!collapsed}" aria-label="Mostrar u ocultar el plan de juego">${collapsed ? "▸" : "▾"}</button></div>
@@ -168,7 +189,7 @@ export async function renderGamePlan(el, teamCode, opts = {}) {
     card.classList.toggle("gp-collapsed", !open);
     toggle.textContent = open ? "▾" : "▸";
     toggle.setAttribute("aria-expanded", String(open));
-    setPref("panel.collapsed", PANEL_ID, !open).catch(() => {});
+    setPref("panel.collapsed", panelId, !open).catch(() => {});
   });
 
   const ctl = el.querySelector(".gp-ctl"), meta = el.querySelector(".gp-meta"), body = el.querySelector(".gp-body");
@@ -176,7 +197,7 @@ export async function renderGamePlan(el, teamCode, opts = {}) {
     ctl.innerHTML = _controls(state);
     ctl.querySelector(".gp-ref").addEventListener("change", e => {
       state.reference = e.target.value; state.error = "";
-      _saveSession("reference", state.reference === "competencia" ? "" : state.reference);
+      _saveSession("reference", state.reference);
       if (state.reference !== "rival") { load(); } else { drawControls(); if (state.rival) load(); else { meta.textContent = ""; body.innerHTML = ""; } }
     });
     ctl.querySelector(".gp-rival")?.addEventListener("change", e => {
@@ -195,7 +216,7 @@ export async function renderGamePlan(el, teamCode, opts = {}) {
       d = await api.gamePlan({ team: teamCode, reference: state.reference, rival: state.reference === "rival" ? state.rival : null, ...params });
     } catch (e) {
       if (t !== _token) return;
-      if (e.code === "parametro_invalido" || e.code === "referencia_no_disponible" || e.code === "no_encontrado") {
+      if (e.code === "parametro_invalido" || e.code === "referencia_no_disponible" || e.code === "no_encontrado" || e.code === "sin_proximo_partido") {
         // La referencia elegida ya no sirve (por ejemplo, un rival que no está en esta competencia): se vuelve a la base.
         if (state.reference !== "competencia") {
           state.error = e.message; state.reference = "competencia"; state.rival = "";

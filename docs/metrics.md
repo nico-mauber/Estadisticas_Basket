@@ -265,6 +265,22 @@ Cada rebote ofensivo propio (incluido el de equipo) abre una oportunidad nueva (
 
 **Tipos de pérdida.** pase = `badpass`; manejo = `ballhandling`; pasos = `travel`; 24 segundos = `24sec`; otras = el resto de los subtipos y las pérdidas sin subtipo.
 
+## Impacto ajustado — RAPM (A-11)
+
+**Qué mide.** Cuántos puntos por 100 posesiones mejora un jugador a su equipo sobre el promedio de la competencia, descontando con quién comparte cancha y contra quién juega (el ON/OFF crudo no lo descuenta). **Ofensivo** positivo = su equipo anota más con él atacando; **defensivo** positivo = el rival anota menos con él defendiendo; **total** = ofensivo + defensivo.
+
+**Modelo.** Cada stint (tramo de un partido con los mismos diez jugadores) da hasta dos observaciones, una por equipo atacante: `y = 100 × puntos / posesiones`, peso = posesiones. Se ajusta `y − media = Σ O(atacantes) + Σ D(defensores)` por mínimos cuadrados ponderados con penalización ridge `λ · Σ (O² + D²)`; la media (nivel base, PPP ponderado × 100) no se penaliza. Publicado: `ofensivo = O`, `defensivo = −D`. Solo entran las posesiones completas de A-01 con los diez jugadores identificados; los cambios dentro de una posesión se atribuyen al quinteto del inicio.
+
+**λ.** Validación cruzada: los partidos se reparten en `rapm.folds` pliegues (por defecto 5; cada partido entero en uno) y se elige el λ de la grilla `rapm.lambdas` (por defecto 500, 1000, 2000, 4000 y 8000) con menor error cuadrático ponderado de validación (empate → el mayor). Advertencias: λ en el borde de la grilla; el mejor λ no mejora al modelo vacío (solo nivel base), señal de muestra insuficiente. Hacen falta al menos `2 × rapm.folds` partidos con play-by-play.
+
+**Posesiones del jugador.** Las de los stints usados en las que estuvo en cancha (ataque + defensa). Se muestran siempre junto al valor. Muestra (T-02): minutos, `sample.player.*`; con muestra baja el valor se ve pero queda fuera del ranking y de los percentiles.
+
+**Verificación del ranking (criterio del cliente: "no dominado por jugadores con pocas posesiones").** Se cumple cuando: (a) ningún jugador de muestra baja entra al top 10; (b) el top 10 no tiene más jugadores del cuartil inferior de posesiones de lo que daría el azar (como máximo 4 de 10: binomial con p = 0,25 y α = 0,10); (c) la correlación de rangos entre |impacto| y posesiones es ≥ −0,3 (con muestras chicas dominando, los valores extremos se concentrarían en pocas posesiones y la correlación sería fuertemente negativa). Además se informa el criterio estricto "ninguno del top 10 debajo del percentil 25": aun si el impacto no tuviera ninguna relación con las posesiones se cumpliría solo con probabilidad 0,75¹⁰ ≈ 5,6 %, por eso no se usa como aprobación. Y se compara con un ajuste casi sin regularizar (λ mínimo / 100): cuántos jugadores de muestra baja entrarían al top 10 sin ridge y cuántos con el λ elegido.
+
+**ON/OFF crudo** (para comparar): `100 × (puntos a favor / posesiones atacando − puntos en contra / posesiones defendiendo)` en las mismas posesiones con el jugador en cancha.
+
+**Limitaciones.** Sin ventaja de localía, sin decaimiento temporal ni a priori de box score; un coeficiente por ficha de jugador (un traspaso entre equipos da dos fichas). Con pocos partidos por equipo los valores quedan muy contraídos hacia 0 y el sistema lo advierte.
+
 ## Contextos cruzados (A-06)
 
 Cada celda reparte las posesiones del equipo (o las del rival, en defensa) según dos dimensiones y calcula la métrica como **cociente de totales de la celda**: PPP = puntos / posesiones; eFG% = (T2c + 1,5 × T3c) / tiros de campo; TS% = puntos / (2 × (tiros de campo + 0,44 × TLi)); PPT = (2 × T2c + 3 × T3c) / tiros de campo; TO% = pérdidas / (tiros de campo + 0,44 × TLi + pérdidas); OR% = RO / (RO + RD rival); FT Rate = TLi / tiros de campo; volumen = posesiones. Con la dimensión oportunidad la unidad es la oportunidad y OR% no aplica. **Tramo de reloj de una posesión** = el del último tiro de campo con tramo derivable; sin tiro, «Sin tiro». **Clutch** = la posesión empieza en la ventana de cierre (`clutch.window_secs`) de un partido cerrado (`clutch.margin`), igual que Cierres. Mínimo de muestra de la celda: entidad «split» de T-02. El PPP se ajusta por regresión a la media (`regression.split.k`); el color usa el valor ajustado. Percentil: contra la misma celda de los demás equipos cuando las dos dimensiones son comunes a todos (cuarto, clutch, tramo, origen, tipo, oportunidad, sede); si no, dentro de la matriz.

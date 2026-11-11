@@ -1,89 +1,42 @@
 # Progress — F-15: Sugerencias de quinteto asistidas por IA
 
-> **Estado:** ⬜ No iniciado
-> Reglas: `sdd/04-implement.md`.
+> **Estado:** ✅ Implementado y **apagado por defecto**. Se activa en Render con `LLM_ENABLED=true` y `ANTHROPIC_API_KEY`; el modelo se elige con `LLM_MODEL` (decisión de costo del cliente).
+> **Fecha:** 2026-11-05
 
-## Estado de tareas
-### Grupo A — Backend: esquema y modelos
-- [ ] T-A1 · Sin cambios de esquema (confirmación)
-- [ ] T-A2 · Claves `ai.*` en `CONFIG_SPEC`
-- [ ] T-A3 · `anthropic` en `requirements.txt`
+## Qué se hizo
+- `backend/llm.py`: disponibilidad (paquete, bandera, clave y `ai.suggestions_enabled`), resumen determinista por tipo de lectura con las mismas funciones que las tablas, marcadores, validación de cifras y descarte, llamada con el SDK oficial (`client.beta.messages.create`, salida estructurada, `effort`, `fallbacks: "default"`), manejo de negativa, tiempo agotado y errores, caché por consulta y límite por usuario y hora.
+- `backend/app.py`: `POST /api/ai/lineup-suggestions`; `/api/me` agrega `llm_enabled`. `backend/config.py`: `ai.suggestions_enabled` activa y `ai.perf_pct`, `ai.low_usage_share`, `ai.top_n`, `ai.max_calls_per_hour`. `backend/requirements.txt`: `anthropic>=1.17,<2` (opcional).
+- Frontend: `components/lineup-suggestions.js` en Equipo › Quintetos, solo con la función habilitada; `sw.js` v65.
 
-### Grupo B — Backend: lógica y rutas
-- [ ] T-B1 · Disponibilidad (`llm_available`, `suggestions_enabled`)
-- [ ] T-B2 · `format_value`
-- [ ] T-B3 · `validate_numbers`
-- [ ] T-B4 · `build_summary` y elegibles
-- [ ] T-B5 · Selección: anotar, defender, reboteear, frenar ritmo
-- [ ] T-B6 · Selección: cerrar, lectura de cierres
-- [ ] T-B7 · Selección: contra un rival
-- [ ] T-B8 · Selección: infrautilizados, a evitar
-- [ ] T-B9 · Selección: cambio de una pieza
-- [ ] T-B10 · `_call_model`
-- [ ] T-B11 · `_process` (validación y descarte)
-- [ ] T-B12 · `lineup_suggestions` (caché, límites)
-- [ ] T-B13 · Ruta y `llm_enabled` en `/api/me`
+## Estado de CA
+Scripts en el scratchpad (no se commitean): `f15_sim.py` 35/35 (cliente simulado para la lógica + servidor HTTP local que imita la API para verificar la forma real de la llamada del SDK 1.17), `f15_browser.py` 21/21 (1280 y 360 px, servidor con la función activa contra un servicio simulado, consola limpia).
 
-### Grupo C — Frontend: api.js
-- [ ] T-C1 · `api.aiLineupSuggestions`
-
-### Grupo D — Frontend: UI
-- [ ] T-D1 · Montaje condicionado por `llm_enabled`
-- [ ] T-D2 · Panel, límites y controles
-- [ ] T-D3 · Generación, tarjetas y soporte
-- [ ] T-D4 · Vacíos, errores y regenerar
-- [ ] T-D5 · Estilos y mobile
-
-### Grupo E — Errores, estados vacíos, offline/SW
-- [ ] T-E1 · Offline
-- [ ] T-E2 · `sw.js`
-- [ ] T-E3 · `render.yaml` y `docs/deployment.md`
-
-### Grupo F — Verificación de feature
-- [ ] T-F1 · Backend arranca sin traceback
-- [ ] T-F2 · Esquema sin cambios
-- [ ] T-F3 · Endpoints con servicio simulado
-- [ ] T-F4 · Consola sin errores JS
-- [ ] T-F5 · CA-1 … CA-19
-- [ ] T-F6 … T-F18 · Verificación por CA
-- [ ] T-F19 · Registro de modelo, duración, tokens y costo
-
-## Estado de CA (gate de aceptación)
 | CA | Estado | Evidencia |
 |---|---|---|
-| CA-1 (CA del cliente) | ⬜ | |
-| CA-2 | ⬜ | |
-| CA-3 | ⬜ | |
-| CA-4 | ⬜ | |
-| CA-5 | ⬜ | |
-| CA-6 | ⬜ | |
-| CA-7 | ⬜ | |
-| CA-8 | ⬜ | |
-| CA-9 | ⬜ | |
-| CA-10 | ⬜ | |
-| CA-11 | ⬜ | |
-| CA-12 | ⬜ | |
-| CA-13 | ⬜ | |
-| CA-14 | ⬜ | |
-| CA-15 | ⬜ | |
-| CA-16 | ⬜ | |
-| CA-17 | ⬜ | |
-| CA-18 | ⬜ | |
-| CA-19 | ⬜ | |
+| CA-1 (cliente) | ✅ | las cifras del texto son las del resumen (y aparecen en la tabla de soporte); sin la función Quintetos no cambia y el panel no existe |
+| CA-2 | ✅ | cifra inventada, fila no listada o marcador inexistente → descartada; todas descartadas → `validacion_fallida` |
+| CA-3 | ✅ | etiqueta "Generada automáticamente" y datos que la sustentan |
+| CA-4 | ✅ | abrir la pestaña no llama al servicio (contador del servicio simulado) |
+| CA-5 | ✅ | con el umbral de quinteto en 500 posesiones: `sin_quintetos_sobre_umbral`, sin llamada |
+| CA-6 | ✅ | ningún quinteto de muestra baja en el resumen |
+| CA-7 | ✅ | «Anotar» = top elegibles por OER ajustado de la tabla |
+| CA-8 | ✅ | «Contra un rival» usa los cruces de quintetos de F-03 con muestra suficiente |
+| CA-9 | ✅ | infrautilizados cumplen percentil y participación; «a evitar» exige muestra alta y Net aj. + banda < 0 (la base de ejemplo no tiene ninguno) |
+| CA-10 | ✅ | cada par difiere en un jugador; impactos de A-08 |
+| CA-11 | ✅ | cierres: solo muestra alta (la base de ejemplo no tiene ninguno) |
+| CA-12 | ✅ | límites visibles sin interacción |
+| CA-13 | ✅ | negativa → `rechazo_modelo`; tiempo agotado → 502 `timeout_externo`; servicio caído → 502 `llm_error`; sin texto parcial |
+| CA-14 | ✅ | `ai.max_calls_per_hour` = 2 → la tercera generación real responde 429; repetir la consulta reutiliza sin llamar; Regenerar vuelve a llamar |
+| CA-15 | ✅ | métrica nula fuera del resumen |
+| CA-16 | ✅ | lo enviado: objetivo, criterio, equipo, contexto y filas con nombres y valores formateados (sin ids, eventos ni partidos) |
+| CA-17 | ✅ | sin entorno: `llm_enabled: false`, 503 `llm_deshabilitado`, la app arranca igual |
+| CA-18 | ✅ | valores = `phrases.format_value` de los valores de la tabla (mismo formato que el frontend) |
+| CA-19 | ⬜ | requiere una clave real (no se probó; sin costo hasta que el cliente la cargue) |
 
-## Gates técnicos
-- Backend arranca sin traceback: ⬜
-- `upgrade_db()` / `create_all` idempotente (sin cambios de esquema): ⬜
-- Endpoints probados manualmente: ⬜
-- Consola del navegador sin errores JS: ⬜
-
-## Desviaciones respecto a docs/ o plan
-
-## Docs a actualizar
-- `docs/api.md` — `POST /api/ai/lineup-suggestions`; `llm_enabled` en `/api/me`.
-- `docs/deployment.md` — variables `LLM_ENABLED`, `ANTHROPIC_API_KEY`, `LLM_MODEL`, `LLM_TIMEOUT_SECS`, `LLM_MAX_RETRIES`, `LLM_EFFORT`; hilos de gunicorn (DA-28).
-- `docs/frontend.md` — panel de sugerencias, copy nuevo, formateador numérico de backend.
-- `docs/architecture.md` — módulo `llm.py`, dependencia opcional `anthropic`, claves `ai.*`.
-- `docs/metrics.md` — nota: el resumen y las cifras de IA usan los mismos valores y formato que la tabla de quintetos.
-
-## Deuda / TODO
+## Desviaciones y decisiones
+- Modelo por defecto `claude-opus-5-5` (la arquitectura decía `claude-opus-5`, que ya tiene sucesor). `LLM_EFFORT` por defecto `medium`.
+- `fallbacks: "default"` (beta `server-side-fallback-2026-07-01`) activado por defecto; se omite con Haiku y con `LLM_FALLBACKS=off`.
+- La tabla de soporte usa los valores en base total (las tasas no cambian con la base).
+- `ai.suggestions_enabled` se muestra siempre en Configuración (con la aclaración de que requiere el entorno), en vez de ocultarse.
+- Sin enlace que enfoque la fila exacta de la tabla (el enlace abre la pestaña Quintetos).
+- Copy sin `t()` (F-21).
