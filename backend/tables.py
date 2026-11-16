@@ -11,6 +11,7 @@ las filas en el formato compacto por columnas (Arq. §7.6, plan §3.1).
 `export_xlsx.workbook_bytes` escribe el XLSX; `bulk_workbook` arma la exportación masiva.
 Las rutas finas viven en `app.py`. Ver plan §4.1/§4.2/§4.5/§4.6.
 """
+import dataclasses
 import datetime
 import unicodedata
 from dataclasses import dataclass, field
@@ -339,7 +340,7 @@ def _compute(tdef: TableDef, treq: TableRequest) -> dict:
     return out
 
 
-_SAMPLE_ENTITIES = frozenset({"player", "lineup", "onoff", "clutch", "origin", "ptype", "matchup"})
+_SAMPLE_ENTITIES = frozenset({"player", "lineup", "onoff", "clutch", "origin", "ptype", "matchup", "pair"})
 
 
 def _build_columns(tdef: TableDef, has_sample: bool) -> list:
@@ -626,7 +627,7 @@ def _meta_entity(tdef, treq) -> tuple:
         gid = str(treq.params.get("game") or "")
         team = (treq.params.get("team") or "").upper()
         return gid, f"Partido {gid}" + (f" · {team}" if team else ""), f"partido-{gid}" + (f"-{team.lower()}" if team else "")
-    if et in ("lineup", "onoff") or (et == "player" and treq.table_id == "team_roster"):
+    if et in ("lineup", "onoff", "pair") or (et == "player" and treq.table_id == "team_roster"):
         if treq.params.get("team"):
             code = treq.params["team"].upper()
             return code, code, code   # quintetos, ON/OFF y plantel son de UN equipo (F-06, F-08)
@@ -980,6 +981,27 @@ def _lineup_rows(treq: TableRequest, size: int) -> list:
     return out
 
 
+def _build_pairs(treq: TableRequest) -> list:
+    """Parejas del plantel (A-08 RF-11): una fila por pareja que compartió cancha, con badge de muestra (`pair`) y el
+    valor ajustado de OER/DER/Net (T-02)."""
+    import lineups
+    import sample as sample_mod
+
+    team_code = (treq.params.get("team") or "").upper()
+    team_poss = sample_mod.team_offensive_possessions(team_code, treq.comp_id, treq.ctx)
+    prior = sample_mod.league_prior(treq.comp_id, treq.ctx)
+    out = []
+    for b in lineups.all_lineups(team_code, treq.comp_id, treq.ctx, size=2):
+        b = dataclasses.replace(b, entity_type="pair")
+        badge = sample_mod.sample_for("pair", [b], team_poss=team_poss)
+        values = sample_mod.adjust_values(compute_standard(b), b, prior)
+        adj = {k: values[k]["adj"] for k in sample_mod.REGRESSED_KEYS if (values.get(k) or {}).get("adj") is not None}
+        out.append(TableRow(id=b.entity_id, link=f"pair:{b.entity_id}", texts={"_players": b.name},
+                            bundle=b, sample=badge, adj=adj or None,
+                            extra={"player_ids": (b.meta or {}).get("player_ids") or []}))
+    return out
+
+
 def _build_team_lineups(treq: TableRequest) -> list:
     raw = (treq.params.get("size") or "5").strip()
     try:
@@ -1251,6 +1273,16 @@ register_table(
         f"Quintetos — {(treq.params.get('team') or '').upper()}"
         if (treq.params.get('size') or '5') == '5'
         else f"Combinaciones de {treq.params.get('size')} — {(treq.params.get('team') or '').upper()}"),
+)
+
+register_table(
+    "pairs", entity_type="pair", title="Parejas", builder=_build_pairs, required_params=("team",),
+    default_columns=("_players", "games", "minutes", "possessions", "oer", "der", "net_rating", "ts_pct", "efg_pct",
+                     "ast", "plus_minus"),
+    bulk_scopes=("team",), row_kind="entity", extra_columns=(("_players", "Pareja", "text"),),
+    default_sort={"key": "net_rating", "dir": "desc", "use_adjusted": True},
+    totals_mode="none", avg_mode="none",
+    title_fn=lambda treq: f"Parejas — {(treq.params.get('team') or '').upper()}",
 )
 
 register_table(

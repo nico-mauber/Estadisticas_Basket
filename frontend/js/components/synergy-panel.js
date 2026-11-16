@@ -4,6 +4,8 @@ import { api } from "../api.js";
 import { fmtNumber, fmtSigned, nullDisplay, PCT } from "../core/format.js";
 import { sampleBadge } from "./sample-badge.js";
 import { exportMenu } from "./export-menu.js";
+import { mountTable } from "./data-table.js";
+import { loadCatalog } from "../core/catalog.js";
 
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 let _token = 0, _tokenP = 0;
@@ -63,10 +65,14 @@ export async function renderSynergy(el, team, opts = {}) {
       ${_rank("Quién convierte más puntos tras asistencia", r.points_after_assist.slice(0, 10), [["Anota", x => esc(x.name)], ["Puntos", x => x.points], ["% asistidas", x => num(x.assisted_share, PCT)], ["Asistente principal", x => `${esc(x.main_assister.name)} (${x.main_assister.count})`]], "Sin canastas asistidas en la selección.")}
     </div>
     <div class="ev-grid">${pairsTop("Parejas: mejor Net Rating (ajustado)", "net_rating")}${pairsTop("Parejas: mejor OER (ajustado)", "oer")}${pairsTop("Parejas: mayor eficiencia (TS%)", "ts_pct")}</div>
+    <div class="card"><div class="card-title">Todas las parejas</div><div id="sy-pairs-dt"></div></div>
     ${_rank("Jugadores que potencian a sus compañeros", impact.slice(0, 10), [["Jugador", x => esc(x.name)], ["Compañeros", x => x.n], ["Impacto en Net", x => fmtSigned(x.impact_net, 2)],
       ["Impacto en OER", x => (x.impact_oer == null ? nullDisplay("sin_datos") : fmtSigned(x.impact_oer, 2))], ["Más potenciado", x => `${esc(x.companions[0].name)} (${fmtSigned(x.companions[0].diff_net, 2)})`]],
       "Ningún jugador tiene compañeros con muestra suficiente en ambos estados.")}
     <p class="td-muted sy-method">Las parejas usan el valor ajustado por muestra (regresión a la media de T-02); las de muestra baja no entran en los rankings. El impacto de A sobre B es el Net Rating de B junto a A menos el de B sin A, ambos ajustados y con muestra suficiente; el impacto de A es el promedio ponderado por la menor de las dos muestras.</p>`;
+  // Tabla completa de parejas (T-06 `pairs`): orden, columnas, exportación y una fila por pareja con su muestra.
+  mountTable(el.querySelector("#sy-pairs-dt"), async () => { await loadCatalog(); return api.table("pairs", { team, ...(opts.params || {}) }); },
+    { tableId: "pairs", collapsedRows: 8 });
   const m = d.assist_matrix;
   exportMenu(el.querySelector("#sy-export"), {
     getNode: () => el.querySelector("#sy-matrix"),

@@ -1405,5 +1405,12 @@
 "EN VIVO": "LIVE",
 "DESACTUALIZADO": "OUT OF DATE",
 "SIN CONEXIÓN": "OFFLINE",
-"El partido terminó pero no se pudo guardar; se reintenta en la próxima actualización.": "The game ended but could not be saved; it will retry on the next update."
+"El partido terminó pero no se pudo guardar; se reintenta en la próxima actualización.": "The game ended but could not be saved; it will retry on the next update.",
+"Todas las parejas": "All pairs",
+"Parejas": "Pairs",
+"Disponible cuando se cargue el calendario": "Available once the schedule is loaded",
+"La app va a abrir siempre en este equipo": "The app will always open on this team",
+"☆ Fijar como mi equipo": "☆ Set as my team",
+"Fijar como mi equipo": "Set as my team",
+"vs Rival": "vs Opponent"
 }

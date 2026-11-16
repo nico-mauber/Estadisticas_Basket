@@ -73,7 +73,7 @@ GROUPS = [
      ]},
 ]
 
-_ALL_ENTITIES = ("team", "player", "lineup", "onoff", "clutch", "origin", "ptype", "matchup")
+_ALL_ENTITIES = ("team", "player", "lineup", "onoff", "clutch", "origin", "ptype", "matchup", "pair")
 _PLAYER_ONLY = ("player",)
 _TEAM_ONLY = ("team",)
 
@@ -411,7 +411,7 @@ def _entity_id_kwargs(entity_type: str, raw_id: str) -> dict:
             return {"player_id": int(raw_id)}
         except (TypeError, ValueError):
             return {}
-    if entity_type in ("lineup", "onoff"):
+    if entity_type in ("lineup", "onoff", "pair"):
         team_code = raw_id.split(":", 1)[0] if ":" in raw_id else raw_id
         return {"team_code": team_code.upper()}
     if entity_type == "clutch":

@@ -419,6 +419,7 @@ def _lineup_bundles(games, team_code, size):
                     "evs": [], "seconds": 0.0, "game_ids": set(), "names": {}
                 })
                 entry["evs"].extend(seg["events"])
+                entry.setdefault("opp_evs", {}).setdefault(g["opp_code"], []).extend(seg["events"])
                 entry["seconds"] += seg["seconds"]
                 entry["game_ids"].add(g["game_id"])
                 for pid, name in zip(ids, combo_names):
@@ -429,12 +430,10 @@ def _lineup_bundles(games, team_code, size):
     for ids_sorted, entry in acc.items():
         evs = entry["evs"]
         own = _agg(evs, team_code)
-        opp_code = None
-        for g in games:
-            if g["game_id"] in entry["game_ids"]:
-                opp_code = g["opp_code"]
-                break
-        opp = _agg(evs, opp_code) if opp_code else {k: 0 for k in own}
+        # El rival cambia de partido a partido: sus conteos se suman con el código de CADA partido. Tomar el del
+        # primero dejaba fuera lo que hicieron los rivales de los demás (puntos en contra, DER y Net mal).
+        opp_by = entry.get("opp_evs") or {}
+        opp = _sum_boxes([_agg(e, code) for code, e in opp_by.items() if code]) if opp_by else {k: 0 for k in own}
         own = dict(own)
         opp = dict(opp)
         own["blk_received"] = opp.get("blk", 0)

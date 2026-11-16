@@ -847,6 +847,8 @@ Response 200: `assist_matrix`, `rankings`, `pairs`, `teammate_impact`, `context`
 - `player`: `best_pairs`, `assists_to`, `assisted_by` y `boosts`.
 Errores: 400 `parametro_invalido`, 400 `competencia_inexistente`, 404 `no_encontrado` y 404 `sin_pbp`.
 
+**Tabla y entidad de parejas.** `GET /api/table/pairs?team=<code>` (T-06): una fila por pareja con el conjunto estándar, badge de muestra (`pair`), ajustado de OER/DER/Net, percentiles contra todas las parejas de la competencia; orden por Net ajustado; entra en la exportación masiva del equipo. `GET /api/metrics/pair?id=<equipo>:<pid>-<pid>` (T-05): mismos grupos y claves que un quinteto, ficha con población = parejas de la competencia. Un id que no tenga exactamente dos jugadores → 400 `parametro_invalido`.
+
 ## GET `/api/events-production` — NUEVO (A-07)
 
 Consecuencia en puntos de cada evento de un equipo o un jugador. Auth: `login_required`. Query: `entity=team|player`, `id` (código de equipo o `player_id`, que sigue las fusiones de C-08) y el contexto de T-03 (el contexto de nivel evento no se aplica).

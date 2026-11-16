@@ -260,7 +260,7 @@ function _fourFactorsCard(av, teamName) {
   return `
     <div class="card">
       <div class="map-header">
-        <div class="card-title" style="margin:0">Four Factors <span style="color:var(--muted2);font-weight:400;text-transform:none;letter-spacing:0">— ${teamName} vs Rival</span></div>
+        <div class="card-title" style="margin:0">Four Factors <span style="color:var(--muted2);font-weight:400;text-transform:none;letter-spacing:0">— <span class="notranslate">${teamName}</span> <span>vs Rival</span></span></div>
         <span class="xm-host" data-xm="four-factors"></span>
       </div>
       <div class="table-wrap">

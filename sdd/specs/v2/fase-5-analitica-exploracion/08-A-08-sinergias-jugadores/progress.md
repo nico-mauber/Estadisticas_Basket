@@ -1,6 +1,6 @@
 # Progress — A-08: Sinergias de jugadores
 
-> **Estado:** 🔶 Implementado (Equipo › Quintetos y Jugador › Impacto, `GET /api/synergy/<team>`). Faltan la tabla `pairs`, la entidad `pair` de T-05 y los rankings de T-01.
+> **Estado:** ✅ Implementado (Equipo › Quintetos y Jugador › Impacto, `GET /api/synergy/<team>`, tabla `pairs` de T-06 y entidad `pair` de T-05 con ficha de T-01).
 > **Fecha:** 2026-11-05
 
 ## Qué se hizo
@@ -26,3 +26,9 @@
 - Las dimensiones de posesión del contexto no se aplican a las parejas (los filtros de evento no entran).
 - El estado «B sin A» usa los partidos totales de B como conteo de partidos.
 - Copy sin `t()` (F-21).
+
+## Tabla `pairs` y entidad `pair` (2026-11-16)
+- `GET /api/table/pairs?team=` (T-06): conjunto estándar, muestra `pair`, ajustado OER/DER/Net, percentiles contra las 258 parejas de la competencia; en Equipo › Quintetos como "Todas las parejas" (orden, columnas, CSV/XLSX con cabecera) y en la exportación masiva del equipo.
+- `GET /api/metrics/pair?id=` (T-05): mismos grupos y claves que quinteto y jugador (CA-8); ficha con población de parejas (rankings de T-01).
+- Evidencia: `a08_pairs.py` 11/11 (Net de la tabla = Net de la entidad, mismas parejas que `/api/synergy`) y `a08_browser2.py` 8/8 en Chromium (1280 y 360 px, inglés sin textos sin traducir).
+- Bug corregido de paso en `lineups._lineup_bundles` (rival de cada partido); las parejas y el impacto de compañeros usan ahora los puntos en contra correctos.

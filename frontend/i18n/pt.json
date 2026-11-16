@@ -1405,5 +1405,12 @@
 "EN VIVO": "AO VIVO",
 "DESACTUALIZADO": "DESATUALIZADO",
 "SIN CONEXIÓN": "SEM CONEXÃO",
-"El partido terminó pero no se pudo guardar; se reintenta en la próxima actualización.": "O jogo terminou, mas não foi possível salvá-lo; nova tentativa na próxima atualização."
+"El partido terminó pero no se pudo guardar; se reintenta en la próxima actualización.": "O jogo terminou, mas não foi possível salvá-lo; nova tentativa na próxima atualização.",
+"Todas las parejas": "Todas as duplas",
+"Parejas": "Duplas",
+"Disponible cuando se cargue el calendario": "Disponível quando o calendário for carregado",
+"La app va a abrir siempre en este equipo": "O app vai abrir sempre nesta equipe",
+"☆ Fijar como mi equipo": "☆ Definir como minha equipe",
+"Fijar como mi equipo": "Definir como minha equipe",
+"vs Rival": "vs Adversário"
 }
