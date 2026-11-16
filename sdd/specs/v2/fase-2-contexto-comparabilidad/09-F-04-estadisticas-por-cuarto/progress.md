@@ -1,6 +1,6 @@
 # Progress — F-04: Estadísticas por cuarto
 
-> **Estado:** 🔶 Implementado en Equipo (8 tramos con conjunto estándar, ficha, badge de split, resumen tipo Cierres y desglose por partido exportable); falta la pestaña `momentos` (X-01), la tabla T-06 `period_splits` y migrar Cierres
+> **Estado:** 🔶 Implementado en Equipo (8 tramos con conjunto estándar, ficha, badge de split, resumen tipo Cierres, desglose por partido exportable y tabla `period_splits` de T-06); falta migrar Cierres dentro de la pestaña Momentos
 > **Fecha:** 2026-10-20
 
 ## Estado de tareas
@@ -58,3 +58,7 @@
 - Tabla T-06 `period_splits`, pestaña `momentos` (X-01), migración de Cierres a `events_bundle`.
 - Conciliar los puntos por cuarto con `period_pts` (F-11 v2).
 - `t()` para el copy (F-21).
+
+## Tabla `period_splits` (2026-11-16)
+- T-B8 ✅ `GET /api/table/period_splits?team=`: 8 tramos + "Partido completo", mismos valores que `GET /api/periods` y `/api/metrics/team` (`f04_table.py` 6/6; Σ cuartos + prórroga = puntos del partido). En la UI, "Comparar todos los tramos" (se carga al abrirlo), exportable; Chromium 1280/360 px e inglés (`tables_browser.py`).
+- Desvío: sin `view=partidos&window=` (el desglose por partido de cada tramo ya se exporta desde "Ver partido a partido") y sin fila de totales (los tramos se superponen).

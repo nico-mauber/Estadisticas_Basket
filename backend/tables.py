@@ -1468,3 +1468,39 @@ register_table(
     default_sort={"key": "_rank", "dir": "asc", "use_adjusted": False},
     totals_mode="none", avg_mode="population", sample_col=True, columns_fn=_leaders_columns, title_fn=_leaders_title,
 )
+
+
+# ── Tramos del partido (F-04 RF-4, RF-11) ─────────────────────────────────────
+
+def _build_period_splits(treq: TableRequest) -> list:
+    """Una fila por tramo (1.º–4.º cuarto, mitades, prórroga, últimos 5 minutos) con el conjunto estándar del equipo en
+    ese tramo y su badge de muestra de split, más la fila "Partido completo" como referencia. Los tramos se superponen
+    (las mitades contienen cuartos), por eso no hay fila de totales."""
+    import bundles as bundles_mod
+    import sample as sample_mod
+    import splits
+    team_code = (treq.params.get("team") or "").upper()
+    # el tramo manda: el filtro `quarter` de la barra no se combina con él (igual que GET /api/periods)
+    ctx = dataclasses.replace(treq.ctx, quarters=())
+    team_poss = sample_mod.team_offensive_possessions(team_code, treq.comp_id, ctx)
+    out = []
+    for w in splits.WINDOWS:
+        b = splits.team_event_bundle(team_code, treq.comp_id, ctx, w)
+        badge = sample_mod.sample_for("period", [b], team_poss=team_poss) if b is not None else None
+        out.append(TableRow(id=f"{team_code}:{w}", link=None, texts={"_window": splits.window_label(w)}, bundle=b,
+                            sample=badge, reason_if_null="sin_partidos"))
+    full = bundles_mod._team_bundle_from_games(team_code, treq.comp_id, ctx)
+    if full is not None:
+        out.append(TableRow(id=f"{team_code}:partido", link=None, texts={"_window": "Partido completo"}, bundle=full))
+    return out
+
+
+register_table(
+    "period_splits", entity_type="team", title="Por tramo del partido", builder=_build_period_splits,
+    required_params=("team",),
+    default_columns=("_window", "_sample", "games", "pts", "pts_against", "plus_minus", "oer", "der", "net_rating",
+                     "efg_pct", "to_pct", "or_pct", "ft_rate"),
+    bulk_scopes=("team",), row_kind="entity", extra_columns=(("_window", "Tramo", "text"),),
+    default_sort=None, totals_mode="none", avg_mode="none", pct_mode="none", sample_col=True,
+    title_fn=lambda treq: f"Por tramo del partido — {(treq.params.get('team') or '').upper()}",
+)

@@ -1429,5 +1429,7 @@
 "Empate": "Tie",
 "Puesto": "Rank",
 "{#} jugadores califican": "{1} players qualify",
-"{#} jugador califica": "{1} player qualifies"
+"{#} jugador califica": "{1} player qualifies",
+"Comparar todos los tramos": "Compare all periods",
+"Partido completo": "Full game"
 }
