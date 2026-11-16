@@ -84,6 +84,7 @@ function _translateCore(core) {
   for (const [prefix, value] of _prefixes()) {
     if (core.startsWith(prefix) && core.length > prefix.length) return value.replace("⁂", core.slice(prefix.length));
   }
+  if (/^https?:\/\//.test(core)) return undefined;                    // una dirección web no se traduce
   if (/\p{L}{2}/u.test(core)) _misses.add(_template(core).key);      // sin traducción: queda en español y se registra
   return undefined;
 }

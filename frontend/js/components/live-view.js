@@ -3,6 +3,7 @@
 // muestra la vista Analizar (F-07) con los datos ya persistidos.
 import { api } from "../api.js";
 import { PCT, DEC1, DEC2, isNull, nullDisplay } from "../core/format.js";
+import { getLocale } from "../core/i18n.js";
 import { renderGameView } from "./game-view.js";
 import { momentumHTML } from "./momentum-panel.js";
 
@@ -170,7 +171,7 @@ function _render() {
   let html = `
     <div class="gv-header card">
       <div class="gv-meta">${badge} ${d.clock ? `<span class="lv-clock">${esc(d.clock.label)}</span>` : ""}
-        <span class="lv-updated">Actualizado ${_fmtTime(d.fetched_at)}</span></div>
+        <span class="lv-updated"><span>Actualizado</span> <span>${_fmtTime(d.fetched_at)}</span></span></div>
       <div class="gv-score">
         <span class="gv-team">${esc(home.name)}</span>
         <span class="gv-pts">${home.score ?? "–"}</span>
@@ -231,7 +232,7 @@ function _vivoBody(d, home, away) {
 function _fmtTime(iso) {
   if (!iso) return "";
   const d = new Date(iso);
-  return isNaN(d) ? "" : d.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  return isNaN(d) ? "" : d.toLocaleTimeString(getLocale(), { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
 function _fmtVal(key, m) {
@@ -271,10 +272,12 @@ function _compareTable(rows, home, away) {
 }
 
 function _seasonNote(home, away) {
+  // Nombres y competencia en nodos que no se traducen; el resto, en nodos propios para el traductor (F-21).
   const parts = [home, away].filter(t => t.vs_season).map(t =>
-    `${esc(t.name)}: ${t.vs_season.games} PJ${t.vs_season.competition_label ? ` en ${esc(t.vs_season.competition_label)}` : ""}`);
+    `<span class="notranslate">${esc(t.name)}</span>: <span>${t.vs_season.games} PJ</span>${t.vs_season.competition_label
+      ? ` <span>en</span> <span class="notranslate">${esc(t.vs_season.competition_label)}</span>` : ""}`);
   if (!parts.length) return '<p class="lv-hint">Sin partidos previos en la temporada para comparar.</p>';
-  return `<p class="lv-hint">Δ temp. = diferencia contra el promedio de temporada del propio equipo (${parts.join(" · ")}).</p>`;
+  return `<p class="lv-hint"><span>Δ temp. = diferencia contra el promedio de temporada del propio equipo.</span> ${parts.join(" · ")}</p>`;
 }
 
 export function pointsDistributionHTML(teamName, dist) {

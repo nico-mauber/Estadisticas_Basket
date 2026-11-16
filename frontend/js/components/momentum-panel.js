@@ -23,7 +23,7 @@ function runHTML(m) {
   const since = r.elapsed_secs != null ? ` · ${mmss(r.elapsed_secs)} de juego` : "";
   return `<div class="mo-run mo-${r.side}">
     <span class="mo-run-score">${r.points}-${r.opp_points}</span>
-    <span class="mo-run-text">Racha de <strong>${esc(team)}</strong><br><small>desde ${esc(r.since?.label)}${since}</small></span>
+    <span class="mo-run-text">Racha de <strong>${esc(team)}</strong><br><small><span>desde</span> ${esc(r.since?.label)}${since}</small></span>
   </div>`;
 }
 
@@ -51,7 +51,7 @@ function outcomeItem(o) {
   const tags = [];
   if (o.is_three) tags.push('<span class="mo-tag mo-tag-3">Triple</span>');
   if (o.had_second_chance) tags.push('<span class="mo-tag">Rebote ofensivo</span>');
-  if (o.assister) tags.push(`<span class="mo-tag">Asist. ${esc(o.assister)}</span>`);
+  if (o.assister) tags.push(`<span class="mo-tag"><span>Asist.</span> ${esc(o.assister)}</span>`);
   return `<li class="mo-out ${scored ? "mo-out-pts" : "mo-out-zero"}">
     <span class="mo-out-pts-val">${o.pts > 0 ? `+${o.pts}` : "0"}</span>
     <span class="mo-out-main">${esc(o.label)}${o.player ? ` · ${esc(o.player)}` : ""} ${tags.join(" ")}</span>
