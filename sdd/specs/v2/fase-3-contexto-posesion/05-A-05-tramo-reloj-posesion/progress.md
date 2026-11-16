@@ -1,6 +1,6 @@
 # Progress — A-05: Tramo de reloj de posesión
 
-> **Estado:** 🔶 Implementado en Equipo (ataque y defensa), Partido y Jugador: tramos del reloj de posesión, reloj de 14 s aparte, conciliación contra el box oficial, composición de puntos, plantel por tramo, panel de decisión de siete preguntas y matriz zona × tramo. Faltan quinteto, el filtro del mapa de tiro por tramo, filtros de contexto `clock` / `clock_start`, entidad `clock` (T-05) y tablas T-06.
+> **Estado:** 🔶 Implementado en Equipo (ataque y defensa), Partido y Jugador: tramos del reloj, reloj de 14 s aparte, conciliación, composición de puntos, plantel por tramo, panel de decisión, matriz zona × tramo, entidad `clock` (T-05) y tablas `team_clock` / `zone_clock_matrix` (T-06). Faltan quinteto, el filtro del mapa de tiro por tramo y los filtros de contexto `clock` / `clock_start`.
 > **Fecha:** 2026-10-27
 > **Origen del pedido:** el cliente marcó como urgente (a) cómo anota cada equipo, en equipo y en partido, con el peso de triples, dobles, tiros libres, pérdidas y asistencias, y (b) la segmentación por tramo del reloj (antes de 8 s, entre 8 y 16 s, más de 16 s) con el % de triples, su cantidad y su peso. Se implementó primero esa parte (partición (a) del plan §10 D-8).
 
@@ -67,3 +67,8 @@ Seed local (13 partidos): `a05_sim.py` 70/70 y `a05_browser.py` 47/47 (1280 y 36
 - La atribución a jugador usa quien ejecuta el tiro, la pérdida o el primer tiro libre; en faltas recibidas es el tirador de libres (normalmente el que recibió la falta).
 - Vista de composición de puntos en Liga (comparar equipos) y en Preparar.
 - `t()` para el copy (F-21).
+
+## Entidad `clock` y tablas T-06 (2026-11-16)
+- T-C1 ✅ `GET /api/metrics/clock?id=<equipo>:<tramo>&side=`; T-C3 ✅ `team_clock` y `zone_clock_matrix`. `a05_table.py` 17/17: oportunidades y puntos por tramo = `GET /api/possession-clock` (24 s + 14 s), Σ filas de `team_clock` = todas las oportunidades, Σ intentos de la matriz = tiros de posesiones completas, ficha con población por tramo.
+- En Equipo › Posesión, "Tabla completa" del reloj con "Por tramo" y "Zona × tramo", exportable; Chromium 1280/360 px e inglés (`tables_browser.py` 11/11).
+- Desvío: sin `MetricDef` nuevas (`clock_shot_share`, `clock_viol24_rate`): el reparto y las violaciones de 24 s siguen en el panel.

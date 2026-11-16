@@ -6,6 +6,8 @@
 // El lado va en `?cside=`.
 import { api } from "../api.js";
 import { fmtNumber, PCT, PCT0, DEC1, DEC2, nullDisplay, isNull } from "../core/format.js";
+import { mountTable } from "./data-table.js";
+import { loadCatalog } from "../core/catalog.js";
 
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
@@ -241,10 +243,38 @@ export async function renderClockPanel(el, teamCode, opts = {}) {
   const ctx = d.context?.label ? `<p class="td-muted">${esc(d.context.label)}</p>` : "";
   shell(ctx + sec("Composición de los puntos", _mix(d.points_mix, side)) + sec("Tramo del reloj de posesión", _bands(d))
     + sec("Panel de decisión", _decision(d, side)) + sec("Matriz zona × tramo", _matrix(d.matrix))
-    + (d.players ? sec("Jugadores por tramo", _playersTable(d.players)) : "") + _reconcile(d));
+    + (d.players ? sec("Jugadores por tramo", _playersTable(d.players)) : "") + _reconcile(d)
+    + (game ? "" : _clockTableShell()));
   el.querySelectorAll(".cp-goside").forEach(b => b.addEventListener("click", () => {
     _setSideUrl(b.dataset.side);
     renderClockPanel(el, teamCode, opts);
+  }));
+  if (!game) _mountClockTable(el, teamCode, side, opts.params || {});
+}
+
+// Tablas completas (T-06): conjunto estándar por tramo y reloj (`team_clock`) y matriz zona × tramo (`zone_clock_matrix`).
+let _clockTable = "team_clock";
+
+function _clockTableShell() {
+  return `<details class="cp-table-wrap"><summary>Tabla completa</summary>
+    <div class="pb-chips" role="group" aria-label="Tabla">${[["team_clock", "Por tramo"], ["zone_clock_matrix", "Zona × tramo"]].map(([k, l]) =>
+      `<button type="button" class="filter-pill cp-tbl${k === _clockTable ? " active" : ""}" data-k="${k}">${l}</button>`).join("")}</div>
+    <div id="cp-table-dt"></div></details>`;
+}
+
+function _mountClockTable(el, team, side, params) {
+  const wrap = el.querySelector(".cp-table-wrap");
+  if (!wrap) return;
+  const load = () => mountTable(el.querySelector("#cp-table-dt"), async () => {
+    await loadCatalog();
+    return api.table(_clockTable, { team, side, ...params });
+  }, { tableId: _clockTable });
+  wrap.addEventListener("toggle", () => { if (wrap.open && !wrap.dataset.loaded) { wrap.dataset.loaded = "1"; load(); } });
+  el.querySelectorAll(".cp-tbl").forEach(b => b.addEventListener("click", () => {
+    if (b.dataset.k === _clockTable) return;
+    _clockTable = b.dataset.k;
+    el.querySelectorAll(".cp-tbl").forEach(x => x.classList.toggle("active", x === b));
+    if (wrap.open) load();
   }));
 }
 

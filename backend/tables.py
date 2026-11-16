@@ -342,7 +342,7 @@ def _compute(tdef: TableDef, treq: TableRequest) -> dict:
     return out
 
 
-_SAMPLE_ENTITIES = frozenset({"player", "lineup", "onoff", "clutch", "origin", "ptype", "matchup", "pair", "chance"})
+_SAMPLE_ENTITIES = frozenset({"player", "lineup", "onoff", "clutch", "origin", "ptype", "matchup", "pair", "chance", "clock"})
 
 
 def _build_columns(tdef: TableDef, has_sample: bool, treq=None) -> list:
@@ -630,7 +630,7 @@ def _meta_entity(tdef, treq) -> tuple:
         gid = str(treq.params.get("game") or "")
         team = (treq.params.get("team") or "").upper()
         return gid, f"Partido {gid}" + (f" · {team}" if team else ""), f"partido-{gid}" + (f"-{team.lower()}" if team else "")
-    if et in ("lineup", "onoff", "pair", "chance", "origin", "ptype") or (et == "player" and treq.table_id == "team_roster"):
+    if et in ("lineup", "onoff", "pair", "chance", "origin", "ptype", "clock", "zone_clock", "chain", "cross") or (et == "player" and treq.table_id == "team_roster"):
         if treq.params.get("team"):
             code = treq.params["team"].upper()
             return code, code, code   # quintetos, ON/OFF y plantel son de UN equipo (F-06, F-08)

@@ -972,6 +972,11 @@ Cada bloque `r24` / `r14` (`r14.tardio` = `{value: null, reason: "no_aplica"}`):
 
 Errores: 400 `parametro_invalido` ("Indicá un equipo.", "El lado debe ser ataque o defensa."), 400 `contexto_invalido`, 404 `no_encontrado`, 404 `sin_pbp`. Cortes configurables: `clock.early_max` (8) y `clock.mid_max` (16); `clock.reset_secs` (14).
 
+**Entidad `clock` y tablas (A-05, T-05/T-06).**
+- `GET /api/metrics/clock?id=<equipo>:temprano|medio|tardio&side=`: conjunto estándar de las oportunidades decididas en ese tramo (ambos relojes; misma caja por oportunidad que la entidad `chance`), ficha con población = equipos en el mismo tramo y lado.
+- `GET /api/table/team_clock?team=&side=`: una fila por tramo y reloj (temprano/medio/tardío con 24 s, temprano/medio con 14 s) y "Sin tramo", con el conjunto estándar, `% de las oportunidades` y badge; totales = todas las oportunidades.
+- `GET /api/table/zone_clock_matrix?team=&side=`: una fila por zona con intentos y eFG% en cada tramo y sin reloj (mismos datos que `matrix`).
+
 ## GET `/api/game/<game_id>/matchups` — NUEVO (F-07)
 
 Coincidencia en cancha de un partido: cruces entre quintetos y/o jugadores.
