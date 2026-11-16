@@ -86,6 +86,7 @@ class TableDef:
     title_fn: Callable | None = None
     payload_extras: Callable | None = None   # F-10: `{info, filters}` que se suma al payload y a meta.filters
     pct_mode: str = "population"          # population | none (F-07: tablas de un partido, sin percentil)
+    columns_fn: Callable | None = None    # F-14: columnas visibles por defecto según la petición (la métrica elegida)
     sample_col: bool | None = None        # None = según el tipo de entidad
 
 
@@ -122,6 +123,7 @@ def register_table(table_id: str, *, entity_type: str, title: str, builder: Call
         payload_extras=kwargs.get("payload_extras"),
         pct_mode=kwargs.get("pct_mode", "population"),
         sample_col=kwargs.get("sample_col"),
+        columns_fn=kwargs.get("columns_fn"),
     )
 
 
@@ -250,7 +252,7 @@ def _compute(tdef: TableDef, treq: TableRequest) -> dict:
     has_sample = entity_type in _SAMPLE_ENTITIES if tdef.sample_col is None else tdef.sample_col
 
     # 8. Columnas
-    columns = _build_columns(tdef, has_sample)
+    columns = _build_columns(tdef, has_sample, treq)
     metric_cols = [c for c in columns if c["type"] == "metric"]
 
     # 10. Percentiles — preparar población / game-population
@@ -340,17 +342,18 @@ def _compute(tdef: TableDef, treq: TableRequest) -> dict:
     return out
 
 
-_SAMPLE_ENTITIES = frozenset({"player", "lineup", "onoff", "clutch", "origin", "ptype", "matchup", "pair"})
+_SAMPLE_ENTITIES = frozenset({"player", "lineup", "onoff", "clutch", "origin", "ptype", "matchup", "pair", "chance"})
 
 
-def _build_columns(tdef: TableDef, has_sample: bool) -> list:
+def _build_columns(tdef: TableDef, has_sample: bool, treq=None) -> list:
     """`extra_columns` (texto) + `_sample` + todas las claves del catálogo del tipo (orden GROUPS),
     con `default_visible` (plan §4.1 paso 8)."""
+    visible = set(tdef.columns_fn(treq)) if (tdef.columns_fn and treq is not None) else set(tdef.default_columns)
     columns = []
     sticky_done = False
     for (key, label, fmt) in tdef.extra_columns:
         col = {"key": key, "label": label, "type": "text",
-               "default_visible": key in tdef.default_columns}
+               "default_visible": key in visible}
         if fmt.startswith("value:"):
             # Columna numérica fuera del catálogo (p. ej. el impacto ajustado de A-11): el valor sale de `texts` y
             # el cliente lo formatea con `fmt`.
@@ -370,7 +373,7 @@ def _build_columns(tdef: TableDef, has_sample: bool) -> list:
             if tdef.entity_type not in mdef.entities:
                 continue
             columns.append({"key": key, "type": "metric",
-                            "default_visible": key in tdef.default_columns})
+                            "default_visible": key in visible})
     return columns
 
 
@@ -627,7 +630,7 @@ def _meta_entity(tdef, treq) -> tuple:
         gid = str(treq.params.get("game") or "")
         team = (treq.params.get("team") or "").upper()
         return gid, f"Partido {gid}" + (f" · {team}" if team else ""), f"partido-{gid}" + (f"-{team.lower()}" if team else "")
-    if et in ("lineup", "onoff", "pair") or (et == "player" and treq.table_id == "team_roster"):
+    if et in ("lineup", "onoff", "pair", "chance", "origin", "ptype") or (et == "player" and treq.table_id == "team_roster"):
         if treq.params.get("team"):
             code = treq.params["team"].upper()
             return code, code, code   # quintetos, ON/OFF y plantel son de UN equipo (F-06, F-08)
@@ -1411,4 +1414,57 @@ register_table(
     default_sort={"key": "possessions", "dir": "desc", "use_adjusted": False},
     totals_mode="none", avg_mode="none", pct_mode="none", sample_col=True,
     title_fn=lambda treq: _game_title(_MATCHUP_LEVEL_TITLES.get(treq.params.get("level") or "quinteto", "Cruces"))(treq),
+)
+
+
+# ── Líderes (F-14 RF-2, RF-15) ────────────────────────────────────────────────
+
+def _build_leaders(treq: TableRequest) -> list:
+    """Todos los jugadores que califican en una métrica (`metric`, mínimo de minutos `min_minutes`), con el puesto y los
+    valores de ranking de la población de T-01 (los mismos que su ficha, por partido)."""
+    import competition_profile as cp
+    import population as population_mod
+    metric = (treq.params.get("metric") or "").strip()
+    d = METRICS.get(metric)
+    if d is None or "player" not in d.entities:
+        raise TableError(400, "Métrica desconocida o que no aplica a jugadores.", "parametro_invalido", {"param": "metric"})
+    raw = (treq.params.get("min_minutes") or "").strip()
+    try:
+        min_minutes = float(raw) if raw else None
+    except ValueError:
+        raise TableError(400, "min_minutes debe ser un número.", "parametro_invalido", {"param": "min_minutes"}) from None
+    if treq.comp_id is None:
+        raise TableError(400, "Elegí una competencia: los líderes se calculan dentro de una.", "parametro_invalido",
+                         {"param": "competition"})
+    res = cp.leaders(metric, treq.comp_id, treq.ctx, min_minutes=min_minutes)
+    members = {m.id: m for m in population_mod.population("player", treq.comp_id, treq.ctx).members}
+    out = []
+    for r in res["rows"]:
+        m = members.get(r["id"])
+        pre = {k: {"value": v, "reason": None if v is not None else "sin_datos"} for k, v in ((m.values if m else {}) or {}).items()}
+        out.append(TableRow(id=str(r["id"]), link=f"player:{r['id']}",
+                            texts={"_rank": r["rank"], "_tie": "=" if r["tied"] else "", "_name": r["name"],
+                                   "_team": r["team_code"]},
+                            bundle=None, sample=r["sample"], extra={"precomputed": pre}, reason_if_null="sin_datos"))
+    return out
+
+
+def _leaders_columns(treq) -> tuple:
+    metric = (treq.params.get("metric") or "").strip()
+    return ("_rank", "_tie", "_name", "_team", "_sample", metric, "minutes", "games")
+
+
+def _leaders_title(treq) -> str:
+    d = METRICS.get((treq.params.get("metric") or "").strip())
+    return f"Líderes — {d.label if d else ''} — {_competition_label(treq.comp_id) or 'competencia'}"
+
+
+register_table(
+    "leaders", entity_type="player", title="Líderes", builder=_build_leaders, required_params=("metric",),
+    default_columns=("_rank", "_tie", "_name", "_team", "_sample", "minutes", "games"),
+    bulk_scopes=(), row_kind="entity",
+    extra_columns=(("_rank", "Puesto", "value:int"), ("_tie", "Empate", "text"), ("_name", "Jugador", "text"),
+                   ("_team", "Equipo", "text")),
+    default_sort={"key": "_rank", "dir": "asc", "use_adjusted": False},
+    totals_mode="none", avg_mode="population", sample_col=True, columns_fn=_leaders_columns, title_fn=_leaders_title,
 )

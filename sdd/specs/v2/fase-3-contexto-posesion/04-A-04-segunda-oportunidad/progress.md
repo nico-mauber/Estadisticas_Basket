@@ -1,6 +1,6 @@
 # Progress — A-04: Segunda oportunidad
 
-> **Estado:** 🔶 Implementado en Equipo (ataque y defensa) y Jugador, con conciliación contra el box oficial; faltan el tipo de entidad `chance` (T-05), la tabla `team_second_chance` (T-06) y el filtro de contexto `chance`
+> **Estado:** 🔶 Implementado en Equipo (ataque y defensa) y Jugador, con conciliación contra el box oficial, entidad `chance` (T-05) y tabla `team_second_chance` (T-06); falta el filtro de contexto `chance` sobre otras vistas
 
 ## Estado de tareas
 - [x] Enriquecedor `enrich_chances` (desenlace, modo, segundos, origen del rebote, captura y finalización) y campos nuevos en `Chance`
@@ -39,3 +39,10 @@ Seed local (13 partidos, todos con ingesta v5): `test_client` y Chromium 1280 px
 
 ## Docs pendientes
 `docs/api.md`: tabla `team_second_chance` y tipo `chance` cuando existan.
+
+## Entidad `chance` y tabla `team_second_chance` (2026-11-16)
+- T-B9 ✅ `GET /api/metrics/chance?id=<equipo>:primera|segunda&side=`: conjunto estándar completo, ficha con población de equipos en la misma oportunidad y lado.
+- T-B11 ✅ `GET /api/table/team_second_chance?team=&side=&section=desenlaces|origen|jugadores`; en la pestaña Posesión como "Tabla completa" con selector de sección, exportable.
+- Evidencia: `a04_sim.py` 18/18 (oportunidades y puntos = `GET /api/second-chance`, Σ filas = segundas oportunidades en las tres secciones, puntos por desenlace = reporte, primera = posesiones completas) y `tables_browser.py` en Chromium (1280 y 360 px, CSV con cabecera, inglés sin textos sin traducir).
+- Desvío: los rebotes se asignan por estructura (el RO que abre la siguiente oportunidad es de la que termina) para que PPP/OER/OR% por oportunidad tengan sentido; sin percentiles por fila ni promedio de competencia en la tabla (las filas son subgrupos sin población propia).
+- Pendiente: T-B10, la dimensión de contexto `chance` para filtrar otras vistas (va con el resto de filtros de posesión de T-03).

@@ -1412,5 +1412,22 @@
 "La app va a abrir siempre en este equipo": "The app will always open on this team",
 "☆ Fijar como mi equipo": "☆ Set as my team",
 "Fijar como mi equipo": "Set as my team",
-"vs Rival": "vs Opponent"
+"vs Rival": "vs Opponent",
+"Tabla completa": "Full table",
+"Por desenlace": "By outcome",
+"Por origen del rebote": "By rebound origin",
+"Por jugador": "By player",
+"Grupo": "Group",
+"% de las 2.ª oport.": "% of 2nd chances",
+"Segunda oportunidad por desenlace": "Second chance by outcome",
+"Segunda oportunidad por origen del rebote": "Second chance by rebound origin",
+"Segunda oportunidad por jugador": "Second chance by player",
+"Segunda oportunidad del rival por desenlace": "Opponent second chance by outcome",
+"Segunda oportunidad del rival por origen del rebote": "Opponent second chance by rebound origin",
+"% de las {#}.ª oport.": "% of 2nd chances",
+"Sección": "Section",
+"Empate": "Tie",
+"Puesto": "Rank",
+"{#} jugadores califican": "{1} players qualify",
+"{#} jugador califica": "{1} player qualifies"
 }

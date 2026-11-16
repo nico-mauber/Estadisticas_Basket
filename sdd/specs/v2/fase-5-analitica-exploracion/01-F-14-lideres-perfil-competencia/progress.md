@@ -1,6 +1,6 @@
 # Progress — F-14: Líderes y perfil de la competencia
 
-> **Estado:** 🔶 Implementado (pestañas Líderes y Perfil de Liga, `GET /api/leaders`, `GET /api/competition-profile`, claves `leaders.*` activas). Faltan la tabla `leaders` de T-06 con exportación y la base de normalización de T-04.
+> **Estado:** ✅ Implementado (pestañas Líderes y Perfil de Liga, `GET /api/leaders`, `GET /api/competition-profile`, tabla `leaders` de T-06 con exportación, claves `leaders.*` activas).
 > **Fecha:** 2026-11-04
 
 ## Qué se hizo
@@ -35,3 +35,8 @@
 - Sin tabla `leaders` de T-06 ni exportación; la tabla de una métrica es propia.
 - Sin base de normalización (T-04): los conteos van por partido.
 - Copy sin `t()` (F-21).
+
+## Tabla `leaders` (2026-11-16)
+- T-B7 ✅ `GET /api/table/leaders?metric=&min_minutes=`: mismos jugadores, orden, puesto y valores que `/api/leaders?all=1` (`f14_table.py` 20/20 con PTS, TS% y PER).
+- En Liga › Líderes, el modo métrica muestra la tabla completa (orden, columnas, exportación CSV/XLSX/PNG/PDF con cabecera de competencia y filtros); la fila abre la ficha del jugador. Chromium 1280 y 360 px y en inglés (`tables_browser.py`).
+- Desvío: los valores son los de ranking de la población (por partido, igual que la ficha); la base de la barra no cambia esta tabla.
