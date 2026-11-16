@@ -1424,7 +1424,7 @@
 "Segunda oportunidad por jugador": "Second chance by player",
 "Segunda oportunidad del rival por desenlace": "Opponent second chance by outcome",
 "Segunda oportunidad del rival por origen del rebote": "Opponent second chance by rebound origin",
-"% de las {#}.ª oport.": "% of 2nd chances",
+"% de las {#}.ª oport.": "% of chance no. {1}",
 "Sección": "Section",
 "Empate": "Tie",
 "Puesto": "Rank",
