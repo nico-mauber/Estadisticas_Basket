@@ -1,6 +1,6 @@
 # Progress — F-18: Tendencias y evolución
 
-> **Estado:** 🔶 Implementado para equipo (Game log) y jugador (Tendencias). Falta el quinteto, la exportación a PDF y CSV, y reemplazar los dos gráficos fijos de evolución.
+> **Estado:** 🔶 Implementado para equipo (Game log) y jugador (Tendencias), con exportación CSV/XLSX/PNG/PDF. Falta el quinteto y reemplazar los dos gráficos fijos de evolución.
 > **Fecha:** 2026-11-04
 
 ## Qué se hizo
@@ -27,3 +27,6 @@
 - Sin quinteto.
 - El indicador usa el cociente de totales de cada grupo para los valores y el delta, y la prueba de Welch sobre los valores por partido.
 - Copy sin `t()` (F-21).
+
+## Exportación (2026-11-16)
+- Menú Exportar en lugar de "Descargar imagen": CSV/XLSX con la serie partido a partido (fecha, rival, L/V, resultado, diferencia, valor y media móvil de cada métrica) y la cabecera de contexto; PNG/PDF con los dos gráficos como imagen y la misma cabecera. `f18_browser2.py` 16/16 en Chromium (equipo y jugador, 1280 y 360 px).

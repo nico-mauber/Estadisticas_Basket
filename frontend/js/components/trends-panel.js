@@ -5,6 +5,8 @@
 import { api } from "../api.js";
 import { loadCatalog, groupsFor, metricLabel, metricDef } from "../core/catalog.js";
 import { fmtNumber, fmtSigned, PCT, DEC1, DEC2 } from "../core/format.js";
+import { exportMenu } from "./export-menu.js";
+import { buildExportNode } from "./exporters.js";
 
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const COLORS = ["#ff6a00", "#4ea1ff", "#3ecf8e"];
@@ -55,7 +57,7 @@ export async function renderTrends(el, entity, id, opts = {}) {
     <div class="ld-controls tr-controls">${[0, 1, 2].map(sel).join("")}
       <label class="gp-lbl">Media móvil<select class="map-select" id="tr-ma">${MA_OPTIONS.map(([v, l]) => `<option value="${v}"${(maOn ? String(ma) : "0") === v ? " selected" : ""}>${l}</option>`).join("")}</select></label>
       <label class="gp-lbl">Últimos N (tendencia)<input id="tr-n" type="number" min="1" class="ld-min" value="${d.last_n}"></label>
-      <button type="button" class="btn btn-ghost btn-sm" id="tr-png">Descargar imagen</button></div>
+      <span id="tr-export"></span></div>
     <p class="tr-warn below-avg" id="tr-warn" role="status" hidden></p>
     <div class="tr-chart"><canvas id="tr-canvas" height="240"></canvas></div>
     <p class="td-muted">Línea punteada: media móvil. Línea fina horizontal: Ø de la competencia. Los partidos sin valor quedan como hueco (no se dibujan como 0).
@@ -83,12 +85,39 @@ export async function renderTrends(el, entity, id, opts = {}) {
 
   _draw(d, maOn, entity);
   _renderTrends(el.querySelector("#tr-trends"), d);
-  el.querySelector("#tr-png").addEventListener("click", () => {
-    const a = document.createElement("a");
-    a.href = document.getElementById("tr-canvas").toDataURL("image/png");
-    a.download = `evolucion_${entity}_${id}.png`.toLowerCase();
-    a.click();
+  // Exportación (F-18 RF-14): CSV/XLSX con la serie partido a partido (valor y media móvil de cada métrica) y PNG/PDF con los
+  // gráficos y la cabecera de contexto. El canvas no se clona: va como imagen.
+  const meta = {
+    title: `Evolución — ${opts.entityName || id}`,
+    entity: { type: entity, id, name: opts.entityName || String(id) },
+    competition: { label: d.context?.competition?.label || "" },
+    filters: [{ label: "Contexto", value: d.context?.label || "" }, { label: "Métricas", value: d.series.map(x => x.label).join(", ") },
+              { label: "Media móvil", value: maOn ? `${ma} partidos` : "sin media" }, { label: "Base", value: d.base }],
+    generated_at: new Date().toISOString(),
+    file_name: `evolucion_${entity}_${id}`.toLowerCase(),
+  };
+  const getData = () => ({
+    meta,
+    columns: [{ key: "date", label: "Fecha", fmt: "text" }, { key: "opp", label: "Rival", fmt: "text" }, { key: "ha", label: "L/V", fmt: "text" },
+              { key: "res", label: "Resultado", fmt: "text" }, { key: "diff", label: entity === "team" ? "Dif." : "+/-", fmt: "int" },
+              ...d.series.flatMap(x => [{ key: x.metric, label: x.label, fmt: x.fmt }, ...(maOn ? [{ key: `${x.metric}_ma`, label: `${x.label} (media móvil)`, fmt: x.fmt }] : [])])],
+    rows: d.games.map((g, i) => [g.date || "", g.opponent || "", g.home_away || "",
+                                 g.result || (g.played ? "" : "No jugó"), g.diff,
+                                 ...d.series.flatMap(x => [x.values[i], ...(maOn ? [x.ma?.[i] ?? null] : [])])]),
   });
+  const imageNode = () => {
+    const box = document.createElement("div");
+    for (const cid of ["tr-canvas", "tr-diff"]) {
+      const c = document.getElementById(cid);
+      if (!c) continue;
+      const img = document.createElement("img");
+      img.src = c.toDataURL("image/png");
+      img.style.cssText = "width:100%;display:block;margin-bottom:12px;background:#fff";
+      box.appendChild(img);
+    }
+    return buildExportNode(box, meta, `${d.games.length} partidos`);
+  };
+  exportMenu(el.querySelector("#tr-export"), { getData, render: { png: imageNode, pdf: imageNode } });
 }
 
 function _draw(d, maOn, entity) {

@@ -383,6 +383,7 @@ function _renderTrends(section) {
   const st = _trendsState[section];
   renderTrends(document.getElementById(`${section}-trends`), section, id, {
     params: section === "team" ? _teamParams() : _playerParams(), base: getBase(), ...st,
+    entityName: section === "team" ? _teamData?.team_name : _playerData?.player,
     onChange: s => { _trendsState[section] = { metrics: s.metrics, ma: s.ma, lastN: s.lastN }; _renderTrends(section); },
   });
 }
