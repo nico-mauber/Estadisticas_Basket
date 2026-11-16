@@ -291,3 +291,90 @@ def _build(entity, ident, comp_id, ctx):
         out["reconcile"] = {k: blocks[k]["reconcile"] for k in ("assists", "oreb", "steals", "turnovers")}
         out["reconcile"]["pts_from_tov"] = _tov_control(d["pts_tov"])
     return out
+
+
+# ── Tabla `events_production` (T-06, A-07 RF-22) ─────────────────────────────
+# Mismos registros que el panel: por cadena (asistencia, rebote ofensivo, rebote defensivo, robo, pérdida) una fila por
+# desenlace o por jugador, con eventos, % del total, puntos de la posesión siguiente y puntos por evento.
+
+CHAINS = {"asistencia": "assists", "rebote_ofensivo": "oreb", "rebote_defensivo": "dreb", "robo": "steals", "perdida": "turnovers"}
+CHAIN_LABELS = {"asistencia": "Asistencias", "rebote_ofensivo": "Rebotes ofensivos", "rebote_defensivo": "Rebotes defensivos",
+                "robo": "Robos", "perdida": "Pérdidas"}
+OUTCOME_LABELS = {
+    "assists": {"doble": "Termina en doble", "triple": "Termina en triple", "mas1": "Termina en 2+1"},
+    "oreb": {"putback": "Putback", "doble": "Doble", "triple": "Triple", "falta": "Falta recibida", "perdida": "Pérdida",
+             "sin_puntos": "Finalización sin puntos"},
+    "dreb": {"transicion": "Abre contraataque", "posicional": "Ataque posicional"},
+    "steals": {"doble": "Doble", "triple": "Triple", "falta": "Falta recibida", "perdida": "Pérdida posterior",
+               "sin_conversion": "Sin conversión"},
+    "turnovers": {"doble": "Doble recibido", "triple": "Triple recibido", "falta": "Falta recibida por el rival",
+                  "sin_castigo": "Sin castigo", "sin_posesion_siguiente": "Sin posesión siguiente (fin de período)",
+                  "posesion_incompleta": "Posesión siguiente incompleta"},
+}
+_PLAYER_KEY = {"assists": "assister", "oreb": "player", "dreb": "player", "steals": "player", "turnovers": "player"}
+
+
+def _cat(block, r):
+    if block == "assists":
+        return r["kind"]
+    if block == "dreb":
+        return "transicion" if r["trans"] else "posicional"
+    return r["cat"]
+
+
+def table_rows(treq):
+    import tables
+    team = (treq.params.get("team") or "").upper()
+    chain = treq.params.get("chain") or "asistencia"
+    section = treq.params.get("section") or "desenlaces"
+    if chain not in CHAINS:
+        raise tables.TableError(400, "Cadena inválida: usá " + ", ".join(CHAINS) + ".", "parametro_invalido", {"param": "chain"})
+    if section not in ("desenlaces", "jugadores"):
+        raise tables.TableError(400, "Sección inválida: usá desenlaces o jugadores.", "parametro_invalido", {"param": "section"})
+    if not repository.team_pbp_games(team, treq.comp_id):
+        raise tables.TableError(404, "Este equipo no tiene play-by-play importado. Reimportá sus partidos.", "sin_pbp")
+    block = CHAINS[chain]
+    d = _collect(team, treq.comp_id, treq.ctx)
+    recs, games = d["recs"][block], d["games_used"]
+    total = len(recs)
+    if section == "desenlaces":
+        groups = [(k, label, [r for r in recs if _cat(block, r) == k]) for k, label in OUTCOME_LABELS[block].items()]
+    else:
+        by = {}
+        for r in recs:
+            by.setdefault(r[_PLAYER_KEY[block]], []).append(r)
+        groups = sorted(((str(pid), _name(pid) or f"jugador {pid}", rs) for pid, rs in by.items() if pid is not None),
+                        key=lambda g: (-len(g[2]), g[1]))
+        if None in by:
+            groups.append(("equipo", "Del equipo (sin jugador)", by[None]))
+    rows = []
+    for key, label, rs in groups:
+        n, pts = len(rs), sum(r["pts"] for r in rs)
+        scored = sum(1 for r in rs if r["pts"] > 0)
+        rows.append(tables.TableRow(
+            id=f"{team}:{chain}:{section}:{key}",
+            link=f"player:{key}" if section == "jugadores" and key.isdigit() else None,
+            texts={"_name": label, "_events": n, "_share": round(n / total, 4) if total else None, "_pts": pts,
+                   "_pts_per": round(pts / n, 4) if n else None, "_scored": round(scored / n, 4) if n else None},
+            bundle=None, sample=_badge(n, games), reason_if_null="no_aplica"))
+    return rows
+
+
+def _register_table():
+    import tables
+    tables.register_table(
+        "events_production", entity_type="chain", title="Producción desde eventos", builder=table_rows,
+        required_params=("team",),
+        default_columns=("_name", "_sample", "_events", "_share", "_pts", "_pts_per", "_scored"),
+        bulk_scopes=(), row_kind="entity",
+        extra_columns=(("_name", "Grupo", "text"), ("_events", "Eventos", "value:int"), ("_share", "% del total", "value:pct"),
+                       ("_pts", "Puntos siguientes", "value:int"), ("_pts_per", "Puntos por evento", "value:dec2"),
+                       ("_scored", "% con puntos", "value:pct")),
+        default_sort=None, totals_mode="none", avg_mode="none", pct_mode="none", sample_col=True,
+        title_fn=lambda treq: (f"{CHAIN_LABELS.get(treq.params.get('chain') or 'asistencia', 'Eventos')} "
+                               f"{'por jugador' if treq.params.get('section') == 'jugadores' else 'por desenlace'} — "
+                               f"{(treq.params.get('team') or '').upper()}"),
+    )
+
+
+_register_table()

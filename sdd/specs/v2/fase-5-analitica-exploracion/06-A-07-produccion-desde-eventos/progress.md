@@ -1,6 +1,6 @@
 # Progress — A-07: Producción desde eventos
 
-> **Estado:** 🔶 Implementado para equipo y jugador (pestaña Eventos, `GET /api/events-production`). Faltan la entidad `chain` de T-05, la tabla `events_production`, las fichas de T-01 y el vínculo de respaldo.
+> **Estado:** 🔶 Implementado para equipo y jugador (pestaña Eventos, `GET /api/events-production`) con la tabla `events_production` de T-06. Faltan la entidad `chain` de T-05 con el conjunto estándar y las fichas de T-01.
 > **Fecha:** 2026-11-05
 
 ## Qué se hizo
@@ -33,3 +33,7 @@
 - Los filtros de nivel evento de T-03 no se aplican.
 - Sin tabla, entidad `chain` ni ranking.
 - Copy sin `t()` (F-21).
+
+## Tabla `events_production` (2026-11-16)
+- `GET /api/table/events_production?team=&chain=&section=desenlaces|jugadores`: en Equipo › Eventos como "Tabla completa" con selector de cadena y sección, exportable. `a07_table.py` 12/12 (Σ eventos y puntos de las filas = bloque del panel en las 5 cadenas × 2 secciones); Chromium 1280/360 px e inglés (`tables_browser.py` 17/17).
+- Desvío: las columnas son las de la cadena (eventos, %, puntos siguientes, puntos por evento, % con puntos), no el conjunto estándar de T-05: un evento no es una entidad con caja propia. Solo en Equipo (en Jugador el panel ya muestra sus cadenas).
