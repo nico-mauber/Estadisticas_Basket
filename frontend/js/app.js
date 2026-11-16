@@ -37,7 +37,7 @@ import { renderMyTeam } from "./components/my-team.js";
 import { renderLineupSuggestions } from "./components/lineup-suggestions.js";
 import { renderFixtures } from "./components/fixtures-manager.js";
 import { homeTeamButton, followButton } from "./components/my-team-controls.js";
-import { loadPrefs, getPref } from "./core/prefs.js";
+import { loadPrefs, getPref, setPref } from "./core/prefs.js";
 import { initI18n, getLanguage, onLanguageChange, deviceLanguage, isLanguage, tText } from "./core/i18n.js";
 import { mountLanguageSelector, chooseLanguage } from "./components/language-selector.js";
 import { renderSavedQueries, saveQueryDialog } from "./components/saved-queries.js";
@@ -1515,12 +1515,22 @@ function _openTeamFromRow(row) {
   renderTeam(code);
 }
 
+// Última competencia elegida por el usuario (T-03 RF-20): la usa Liga cuando la dirección no trae una.
+function _rememberCompetition(comp) {
+  if (comp) setPref("ui", "last_competition", String(comp)).catch(() => {});
+}
+
 async function renderLeague() {
   const sec = document.getElementById("sec-league");
   sec.innerHTML = '<p class="empty"><span class="spinner"></span>Cargando...</p>';
   try {
     const comps = await api.competitions().catch(() => []);
-    // Abre en la competencia por defecto (RF-12); "Todas" solo si el usuario la eligió y sigue vigente
+    // Sin competencia en la dirección: la última que eligió el usuario (T-03 RF-20) si sigue vigente; si no, la
+    // competencia por defecto (RF-12). "Todas" solo si el usuario la eligió.
+    if (_leagueComp == null) {
+      const last = getPref("ui", "last_competition", null);
+      if (last === "all" || comps.some(c => String(c.id) === String(last))) _leagueComp = last == null ? null : String(last);
+    }
     if (_leagueComp !== "all" && !comps.some(c => String(c.id) === String(_leagueComp))) {
       const def = comps.find(c => c.is_default);
       _leagueComp = def ? String(def.id) : null;
@@ -1578,7 +1588,7 @@ async function renderLeague() {
     });
 
     const compSel = document.getElementById("league-comp");
-    if (compSel) compSel.addEventListener("change", e => { _leagueComp = e.target.value; renderLeague(); });
+    if (compSel) compSel.addEventListener("change", e => { _leagueComp = e.target.value; _rememberCompetition(_leagueComp); renderLeague(); });
     _makeCollapsible(sec.children[0], "liga-tabla");
     _makeCollapsible(sec.children[1], "liga-ranking");
 
@@ -2744,6 +2754,7 @@ function _renderPlayerContent(main, data) {
     if (comps.length > 1) {
       document.getElementById("player-comp").addEventListener("change", e => {
         _playerComp = e.target.value;
+        _rememberCompetition(_playerComp);
         _reloadPlayer();
       });
     }
@@ -3360,6 +3371,7 @@ function renderApp() {
   document.getElementById("team-comp").addEventListener("change", e => {
     if (!_teamData) return;
     _teamComp = e.target.value;
+    _rememberCompetition(_teamComp);
     _reloadTeam({ clutch: true });   // los cierres también dependen de la competencia
   });
 
