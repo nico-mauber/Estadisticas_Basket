@@ -1492,5 +1492,9 @@
 "Sin reloj: eFG%": "Sem relógio: eFG%",
 "Temprano ({#} s)": "Inicial ({1} s)",
 "Medio ({#} s)": "Médio ({1} s)",
-"Tardío ({#} s)": "Final ({1} s)"
+"Tardío ({#} s)": "Final ({1} s)",
+"Elegí un equipo y un jugador.": "Escolha uma equipe e um jogador.",
+"Perfil parecido dentro de la competencia: uso, reparto de tiro, rebote, asistencias, pérdidas, eficiencia y minutos.": "Perfil parecido dentro da competição: uso, distribuição de arremessos, rebote, assistências, perdas, eficiência e minutos.",
+"Método": "Método",
+"La muestra del jugador de referencia es baja: el perfil puede ser poco estable.": "A amostra do jogador de referência é baixa: o perfil pode ser pouco estável."
 }

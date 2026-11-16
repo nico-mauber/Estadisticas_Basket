@@ -1,6 +1,6 @@
 # Progress — A-09: Jugadores similares
 
-> **Estado:** 🔶 Implementado en Jugador (pestaña Similares, `GET /api/similar/<id>`). Faltan la pestaña y la acción en Explorar, la exportación (T-06), el bloque "emparejamiento propuesto por perfil" de F-03 y el protocolo de validación con alguien del ambiente.
+> **Estado:** 🔶 Implementado en Jugador (pestaña Similares) y en Explorar › Similares, con exportación. Faltan el bloque "emparejamiento propuesto por perfil" de F-03 y el protocolo de validación con alguien del ambiente.
 > **Fecha:** 2026-11-04
 
 ## Qué se hizo
@@ -21,7 +21,7 @@
 | CA-7 | ✅ | la distancia A→B es la de B→A |
 | CA-8 | 🔶 | el reparto de tiro usa pintura, media y triples del conjunto estándar, no las 11 zonas de C-03 |
 | CA-9 | ✅ | pestaña Similares de Jugador |
-| CA-10 | ⬜ | exportación |
+| CA-10 | ✅ | exportación CSV/XLSX/PNG/PDF de la tabla con referencia, filtros y método en la cabecera (`a09_browser2.py`) |
 | CA-11 | ✅ | jugador inexistente 404; competencia inexistente, posición inválida, `top_n` fuera de rango y `all` → 400 |
 | CA-12 | ⬜ | incremento de F-03 |
 | CA-13 | ✅ | `similar.top_n` cambia sin reiniciar |
@@ -32,3 +32,7 @@
 - Reparto por zona con tres componentes (pintura, media distancia, triples) en vez de 11 zonas.
 - Sin Explorar, exportación ni el bloque de F-03.
 - Copy sin `t()` (F-21).
+
+## Explorar › Similares y exportación (2026-11-16)
+- Pestaña Similares en Explorar: equipo + jugador → tabla de similares; `?team=&player=` en la dirección (recargar la reproduce). Exportación de la tabla (CA-10). Chromium 1280/360 px e inglés sin textos sin traducir (`a09_browser2.py` 13/13).
+- Desvío: la exportación es de la tabla visible (`tableToData`), no una tabla T-06 registrada; el cálculo sigue en `GET /api/similar/<id>`.

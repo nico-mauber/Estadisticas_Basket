@@ -542,3 +542,7 @@ Idiomas: `es` (por defecto, locale es-UY), `en` (en-US), `pt` (pt-BR). Módulo `
 - **Textos sin traducir:** `i18nMisses()` en consola lista los textos visibles que faltan; `?i18n=debug` marca los traducidos con ⟦⟧.
   `backend/tools/i18n_audit.py` verifica paridad de diccionarios, marcadores y plantillas; `--merge <dir>` fusiona fragmentos. El traductor también conserva la flecha de orden de un encabezado ("Posesiones ↓") y colapsa los saltos de línea del HTML antes de cortar por « · ».
 - `api.js` envía `X-Lang` en cada petición. `sw.js` precachea el módulo y los diccionarios.
+
+## Explorar › Similares y tablas completas nuevas (2026-11-16)
+- **Explorar › Similares** (A-09): elegir equipo y jugador muestra sus jugadores de perfil parecido (mismo componente que Jugador › Similares, `renderSimilar`); la dirección lleva `?team=&player=` y recargar la reproduce. La tabla de similares se exporta (CSV/XLSX/PNG/PDF) con la referencia, los filtros y el método en la cabecera.
+- Tablas completas de T-06 agregadas en sus vistas (orden, columnas, exportación): Parejas (Equipo › Quintetos), Segunda oportunidad por desenlace/origen/jugador y reloj de posesión por tramo y zona × tramo (Equipo › Posesión), Producción desde eventos por cadena (Equipo › Eventos), Comparar todos los tramos (Equipo › Momentos), todas las celdas de Contextos (Explorar), y Líderes por métrica (Liga › Líderes).

@@ -1492,5 +1492,9 @@
 "Sin reloj: eFG%": "No clock: eFG%",
 "Temprano ({#} s)": "Early ({1} s)",
 "Medio ({#} s)": "Middle ({1} s)",
-"Tardío ({#} s)": "Late ({1} s)"
+"Tardío ({#} s)": "Late ({1} s)",
+"Elegí un equipo y un jugador.": "Choose a team and a player.",
+"Perfil parecido dentro de la competencia: uso, reparto de tiro, rebote, asistencias, pérdidas, eficiencia y minutos.": "Similar profile within the competition: usage, shot distribution, rebounding, assists, turnovers, efficiency and minutes.",
+"Método": "Method",
+"La muestra del jugador de referencia es baja: el perfil puede ser poco estable.": "The reference player's sample is low: the profile may be unstable."
 }

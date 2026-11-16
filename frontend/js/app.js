@@ -606,6 +606,7 @@ async function applyRoute({ initial = false } = {}) {
         const fromUrl = _searchParamsFromUrl();
         if (t === "quintetos" && Object.keys(fromUrl).length) _searchInit = fromUrl;
         if (t === "contextos" && !fromUrl.team && (fromUrl.competition || fromUrl.last)) _cross = { ..._cross, competition: fromUrl.competition || "", last: fromUrl.last || "" };
+        if (t === "similares" && fromUrl.player) _simX = { ..._simX, team: (fromUrl.team || "").toUpperCase(), player: fromUrl.player };
         if (t === "contextos" && fromUrl.team) _cross = { team: fromUrl.team.toUpperCase(), side: fromUrl.side || "ataque", dimX: fromUrl.dim_x || "tramo", dimY: fromUrl.dim_y || "origen",
                                                           metric: fromUrl.metric || "ppp", limit: Number(fromUrl.limit) || 8, color: fromUrl.color || "", competition: fromUrl.competition || "", last: fromUrl.last || "" };
         setSection("search", { sync: false });
@@ -2783,14 +2784,15 @@ function _playerCompLabel() {
 }
 
 // ── Explorar (X-01, F-10): pestañas Jugadores · Quintetos · Consultas ───────────
-const SEARCH_TABS = [["jugadores", "Jugadores"], ["quintetos", "Quintetos"], ["contextos", "Contextos"], ["consultas", "Consultas"]];
+const SEARCH_TABS = [["jugadores", "Jugadores"], ["quintetos", "Quintetos"], ["contextos", "Contextos"], ["similares", "Similares"], ["consultas", "Consultas"]];
+let _simX = { team: "", player: "", position: "", min: "" };   // Explorar › Similares (A-09)
 let _cross = { team: "", side: "ataque", dimX: "tramo", dimY: "origen", metric: "ppp", limit: 8, color: "", competition: "", last: "" };   // A-06
 let _searchTab = "jugadores";
 let _searchInit = null;          // parámetros a restaurar al abrir la pestaña (consulta guardada o dirección)
 let _searchStale = false;        // la consulta que se abre se guardó con otros datos o configuración
 let _searchLastParams = null;    // última búsqueda de quintetos (la pestaña la recuerda al volver)
 let _searchKeys = new Set();     // claves de la búsqueda que hoy están en la dirección
-const _SEARCH_URL_KEYS = /^(competition|team|include|exclude|min_poss|adjusted|last|side|dim_x|dim_y|metric|limit|color|(min|max)\..+)$/;
+const _SEARCH_URL_KEYS = /^(competition|team|player|include|exclude|min_poss|adjusted|last|side|dim_x|dim_y|metric|limit|color|(min|max)\..+)$/;
 
 function _searchParamsFromUrl() {
   const out = {};
@@ -2806,6 +2808,7 @@ function _searchUrlQuery(section) {
   if (section === "search" && _searchTab === "contextos" && _cross.team)
     Object.assign(q, { competition: _cross.competition, last: _cross.last, team: _cross.team, side: _cross.side, dim_x: _cross.dimX, dim_y: _cross.dimY,
                        metric: _cross.metric, limit: _cross.limit === 8 ? "" : _cross.limit, color: _cross.color });
+  if (section === "search" && _searchTab === "similares" && _simX.player) Object.assign(q, { team: _simX.team, player: _simX.player });
   const current = new Set(Object.keys(q));
   for (const k of _searchKeys) if (!current.has(k)) q[k] = null;
   _searchKeys = current;
@@ -2835,8 +2838,39 @@ async function renderSearch() {
       onChange: s => { _cross = { ..._cross, ...s }; renderSearch(); syncRoute(); },
     });
   }
+  if (_searchTab === "similares") return _renderSearchSimilar(main);
   if (_searchTab === "consultas") return renderSavedQueries(main, { onRun: openSavedQuery, notify: toast });
   return _renderSearchPlayers();
+}
+
+// Explorar › Similares (A-09): elegir equipo y jugador y ver sus jugadores de perfil parecido sin ir a su ficha.
+async function _renderSearchSimilar(main) {
+  let teams = [];
+  try { teams = await api.teams(); } catch { teams = []; }
+  main.innerHTML = `<div class="card"><div class="card-title">Jugadores similares</div><div class="ld-controls">
+      <label class="gp-lbl">Equipo<select id="sx-team" class="map-select"><option value="">— Equipo —</option>${teams.map(t =>
+        `<option value="${esc(t.code)}"${t.code === _simX.team ? " selected" : ""}>${esc(t.name)}</option>`).join("")}</select></label>
+      <label class="gp-lbl">Jugador<select id="sx-player" class="map-select" ${_simX.team ? "" : "disabled"}><option value="">— Jugador —</option></select></label></div>
+      <p class="td-muted">Perfil parecido dentro de la competencia: uso, reparto de tiro, rebote, asistencias, pérdidas, eficiencia y minutos.</p></div>
+    <div id="sx-result">${_simX.player ? "" : '<p class="empty">Elegí un equipo y un jugador.</p>'}</div>`;
+  const teamSel = main.querySelector("#sx-team"), playerSel = main.querySelector("#sx-player");
+  teamSel.addEventListener("change", () => { _simX = { ..._simX, team: teamSel.value, player: "" }; renderSearch(); syncRoute(); });
+  if (_simX.team) {
+    try {
+      const list = await api.players(_simX.team, { competition: _searchComp || null });
+      const rows = Array.isArray(list) ? list : (list.players || []);
+      playerSel.innerHTML = '<option value="">— Jugador —</option>' + rows.filter(p => p.player_id != null).map(p =>
+        `<option value="${p.player_id}"${String(p.player_id) === String(_simX.player) ? " selected" : ""}>${esc(p.player_name || p.name)}</option>`).join("");
+    } catch { /* sin lista: queda el selector vacío */ }
+  }
+  playerSel.addEventListener("change", () => { _simX = { ..._simX, player: playerSel.value }; renderSearch(); syncRoute(); });
+  if (_simX.player) {
+    renderSimilar(main.querySelector("#sx-result"), Number(_simX.player), {
+      params: { competition: _searchComp || null, ...contextParams() }, position: _simX.position, minMinutes: _simX.min,
+      onChange: ({ position, minMinutes }) => { _simX = { ..._simX, position, min: minMinutes }; renderSearch(); },
+      onOpenPlayer: _openPlayerById,
+    });
+  }
 }
 
 // Ejecuta una consulta guardada: abre la pestaña de su tipo con los filtros restaurados.

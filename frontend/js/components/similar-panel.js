@@ -4,6 +4,8 @@
 import { api } from "../api.js";
 import { fmtNumber, PCT, DEC1, DEC2 } from "../core/format.js";
 import { sampleBadge } from "./sample-badge.js";
+import { exportMenu } from "./export-menu.js";
+import { tableToData } from "./exporters.js";
 
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 let _token = 0;
@@ -41,9 +43,9 @@ export async function renderSimilar(el, playerId, opts = {}) {
   const rows = d.results.map((r, i) => `<tr><td class="ld-rank">${i + 1}.º</td>
     <td><a href="#" class="sm-player" data-pid="${esc(r.id)}">${esc(r.name)}</a><div class="td-muted">${esc(r.team_code || "")} · ${esc(r.position_group || "—")} · ${r.games} PJ · ${fmtNumber(r.minutes_pg, 1)} min</div></td>
     <td class="ld-val" title="Distancia ${fmtNumber(r.distance, 2)}">${fmtNumber(r.similarity, 0)}</td>
-    <td class="td-muted">${esc(r.closest.map(x => x.label).join(", "))}</td><td class="td-muted">${esc(r.farthest.map(x => x.label).join(", "))}</td>
+    <td class="td-muted">${r.closest.map(x => `<span>${esc(x.label)}</span>`).join(", ")}</td><td class="td-muted">${r.farthest.map(x => `<span>${esc(x.label)}</span>`).join(", ")}</td>
     ${dims.map(x => `<td class="td-muted">${_val(x, r.values[x.key])}</td>`).join("")}</tr>`).join("");
-  el.innerHTML = `<div class="card"><div class="card-title">Jugadores similares a ${esc(ref.name)}</div>${controls}
+  el.innerHTML = `<div class="card"><div class="card-title">Jugadores similares a ${esc(ref.name)} <span class="sm-export"></span></div>${controls}
     ${ref.low_sample ? '<p class="td-muted below-avg">La muestra del jugador de referencia es baja: el perfil puede ser poco estable.</p>' : ""}
     <p class="td-muted">${sampleBadge(ref.sample, { compact: true })} Población: ${d.population.size} jugadores de la competencia (${esc(d.population.criterion)}).
       Se descartaron ${ex.minutos || 0} por minutos, ${ex.posicion || 0} por posición y ${ex.perfil_incompleto || 0} por perfil incompleto.</p></div>
@@ -56,6 +58,23 @@ export async function renderSimilar(el, playerId, opts = {}) {
   el.querySelector("#sm-pos").addEventListener("change", e => change({ position: e.target.value }));
   el.querySelector("#sm-min").addEventListener("change", e => change({ minMinutes: e.target.value === "" ? "" : Number(e.target.value) }));
   el.querySelectorAll(".sm-player").forEach(a => a.addEventListener("click", ev => { ev.preventDefault(); opts.onOpenPlayer?.(a.dataset.pid); }));
+  // Exportación (A-09 CA-10): la misma tabla que se ve, con la referencia, los filtros y el método en la cabecera.
+  const table = el.querySelector(".sm-table");
+  if (table) {
+    exportMenu(el.querySelector(".sm-export"), {
+      getData: () => tableToData(table, {
+        title: `Jugadores similares a ${ref.name}`,
+        entity: { type: "player", id: ref.id, name: ref.name },
+        competition: { label: opts.competitionLabel || "" },
+        filters: [{ label: "Posición", value: (POS.find(([v]) => v === position) || POS[0])[1] },
+                  { label: "Mínimo de minutos", value: String(d.filters.min_minutes) },
+                  { label: "Método", value: "z-score por dimensión, distancia euclidiana, similitud = 100 · exp(−distancia)" }],
+        generated_at: new Date().toISOString(),
+        file_name: `similares_jugador-${ref.id}`,
+      }),
+      getNode: () => table.closest(".vs-table-wrap"),
+    });
+  }
 }
 
 export function destroySimilar() { _token++; }
