@@ -32,6 +32,7 @@ import possessions
 import origin  # noqa: F401 — registra el enriquecedor de origen de posesión (A-02)
 import second_chance  # noqa: F401 — registra el enriquecedor de segundas oportunidades (A-04)
 import events_production  # noqa: F401 — registra la tabla events_production (A-07)
+import cross_context  # noqa: F401 — registra la tabla cross_cells (A-06)
 import possession_clock  # noqa: F401 — registra el enriquecedor del tramo de reloj (A-05)
 import breakdown  # noqa: F401 — desglose ofensivo calculado cuando FIBA no lo publica
 import transition  # noqa: F401 — registra el enriquecedor de tipo de posesión (A-03); va DESPUÉS de origin

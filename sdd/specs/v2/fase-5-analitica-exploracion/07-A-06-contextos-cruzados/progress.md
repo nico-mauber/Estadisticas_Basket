@@ -1,6 +1,6 @@
 # Progress — A-06: Motor de contextos cruzados
 
-> **Estado:** 🔶 Implementado en Explorar › Contextos (`GET /api/cross`). Faltan la tabla `cross_cells` con el conjunto estándar, el detalle de celda con el conjunto de T-05 completo, los filtros de nivel evento y la prueba del cuadre contra el cierre real de Cierres.
+> **Estado:** 🔶 Implementado en Explorar › Contextos (`GET /api/cross`) con la tabla `cross_cells` de T-06. Faltan el detalle de celda con el conjunto de T-05 completo, los filtros de nivel evento y la prueba del cuadre contra el cierre real de Cierres.
 > **Fecha:** 2026-11-04
 
 ## Qué se hizo
@@ -34,3 +34,7 @@
 - Sin la tabla T-06 `cross_cells`.
 - El cruce 4 usa «finalizador» como dimensión (propuesta del spec), no «jugador en cancha».
 - Copy sin `t()` (F-21).
+
+## Tabla `cross_cells` (2026-11-16)
+- T-B7 ✅ `GET /api/table/cross_cells`: una fila por celda con datos; `a06_table.py` 18/18 (filas = celdas con datos, Σ = cuadre de la matriz, métricas por celda iguales, también con oportunidades y con jugador en cancha superpuesto). En la UI, "Ver todas las celdas como tabla" debajo de la matriz, exportable; Chromium 1280/360 px e inglés (`tables_browser.py`), con los textos del panel traducidos.
+- Desvío: las columnas son las métricas del cruce, no el conjunto estándar de T-05 (las celdas solo acumulan tiros, libres, pérdidas y rebotes).
