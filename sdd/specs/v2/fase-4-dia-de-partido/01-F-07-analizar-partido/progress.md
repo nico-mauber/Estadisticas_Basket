@@ -1,6 +1,6 @@
 # Progress — F-07: Analizar partido
 
-> **Estado:** 🔶 En progreso (backend completo, frontend MVP listo)
+> **Estado:** ✅ Completado (2026-11-16): CA-1…CA-16 verificados (backend 33/33 en 3 scripts, Chromium 45/45 a 1280 y 360 px)
 > **Fecha:** 2026-10-16
 > Reglas: `sdd/04-implement.md`. Spec: [spec.md](spec.md) · Plan: [plan.md](plan.md) · Tasks: [tasks.md](tasks.md)
 
@@ -34,28 +34,31 @@
 - [x] T-D12 · Estilos game-view en `style.css` (responsive, tabs, tablas, shots grid)
 - [x] T-E1 · Estados de bloque: loading, error con «Reintentar» y aviso de sin conexión (`_blockError`); guarda de pestaña contra respuestas tardías
 - [x] T-E2 · `sw.js` v26 → v27 (game-view.js en STATIC)
-- [ ] T-F1 … T-F23 · Verificación
-- [ ] T-G1 (diferido → F-12) · Enlace desde calendario
+- [x] T-F1 … T-F23 · Verificación (ver tabla de CA y evidencia abajo)
+- [x] T-G1 · Enlace desde calendario: Datos › Calendario y Mi equipo enlazan `#/partido/<id>` (hecho en F-12)
+- [x] Cierre (2026-11-16): ingesta 6 (parciales oficiales y rebotes/pérdidas de equipo), entidad `matchup` completa, tablas T-06 `game_players`/`game_lineups`/`game_matchups`, filtros de tiros por cuarto y tramo, contador del jugada a jugada, modo `vivo`, pestaña en la dirección
 
 ## Estado de CA (gate de aceptación)
+Evidencia: `f07_sim.py` 9/9, `f07_sim2.py` 11/11, `f07_tables.py` 13/13 (copia de la base reprocesada con la ingesta 6) y `f07_browser.py` 45/45 en Chromium a 1280 y 360 px, sin errores de consola (scratchpad de la sesión; servidor de prueba con un partido sin pbp borrado a propósito).
+
 | CA | Estado | Evidencia |
 |---|---|---|
-| CA-1 (CA del cliente) | 🔶 parcial | `score_final=True`, `period_sum=True`, `timeline_final=True` en 13/13 partidos. `players_sum` falla en 13/13 por rebotes/pérdidas de equipo (esperado: `team_orb/drb/tov` no disponibles sin ingest v2) |
-| CA-2 (CA del cliente) | ⬜ | pendiente frontend |
-| CA-3 | ⬜ | pendiente frontend |
-| CA-4 | ⬜ | pendiente frontend |
-| CA-5 | 🔶 | backend: `pbp?type=tiro&period=3` filtra correctamente; falta UI |
-| CA-6 | 🔶 | backend: `shots?quarter=2` filtra; bandas sin dato (A-05 pendiente) |
-| CA-7 | 🔶 | backend: `shots` sin filtros Σ zones[].attempts = fga del equipo; falta UI |
-| CA-8 | 🔶 | backend: matchups quinteto con badge y Σ posesiones; falta UI |
-| CA-9 | ⬜ | pendiente métricas de entidad |
-| CA-10 | ⬜ | pendiente frontend |
-| CA-11 | ⬜ | pendiente frontend |
-| CA-12 | ⬜ | pendiente frontend |
-| CA-13 | ⬜ | pendiente frontend |
-| CA-14 | ⬜ | pendiente frontend |
-| CA-15 | ✅ | `GET /api/game/NOEXISTE` → 404 `no_encontrado`; `/pbp?type=xyz` → 400 `parametro_invalido` |
-| CA-16 | ⬜ | pendiente frontend |
+| CA-1 (CA del cliente) | ✅ | 13/13 partidos: PTS = marcador, Σ jugadores + rebotes/pérdidas de equipo = total en cada conteo, Σ parciales oficiales = PTS, timeline final = marcador (`partials_source = "oficial"`) |
+| CA-2 (CA del cliente) | ✅ | `renderGameView(div, id, {mode: "vivo", payload})` dibuja las 8 pestañas y el box desde el payload, sin exportar ni conciliación ni errores |
+| CA-3 | ✅ | Catálogo, game log de Equipo y de Jugador abren `#/partido/<id>/analizar`; la pestaña viaja en la dirección (`#/partido/<id>/box`) y recargar la reproduce |
+| CA-4 | ✅ | 2849347 y 2849340: duración 2700 s, columna `PR1` en parciales, encabezado "1 prórroga" |
+| CA-5 | ✅ | F. Medina + Tiro de campo + 3C → contador "(2 de 593 eventos)" = 2 filas = `…/pbp?player=68&type=tiro&period=3` |
+| CA-6 | ✅ | LAG 2.º cuarto + tardío: 6 intentos en la UI = 6 tiros de campo tardíos del 2.º cuarto en A-01; los sin tramo se informan aparte ("N sin tramo") |
+| CA-7 | ✅ | Sin filtros: 71 intentos = TCi oficial |
+| CA-8 | ✅ | Cruces quinteto: 35 de 36 filas en gris (muestra baja) con badge; Σ posesiones de la tabla = Σ del endpoint |
+| CA-9 | ✅ | `/api/metrics/matchup?id=…&game=…`: mismos grupos y claves que `/api/metrics/lineup` y `/api/metrics/player`; PTS del cruce = `pts_for` de la fila |
+| CA-10 | ✅ | Partido sin pbp: encabezado, box y parciales oficiales; línea de tiempo, jugadas, quintetos y cruces con estado vacío y "Reimportalo desde Datos › Calidad…" |
+| CA-11 | ✅ | Fila "· No jugó", métricas nulas con razón `dnp`, minutos nulos (no suman) |
+| CA-12 | ✅ | Box/quintetos/cruces son tablas T-06: el CSV trae las mismas filas y columnas visibles, con cabecera `# Título`, `# Entidad: Partido <id>`, `# Competencia`, `# Temporada`, `# Filtros: Partido=…`, `# Generado`; XLSX sale de los mismos datos |
+| CA-13 | ✅ | Informe de scouting A4 (`game-report.js`, verificado en be2f63a) |
+| CA-14 | ✅ | Leyenda "Coincidencia en cancha…" visible; "marcaje" no aparece en la página ni en los diccionarios |
+| CA-15 | ✅ | `/api/game/NOEXISTE` → 404 `no_encontrado`; `/pbp?type=xyz` → 400 `parametro_invalido` |
+| CA-16 | ✅ | 3 rachas ≥ 8; con `game.run_min_points = 12` quedan 2 al recargar; restaurado con `POST /api/settings/reset` |
 
 ## Gates técnicos
 - Backend arranca sin traceback: ✅
@@ -67,28 +70,21 @@
 - Dev server localhost:5000: ✅ (game-view.js served 200)
 
 ## Desviaciones respecto a docs/ o plan
-- **Parciales solo desde pbp:** `period_pts` (fuente oficial) no disponible sin F-11 ingest v2. Se usa el fallback pbp en todos los partidos.
-- **`players_sum` falla en todos los partidos:** FIBA reporta rebotes y pérdidas de equipo que no suman en jugadores individuales. Las columnas `team_orb`, `team_drb`, `team_tov` no existen aún (F-11).
-- **Bandas de tiro (A-05):** `no_band = N` (todos) porque A-05 no implementó el campo `band` en posesiones.
-- **`team_matchups` placeholder:** F-03 lo consume; implementación completa diferida.
-- **`load_matchup_bundles` placeholder:** para `/api/metrics/matchup`, implementación completa diferida.
-- **Sin tablas T-06:** `game_players`, `game_lineups`, `matchups_*` no registradas en `tables.register_table` — se usa formato directo del game_detail. Tablas formales para T-06 diferidas al frontend.
-- **Sin router X-01:** frontend monolítico en app.js, sin views/ ni tabs.js.
-- **`shot_zones.py` existe:** investigador reportó ausencia, pero existe y funciona.
+- **Parciales:** fuente oficial desde la ingesta 6 (`team_game_stats.period_pts`). FIBA da una sola cifra para todas las prórrogas (`ot_score`): con una prórroga va directa; con varias se reparten según el pbp. Sin parciales oficiales se reconstruyen del pbp (`partials_source = "pbp"`).
+- **Rebotes y pérdidas de equipo:** columnas nuevas `team_orb`, `team_drb`, `team_tov` (ingesta 6). Los partidos ya importados quedan "pendientes de reproceso" en Datos › Calidad hasta reprocesarlos; mientras tanto la conciliación los informa como `unverified` en vez de falla.
+- **Tablas T-06 formales:** `game_players`, `game_lineups`, `game_matchups` (sin percentiles ni promedio de competencia: `pct_mode = "none"`). El box es una tabla ordenable, no el formato fijo del box de FIBA; el modo `vivo` conserva el formato fijo desde el payload.
+- **Entidad `matchup`:** el id es el de la fila de cruces; sin `?game=` suma todos los enfrentamientos de la competencia. Sin población (no hay universo de cruces comparable).
+- **Ruta:** `#/partido/<id>/<pestaña>` con `analizar` = Resumen (el spec nombra solo `analizar`).
+- **Sin router X-01 por vistas:** la vista sigue en `components/game-view.js` montada por `app.js`.
 
 ## Métricas de rendimiento
-- pendiente
+- `GET /api/game/<id>`: 0,59 s en frío y 0,22 s en caliente (servidor de desarrollo por HTTP, base de 13 partidos); `GET /api/table/game_players`: 0,23 s. Objetivo < 1,5 s en frío cumplido.
 
 ## Docs actualizados
-- ✅ `docs/api.md` — 4 endpoints F-07 documentados
-- ✅ `docs/architecture.md` — `game_analysis.py` y `matchups.py` descritos
+- ✅ `docs/api.md` — forma real de `GET /api/game/<id>`, tablas `game_*`, entidad `matchup`
+- ✅ `docs/database.md` — `team_orb`, `team_drb`, `team_tov`, `period_pts`
+- ✅ `docs/architecture.md` — ingesta 6, `game_analysis`, `matchups`, `tables` (`pct_mode`, `sample_col`)
+- ✅ `docs/frontend.md` — vista del partido, dirección con pestaña, tablas, filtros, modo vivo
 
 ## Deuda / TODO
-- Menú de exportación por tabla (RF-25) solo existe a nivel partido (box); quintetos y cruces no tienen menú propio
-- Copy con `t()` (F-21)
-- T-F1..T-F23: Verificación completa
-- Tablas T-06 formales (register_table)
-- load_matchup_bundles completo
-- ~~team_matchups completo (F-03)~~ — hecho en F-03 (2026-10-17)
-- Parciales desde period_pts (F-11)
-- Bandas de tiro (A-05)
+- Ninguna de F-07. Pendiente operativo: reprocesar en QA/producción los partidos importados (Datos › Calidad) para tener parciales oficiales y rebotes de equipo.

@@ -344,6 +344,7 @@ let _lastSection = "import";
 let _routing = false;      // true mientras se aplica una dirección: la vista no la vuelve a escribir (X-01)
 let _routeQuery = null;    // competencia y últimos N de la dirección abierta; los consume la carga de equipo o jugador
 let _gameId = null;        // partido abierto en Partido (para la dirección)
+let _gameTab = null;       // pestaña de ese partido (resumen, box, tiros…)
 let _trendsState = { team: {}, player: {} };   // métricas, media móvil y N de Evolución y tendencias (F-18)
 let _similar = { position: "", min: "" };   // filtros de Jugador › Similares (A-09)
 let _leaders = { metric: "", min: "" };   // métrica y mínimo de minutos de Liga › Líderes (F-14)
@@ -503,7 +504,7 @@ function currentRoute() {
   else if (section === "import") r.tab = _importTab;
   else if (section === "compare") r.tab = _cmpTab();
   else if (section === "search") r.tab = _searchTab;
-  else if (section === "partido") r.id = _gameId;
+  else if (section === "partido") { r.id = _gameId; r.tab = _gameId ? (_gameTab || "analizar") : null; }
   return r;
 }
 
@@ -621,7 +622,7 @@ async function applyRoute({ initial = false } = {}) {
         renderMyTeamView();
         break;
       case "partido":
-        if (p.id && /^\d+$/.test(p.id)) showGame(p.id); else setSection("partido", { sync: false });
+        if (p.id && /^\d+$/.test(p.id)) showGame(p.id, p.tab); else setSection("partido", { sync: false });
         break;
       case "config":
         setSection("config", { sync: false });
@@ -1878,7 +1879,7 @@ function _loadTeamGameLog(teamCode) {
   const compParam = (_teamComp && _teamComp !== "all") ? _teamComp : null;
   mountTable(el,
     () => api.table("team_game_log", { team: teamCode, competition: compParam, last: _teamLastN || null, ...contextParams(), base: getBase() }),
-    { tableId: "team_game_log" });
+    { tableId: "team_game_log", onRowClick: row => showGame(row.id) });   // la fila abre Analizar partido (F-07 CA-3)
 }
 
 // Re-dibuja las grillas de fichas de Equipo/Jugador con el conjunto estándar ya
@@ -2772,7 +2773,7 @@ function _loadPlayerGameLog(playerId) {
   const compParam = (_playerComp && _playerComp !== "all") ? _playerComp : null;
   mountTable(el,
     () => api.table("player_game_log", { player_id: playerId, competition: compParam, last: _playerLastN || null, ...contextParams(), base: getBase() }),
-    { tableId: "player_game_log" });
+    { tableId: "player_game_log", onRowClick: row => showGame(row.id) });   // la fila abre Analizar partido (F-07 CA-3)
 }
 
 function _playerCompLabel() {
@@ -3077,11 +3078,17 @@ const NAV_ORDER = ["myteam", "import", "league", "team", "player", "compare", "s
 const NAV_EXTRA = ["import", "compare", "search", "preparar"];
 
 // ── F-07: Analizar partido ──────────────────────────────────────────────────
-function showGame(gameId) {
+// `#/partido/<id>/<pestaña>` (CA-3): "analizar" abre el Resumen; recargar reproduce la misma pestaña.
+function showGame(gameId, tab = null) {
   destroyLiveView();
   _gameId = String(gameId);
+  _gameTab = tab && tab !== "analizar" ? tab : null;
   setSection("partido");
-  renderGameView(document.getElementById("partido-main"), gameId);
+  renderGameView(document.getElementById("partido-main"), gameId, {
+    tab: _gameTab,
+    onTab: t => { _gameTab = t === "resumen" ? null : t; syncRoute(); },
+    onOpenPlayer: id => { location.hash = buildHash({ section: "player", id }); },
+  });
 }
 
 // ── F-01: Partido en vivo ──────────────────────────────────────────────────

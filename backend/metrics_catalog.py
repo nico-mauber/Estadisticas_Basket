@@ -73,7 +73,7 @@ GROUPS = [
      ]},
 ]
 
-_ALL_ENTITIES = ("team", "player", "lineup", "onoff", "clutch", "origin", "ptype")
+_ALL_ENTITIES = ("team", "player", "lineup", "onoff", "clutch", "origin", "ptype", "matchup")
 _PLAYER_ONLY = ("player",)
 _TEAM_ONLY = ("team",)
 
@@ -468,6 +468,10 @@ def build_payload(entity_type: str, args) -> dict:
     if entity_type in ("origin", "ptype"):
         params["side"] = args.get("side") or "ataque"
 
+    if entity_type == "matchup":
+        params["game"] = args.get("game") or None
+
+
     req = EntityRequest(entity_type=entity_type, entity_id=entity_id, comp_id=ctx.competition_id,
                         ctx=ctx, base=base, params=params)
 
@@ -618,7 +622,13 @@ def _attach_fichas(payload, entity_type, b0, ctx, base, *, prior_fn) -> None:
     import population
     try:
         variant = _population_variant(entity_type, b0)
+        if entity_type == "matchup":
+            # un cruce existe solo entre dos equipos concretos: no hay universo de la competencia
+            # contra el cual rankearlo (F-07). La ficha se sirve sin puesto ni percentil.
+            payload["population"] = {"size": 0, "criterion": "", "context_label": "", "reason": "contexto_no_comparable"}
+            return
         if ctx.on or ctx.off:
+
             # con/sin jugador: la población de equipos no se puede recalcular con ese filtro (population_mode entity_only)
             payload["population"] = {"size": 0, "criterion": "", "context_label": "", "reason": "contexto_no_comparable"}
             return

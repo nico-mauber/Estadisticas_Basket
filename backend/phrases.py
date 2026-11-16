@@ -295,7 +295,14 @@ def game_plan(entity_type: str, entity_id: str, *, reference: str = "competencia
         if f is None:
             raise PhraseError("sin_proximo_partido", "No hay un próximo partido cargado para este equipo", 404)
         rival = f.away_code if f.home_code == team_code else f.home_code
-        out = game_plan(entity_type, team_code, reference="rival", rival=rival, comp_id=comp_id, ctx=ctx, mode=mode)
+        try:
+            out = game_plan(entity_type, team_code, reference="rival", rival=rival, comp_id=comp_id, ctx=ctx, mode=mode)
+        except PhraseError as e:
+            if e.code != "no_encontrado":
+                raise
+            # rival cargado en el calendario que todavía no jugó en esta competencia (p. ej. arranque de temporada)
+            raise PhraseError("no_encontrado", f"El próximo rival todavía no tiene partidos en esta competencia, no hay datos para comparar: {rival}", 404) from None
+
         return {**out, "reference": {**(out.get("reference") or {}), "type": "rival_proximo", "fixture_id": f.id,
                                      "rival_code": rival}}
     rival = (rival or "").strip().upper() or None

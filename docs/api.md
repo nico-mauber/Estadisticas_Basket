@@ -669,40 +669,58 @@ Conciliación de posesiones reconstruidas vs fórmula del glosario para una comp
 
 ## GET `/api/game/<game_id>` — NUEVO (F-07)
 
-Detalle completo de un partido: encabezado, box oficial, parciales, línea de tiempo, jugadores con conjunto estándar, quintetos, conciliación. Cacheado por `cache.memo("game", ...)`.
+Detalle completo de un partido: encabezado, box oficial, parciales, línea de tiempo, jugadores con conjunto estándar, quintetos y conciliación. Cacheado por `cache.memo("game", ...)`.
 
 **Query:** `?base=total|partido|por40|por100` (default `total`).
 
-**Response 200:**
+**Response 200** (forma real; los valores de métricas son `{value, reason}`):
 ```json
 {
-  "game": { "game_id": "12345", "home_code": "CNF", "away_code": "PEN",
-            "home_name": "CNF", "away_name": "PEN", "date": "2026-03-15",
-            "competition": { "id": 1, "label": "Liga de Ascenso 2026" },
-            "home_score": 82, "away_score": 75 },
-  "box": { "home": { "pts": 82, "fgm": 28, "fga": 58, "fg_pct": 48.3, "..." : "..." },
-           "away": { "..." : "..." } },
-  "partials": { "periods": [{ "key": "Q1", "label": "1er cuarto",
-                  "home_pts": 22, "away_pts": 18, "ratings": { "home": { "off": 1.1, "..." : "..." }, "away": { "..." : "..." } } }],
-                "overtimes": 0 },
-  "timeline": { "plays": [{ "elapsed": 45, "period": 1, "clock": "9:15",
-                  "team": "CNF", "pts": 2, "home_score": 2, "away_score": 0,
-                  "is_timeout": false }],
-                "runs": [{ "team": "CNF", "pts": 10, "start_elapsed": 120, "end_elapsed": 280 }],
-                "lead_changes": 5, "ties": 3, "biggest_lead": { "home": 12, "away": 8 } },
-  "players": { "home": [{ "player_id": 7, "name": "Juan Pérez", "position": "PG",
-                  "played": true, "minutes": "25:30", "standard": { "pts": 15, "..." : "..." } }],
-               "away": [ "..." ] },
-  "lineups": { "home": [{ "players": [7, 12, 15, 18, 21], "names": ["...", "..."],
-                  "minutes": "8:30", "possessions": 22, "badge": "estrella",
-                  "standard": { "off_rating": 112.5, "..." : "..." } }],
-               "away": [ "..." ] },
-  "reconciliation": { "score_final": true, "players_sum": false, "period_sum": true,
-                      "timeline_final": true, "details": { "..." : "..." } }
+  "game": { "game_id": "2849343", "date": "2026-06-10", "competition_id": 1, "competition_label": "Liga de Ascenso 2026",
+            "home_code": "LAG", "home_team": "LAGOMAR", "away_code": "TAB", "away_team": "TABARE",
+            "home_score": 82, "away_score": 73, "minutes": 40, "overtimes": 0,
+            "has_pbp": true, "has_coords": true, "needs_reprocess": false },
+  "box": { "home": { "team_code": "LAG", "team_name": "LAGOMAR", "official": { "pts": 82, "fgm2": 20, "...": "..." },
+                     "team_extra": { "orb": 3, "drb": 2, "tov": 0 } },
+           "away": { "...": "..." },
+           "checks": { "ok": true, "items": [
+             { "check": "score_final", "label": "Puntos de cada equipo = marcador final", "ok": true },
+             { "check": "players_sum", "label": "Suma de jugadores (+ rebotes y pérdidas de equipo) = total del equipo",
+               "ok": true, "diffs": {}, "unverified": [] },
+             { "check": "period_sum", "label": "Suma de parciales = puntos", "ok": true },
+             { "check": "timeline_final", "label": "La línea de tiempo termina en el marcador final", "ok": true } ] } },
+  "standard": { "home": { "oer": { "value": 1.05, "reason": null }, "...": "..." }, "away": { "...": "..." } },
+  "players": [ { "player_id": 68, "player_name": "F. Medina", "side": "home", "starter": true, "dnp": false,
+                 "plus_minus": 9, "minutes": 31.2, "metrics": { "pts": { "value": 14, "reason": null }, "...": "..." } } ],
+  "partials": [ { "period": "1", "label": "1C", "home": 18, "away": 22,
+                  "ratings": { "home": { "oer": { "value": 1.1, "reason": null }, "...": "..." }, "away": { "...": "..." } } } ],
+  "partials_source": "oficial",
+  "timeline": { "points": [ "..." ], "periods": [ "..." ], "timeouts": [ "..." ], "runs": [ "..." ], "run_min_points": 8,
+                "duration": 2400, "final": { "home": 82, "away": 73 }, "lead_changes": 1, "ties": 7,
+                "biggest_lead": { "home": { "pts": 17 }, "away": { "pts": 5 } } },
+  "lineups": { "home": [ { "id": "LAG:61-65-66-68-71", "name": "…", "minutes": 8.7, "possessions": 16.4,
+                           "sample": { "level": "media" }, "metrics": { "...": "..." } } ], "away": [ "..." ] },
+  "base": "total"
 }
 ```
 
+- **Parciales:** `partials_source = "oficial"` cuando el box de FIBA trae los puntos por cuarto (`team_game_stats.period_pts`, ingesta 6); `"pbp"` cuando se reconstruyen del marcador del jugada a jugada; `null` sin ninguno. FIBA publica una sola cifra para todas las prórrogas (`ot_score`): con una prórroga va directa; con varias se reparten según el jugada a jugada y, sin él, se muestra una única columna `PR`. Los `ratings` por período salen siempre del jugada a jugada (`null` con razón `sin_pbp` si no hay).
+- **Conciliación:** `players_sum` suma a los jugadores los rebotes y pérdidas de equipo (`box.<lado>.team_extra`). Un partido importado antes de la ingesta 6 no los tiene: esos conteos quedan en `unverified` en lugar de contarse como falla.
+- `needs_reprocess` = `ingest.needs_reprocess` (versión de ingesta anterior a la vigente).
+
 **Errores:** `404 no_encontrado`; `400 parametro_invalido` (base inválida).
+
+**Tablas T-06 del partido (F-07 RF-25).** Box, quintetos y cruces también se sirven como tablas completas por `GET /api/table/<id>` (orden, columnas, exportación CSV/XLSX con cabecera):
+
+| Tabla | Parámetros | Filas |
+|---|---|---|
+| `game_players` | `game`, `team` | Jugadores del equipo (titulares ★ primero, por minutos; "· No jugó" al final con métricas nulas `dnp`) y la fila "Equipo (sin jugador)" con rebotes y pérdidas de equipo; el total = box oficial |
+| `game_lineups` | `game`, `team` | Quintetos del equipo en el partido con badge de muestra |
+| `game_matchups` | `game`, `level=quinteto\|jugador\|jugador_quinteto`, `side=home\|away` | Cruces del partido (lo que hizo cada lado mientras coincidieron en cancha), badge de muestra |
+
+Sin percentiles ni promedio de competencia (un partido no tiene población). `meta.entity` es el partido y `meta.filters` informa el partido (y el nivel/lado de los cruces). Errores: 404 `no_encontrado` (partido), 400 `parametro_invalido` (equipo que no jugó, nivel o lado inválidos).
+
+**Entidad `matchup`.** `GET /api/metrics/matchup?id=<EQUIPO:ids|RIVAL:ids>&game=<id>` devuelve el conjunto estándar de un cruce (mismos grupos y claves que un quinteto). El `id` es el de la fila de cruces; el nivel se deduce de la cantidad de ids (5 vs 5, 1 vs 1, 1 vs 5). Sin `game` suma todos los enfrentamientos de la competencia del contexto. La ficha va sin puesto ni percentil (`population.reason = contexto_no_comparable`). Id mal formado → 400 `parametro_invalido`.
 
 ---
 
@@ -792,7 +810,7 @@ Errores: 400 `parametro_invalido` ("Elegí la fecha del partido.", "La hora debe
 
 Vinculación: al importar o reprocesar un partido (`ingest.persist_game`) se vincula el partido del calendario con el mismo local y visitante y fecha a ±1 día (el más cercano; empate → menor id). `DELETE /api/games` desvincula antes de borrar. Un partido vinculado deja de ser «próximo».
 
-**`GET /api/game-plan` (F-17, tocado):** `reference=rival_proximo` resuelve el rival del próximo partido del calendario (`reference.type: "rival_proximo"`, `fixture_id`, `rival_code`); sin próximo partido → 404 `sin_proximo_partido` (antes 400 `referencia_no_disponible`).
+**`GET /api/game-plan` (F-17, tocado):** `reference=rival_proximo` resuelve el rival del próximo partido del calendario (`reference.type: "rival_proximo"`, `fixture_id`, `rival_code`); sin próximo partido → 404 `sin_proximo_partido` (antes 400 `referencia_no_disponible`). Si el próximo rival todavía no tiene partidos en la competencia → 404 `no_encontrado` ("El próximo rival todavía no tiene partidos en esta competencia…"); el panel vuelve a la referencia de la competencia. En `GET /api/my-team` el bloque `game_plan` hace lo mismo y agrega `rival_reason: "rival_sin_partidos"` en vez de fallar.
 
 **Configuración:** `alerts.lookback_days` (1–90, 7) y `alerts.change_z` (0,5–5, 1,5) pasan a activas; nuevas `my_team.last_games` (5), `my_team.top_lineups` (3) y `my_team.max_followed` (12), sección Preferencias.
 

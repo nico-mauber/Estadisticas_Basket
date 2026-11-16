@@ -26,9 +26,10 @@ from database import db, Game, GameSource, TeamGameStats, PlayerGameStats, Shot,
 #   3        — C-08: nombre completo y foto del jugador (identidad de ficha)
 #   4        — T-05: tapones y faltas recibidas (equipo y jugador)
 #   5        — A-12: vínculo de la asistencia con el tiro que la convirtió (previous_action)
+#   6        — F-07: rebotes y pérdidas de equipo, parciales oficiales por cuarto
 # Subirla cuando un cambio del parser deba llegar a los partidos ya importados: el panel de
 # calidad los marca "pendientes de reproceso".
-INGEST_VERSION = 5
+INGEST_VERSION = 6
 
 # Partidos por petición de reproceso. Peor caso sin archivo: 5 descargas × 20 s de timeout de
 # urllib = 100 s, por debajo de los 180 s de gunicorn (render.yaml).
@@ -123,8 +124,9 @@ def persist_game(game: dict) -> None:
                  "fgm3", "fga3", "ftm", "fta", "orb", "drb", "trb", "ast", "tov", "stl", "blk", "pf",
                  "opp_pts", "opp_fga2", "opp_fga3", "opp_fta", "opp_orb", "opp_drb", "opp_tov", "opp_pf",
                  "paint_pts", "second_chance_pts", "pts_from_tov", "bench_pts", "fast_break_pts",
-                 "blk_received", "fouls_drawn")
-    player_cols = ("team_code", "team_name", "player_name", "jersey", "minutes", "position",
+                 "blk_received", "fouls_drawn", "team_orb", "team_drb", "team_tov", "period_pts")
+    player_cols = (
+"team_code", "team_name", "player_name", "jersey", "minutes", "position",
                    "plus_minus", "starter", "first_name", "family_name", "photo_url", "pts", "fgm", "fga", "fgm2", "fga2", "fgm3", "fga3",
                    "ftm", "fta", "orb", "drb", "trb", "ast", "tov", "stl", "blk", "pf",
                    "blk_received", "fouls_drawn")

@@ -234,12 +234,22 @@ def _build(team, comp_id, today):
 
     def gp():
         f = nf_holder.get("f")
+        res = None
         if f:
-            res = phrases.game_plan("team", team, reference="rival", rival=f["rival"]["code"], comp_id=comp_id, ctx=ctx)
-            res = {**res, "reference": {**(res.get("reference") or {}), "type": "rival_proximo", "fixture_id": f["fixture_id"]}}
-        else:
+            try:
+                res = phrases.game_plan("team", team, reference="rival", rival=f["rival"]["code"], comp_id=comp_id, ctx=ctx)
+                res = {**res, "reference": {**(res.get("reference") or {}), "type": "rival_proximo", "fixture_id": f["fixture_id"]}}
+            except phrases.PhraseError as e:
+                if e.code != "no_encontrado":
+                    raise
+                # el próximo rival todavía no jugó en la competencia: el plan vuelve a la referencia de la competencia
+                res = None
+        if res is None:
             res = phrases.game_plan("team", team, reference="competencia", comp_id=comp_id, ctx=ctx)
+            if f:
+                res = {**res, "rival_reason": "rival_sin_partidos"}
         return {**res, "next_available": f is not None}
+
 
     steps = (("next_fixture", nf), ("game_plan", gp), ("alerts", lambda: _alerts(team, team_name, comp_id, ctx, per_game, today)),
              ("last_games", lambda: _last_games(per_game)), ("top_lineups", lambda: _top_lineups(team, comp_id, ctx)))

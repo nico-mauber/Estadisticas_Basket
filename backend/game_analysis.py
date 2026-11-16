@@ -4,6 +4,7 @@ Módulo principal de la vista Analizar (S5): encabezado, box oficial + conjunto 
 parciales por período con ratings, línea de tiempo del marcador, jugada a jugada filtrable,
 zonas de tiro filtradas y conciliación. Todo on-the-fly sin persistir.
 """
+import json
 import logging
 from dataclasses import dataclass
 
@@ -11,6 +12,7 @@ import cache
 import competitions
 import config
 import identity
+import ingest
 import lineups
 import possessions
 import repository
@@ -147,66 +149,95 @@ def _official_box(tgs_row) -> dict:
 
 # ── T-B1: period_partials ─────────────────────────────────────────────────────
 
-def period_partials(game_id, events, tgs_map):
+def _official_periods(tgs) -> dict | None:
+    """Parciales oficiales guardados por la ingesta 6 ({"1": 23, …, "OT": 19}) o None."""
+    raw = getattr(tgs, "period_pts", None) if tgs is not None else None
+    if not raw:
+        return None
+    try:
+        d = json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+    return d if isinstance(d, dict) and d else None
+
+
+def _pbp_period_scores(events) -> tuple[list, dict, dict]:
+    """Períodos vistos en el jugada a jugada (en orden) y puntos de cada lado por período."""
+    seen, order, scores = {}, [], {}
+    prev_s1 = prev_s2 = 0
+    last_pk = None
+    s1_end = s2_end = 0
+    for ev in events or []:
+        pk = period_key(ev.get("period", 1), ev.get("period_type", "REGULAR"))
+        if pk not in seen:
+            seen[pk] = {"period": ev.get("period", 1), "period_type": ev.get("period_type", "REGULAR")}
+            order.append(pk)
+        s1, s2 = ev.get("s1"), ev.get("s2")
+        if s1 is None or s2 is None:
+            continue
+        if pk != last_pk and last_pk is not None:
+            scores[last_pk] = (s1_end - prev_s1, s2_end - prev_s2)
+            prev_s1, prev_s2 = s1_end, s2_end
+        s1_end, s2_end = s1, s2
+        last_pk = pk
+    if last_pk:
+        scores[last_pk] = (s1_end - prev_s1, s2_end - prev_s2)
+    return order, seen, scores
+
+
+def period_partials(game_id, events, tgs_map, overtimes: int = 0):
+    """Parciales por período: (filas, fuente).
+
+    Fuente "oficial" cuando el box de FIBA publica los puntos por cuarto (ingesta 6); si no,
+    "pbp" (reconstruidos del marcador del jugada a jugada); None sin ninguno de los dos.
+    FIBA da una sola cifra para todas las prórrogas: con una prórroga va directa; con varias se
+    reparten según el jugada a jugada y, sin él, se muestra una única columna "PR".
+    """
     home_tgs = tgs_map.get("home")
     away_tgs = tgs_map.get("away")
     if not home_tgs or not away_tgs:
-        return [], None, "no_registrado"
+        return [], None
 
     home_code = home_tgs.team_code
     away_code = away_tgs.team_code
+    order, seen, pbp_scores = _pbp_period_scores(events)
 
-    periods_seen = []
-    if events:
-        seen = {}
-        for ev in events:
-            pk = period_key(ev.get("period", 1), ev.get("period_type", "REGULAR"))
-            if pk not in seen:
-                seen[pk] = {
-                    "period": ev.get("period", 1),
-                    "period_type": ev.get("period_type", "REGULAR"),
-                }
-                periods_seen.append(pk)
+    def _row(pk, period, ptype, h, a, label=None):
+        return {
+            "period": pk,
+            "label": label or period_label(period, ptype),
+            "home": h,
+            "away": a,
+            "ratings": (_period_ratings(events, pk, home_code, away_code, {"period": period, "period_type": ptype})
+                        if events else _null_ratings("sin_pbp")),
+        }
 
-    # try official period_pts (not available without F-11 ingest v2)
-    # Fall back to pbp-derived partials
-    source = None
-    partials = []
+    off_h, off_a = _official_periods(home_tgs), _official_periods(away_tgs)
+    if off_h and off_a:
+        regular = sorted({int(k) for k in list(off_h) + list(off_a) if str(k).isdigit()})
+        rows = [_row(str(n), n, "REGULAR", off_h.get(str(n), 0), off_a.get(str(n), 0)) for n in regular]
+        ot_h, ot_a = off_h.get("OT"), off_a.get("OT")
+        ot_pks = [pk for pk in order if seen[pk]["period_type"] == "OVERTIME"]
+        if len(ot_pks) == 1 and ot_h is not None and ot_a is not None:
+            info = seen[ot_pks[0]]
+            rows.append(_row(ot_pks[0], info["period"], "OVERTIME", ot_h, ot_a))
+        elif len(ot_pks) > 1:
+            for pk in ot_pks:
+                h, a = pbp_scores.get(pk, (0, 0))
+                rows.append(_row(pk, seen[pk]["period"], "OVERTIME", h, a))
+        elif (ot_h or ot_a) or overtimes:
+            label = "PR" if overtimes != 1 else period_label(1, "OVERTIME")
+            rows.append(_row("pr1" if overtimes == 1 else "pr", 1, "OVERTIME", ot_h or 0, ot_a or 0, label=label))
+        return rows, "oficial"
 
-    # pbp-derived partials
-    if events:
-        source = "pbp"
-        period_scores = {}
-        prev_s1, prev_s2 = 0, 0
-        last_pk = None
-        for ev in events:
-            pk = period_key(ev.get("period", 1), ev.get("period_type", "REGULAR"))
-            s1, s2 = ev.get("s1"), ev.get("s2")
-            if s1 is None or s2 is None:
-                continue
-            if pk != last_pk and last_pk is not None:
-                period_scores[last_pk] = (s1_end - prev_s1, s2_end - prev_s2)
-                prev_s1, prev_s2 = s1_end, s2_end
-            s1_end, s2_end = s1, s2
-            last_pk = pk
-        if last_pk:
-            period_scores[last_pk] = (s1_end - prev_s1, s2_end - prev_s2)
-
-        for pk in periods_seen:
-            info = seen.get(pk, {})
-            h, a = period_scores.get(pk, (0, 0))
-            pdata = {
-                "period": pk,
-                "label": period_label(info.get("period", 1), info.get("period_type", "REGULAR")),
-                "home": h,
-                "away": a,
-                "ratings": _period_ratings(events, pk, home_code, away_code, info),
-            }
-            partials.append(pdata)
-    elif not events:
-        source = None
-
-    return partials, source
+    if not events:
+        return [], None
+    rows = []
+    for pk in order:
+        info = seen[pk]
+        h, a = pbp_scores.get(pk, (0, 0))
+        rows.append(_row(pk, info["period"], info["period_type"], h, a))
+    return rows, "pbp"
 
 
 def _period_ratings(events, pk, home_code, away_code, period_info):
@@ -516,11 +547,10 @@ def game_shots(game_id: str, team_code: str, *,
                     if an is not None:
                         band_index[an] = {
                             "band": shot_info.get("band"),
-                            "shot_clock_start": getattr(
-                                next((c for c in p.chances if c.start_event <= an <= (c.end_event or an)), None),
-                                "shot_clock_start", None
-                            ) if p.chances else None,
+                            # reloj con el que arrancó la oportunidad del tiro (24 o 14), del enriquecedor A-05
+                            "shot_clock_start": shot_info.get("clock_start"),
                         }
+
     except Exception:
         log.debug("Could not load possessions for band index on game %s", game_id)
 
@@ -549,8 +579,6 @@ def game_shots(game_id: str, team_code: str, *,
         bi = band_index.get(s.action_number, {})
         band = bi.get("band")
         scs = bi.get("shot_clock_start")
-        if band is None:
-            no_band += 1
         if scs == 14:
             reset14 += 1
 
@@ -588,15 +616,18 @@ def game_shots(game_id: str, team_code: str, *,
             return str(shot["period"]) in quarters
         filtered = [sh for sh in filtered if _q_match(sh)]
 
+    if player_id is not None:
+        filtered = [sh for sh in filtered if sh["player_id"] == player_id]
+
+    # Tiros sin tramo de la selección (cuarto/jugador), informados aparte: nunca se cuentan
+    # como "temprano" ni en otro tramo (CA-6).
+    no_band = sum(1 for sh in filtered if sh["band"] is None)
     if bands:
         has_pbp = bool(band_index)
         if not has_pbp:
             ignored.append({"param": "clock", "reason": "sin_pbp"})
         else:
             filtered = [sh for sh in filtered if sh["band"] in bands]
-
-    if player_id is not None:
-        filtered = [sh for sh in filtered if sh["player_id"] == player_id]
 
     # zone table from filtered shots
     zone_dicts = [{
@@ -691,6 +722,7 @@ def reconcile_game(game, tgs_map, players, partials, timeline):
 
     # players_sum
     diffs = {}
+    unverified = set()
     count_cols = ["pts", "fgm2", "fga2", "fgm3", "fga3", "ftm", "fta", "ast", "stl", "blk", "pf"]
     for side, tgs in tgs_map.items():
         side_players = [p for p in players if
@@ -701,22 +733,22 @@ def reconcile_game(game, tgs_map, players, partials, timeline):
             if p_sum != t_val:
                 diffs[f"{side}.{col}"] = {"players": p_sum, "team": t_val}
 
-        # rebotes: add team_orb/team_drb (not available pre-F-11)
-        for rb, team_rb in [("orb", "team_orb"), ("drb", "team_drb")]:
-            p_sum = sum(getattr(p, rb, 0) or 0 for p in side_players)
-            # team_orb/team_drb not in TeamGameStats columns yet
-            t_val = getattr(tgs, rb, 0) or 0
+        # Rebotes y pérdidas: FIBA suma al total del equipo los "de equipo" (sin jugador). Desde
+        # la ingesta 6 se guardan aparte (team_orb/team_drb/team_tov); antes no se pueden
+        # verificar y quedan en `unverified` en vez de contarse como falla.
+        team_extra = {"orb": getattr(tgs, "team_orb", None), "drb": getattr(tgs, "team_drb", None),
+                      "tov": getattr(tgs, "team_tov", None)}
+        for col, extra in team_extra.items():
+            if extra is None:
+                unverified.add(col)
+                continue
+            p_sum = sum(getattr(p, col, 0) or 0 for p in side_players) + extra
+            t_val = getattr(tgs, col, 0) or 0
             if p_sum != t_val:
-                diffs[f"{side}.{rb}"] = {"players": p_sum, "team": t_val}
-
-        # tov: add team_tov (not available pre-F-11)
-        p_sum_tov = sum(getattr(p, "tov", 0) or 0 for p in side_players)
-        t_tov = getattr(tgs, "tov", 0) or 0
-        if p_sum_tov != t_tov:
-            diffs[f"{side}.tov"] = {"players": p_sum_tov, "team": t_tov}
+                diffs[f"{side}.{col}"] = {"players": p_sum, "team": t_val}
 
     ps_ok = len(diffs) == 0
-    checks.append({"check": "players_sum", "ok": ps_ok, "diffs": diffs})
+    checks.append({"check": "players_sum", "ok": ps_ok, "diffs": diffs, "unverified": sorted(unverified)})
 
     # period_sum
     if partials:
@@ -736,8 +768,18 @@ def reconcile_game(game, tgs_map, players, partials, timeline):
     else:
         checks.append({"check": "timeline_final", "ok": None})
 
+    for c in checks:
+        c["label"] = _CHECK_LABELS.get(c["check"], c["check"])
     all_ok = all(c["ok"] for c in checks if c["ok"] is not None)
     return {"ok": all_ok, "items": checks}
+
+
+_CHECK_LABELS = {
+    "score_final": "Puntos de cada equipo = marcador final",
+    "players_sum": "Suma de jugadores (+ rebotes y pérdidas de equipo) = total del equipo",
+    "period_sum": "Suma de parciales = puntos",
+    "timeline_final": "La línea de tiempo termina en el marcador final",
+}
 
 
 # ── T-B6: game_players (StatBundle per player for a single game) ──────────────
@@ -784,6 +826,7 @@ def _game_player_bundles(game_id, players, tgs_map, events):
             "fgm": (p.fgm2 or 0) + (p.fgm3 or 0),
             "fouls_drawn": p.fouls_drawn,
             "blk_received": p.blk_received,
+            "plus_minus": p.plus_minus,
         }
 
         side = "home" if tc == home_code else "away"
@@ -940,7 +983,8 @@ def _build_game_detail(game_id: str, base: str) -> dict:
         "overtimes": ots,
         "has_pbp": has_pbp,
         "has_coords": has_coords,
-        "needs_reprocess": (game.ingest_version or 0) < 2 if game.ingest_version is not None else True,
+        "needs_reprocess": ingest.needs_reprocess(game),
+
     }
 
     # box oficial
@@ -950,7 +994,10 @@ def _build_game_detail(game_id: str, base: str) -> dict:
             "team_code": tgs.team_code,
             "team_name": tgs.team_name,
             "official": _official_box(tgs),
+            # F-07: rebotes y pérdidas de equipo (sin jugador); None = partido previo a la ingesta 6
+            "team_extra": {c: getattr(tgs, "team_" + c, None) for c in ("orb", "drb", "tov")},
         }
+
 
     # estándar de equipo
     standard = {}
@@ -972,7 +1019,7 @@ def _build_game_detail(game_id: str, base: str) -> dict:
             standard[side] = _format_standard(vals)
 
     # parciales
-    partials, partials_source = period_partials(game_id, events, tgs_map)
+    partials, partials_source = period_partials(game_id, events, tgs_map, ots)
 
     # timeline
     tl = score_timeline(game_id, events, home_code, away_code, ots) if has_pbp else None
@@ -1071,3 +1118,73 @@ def metrics_catalog_keys():
     except AttributeError:
         import metrics_catalog
         return list(metrics_catalog.METRICS.keys())
+
+
+# ── Tablas T-06 del partido (F-07 RF-25, CA-12) ─────────────────────────────
+# Filas para `tables.register_table` ("game_players", "game_lineups"): dicts con id, link,
+# texts, bundle y sample; `tables.py` las convierte en `TableRow`.
+
+class GameTableError(ValueError):
+    """Partido inexistente (404) o equipo que no jugó el partido (400)."""
+
+    def __init__(self, message, status=400, code="parametro_invalido"):
+        super().__init__(message)
+        self.status = status
+        self.code = code
+
+
+def _game_and_code(game_id, team_code):
+    game = _load_game(game_id)
+    if not game:
+        raise GameTableError("Partido no encontrado", 404, "no_encontrado")
+    code = (team_code or "").strip().upper()
+    if code not in (game.home_code, game.away_code):
+        raise GameTableError("Ese equipo no jugó este partido")
+    return game, code
+
+
+def game_player_rows(game_id, team_code) -> list:
+    """Box del equipo en el partido: titulares primero, luego por minutos y al final quienes no
+    jugaron (fila "No jugó", métricas nulas con razón `dnp`). Desde la ingesta 6 se agrega la fila
+    "Equipo (sin jugador)" con los rebotes y pérdidas de equipo, así el total cuadra con el box
+    oficial (CA-1)."""
+    game, code = _game_and_code(game_id, team_code)
+    tgs_map = _load_tgs(game_id)
+    players = _load_players(game_id)
+    bundles = [b for b in _game_player_bundles(game_id, players, tgs_map, _load_events(game_id))
+               if (b.meta or {}).get("team_code") == code]
+    bundles.sort(key=lambda b: (b.meta["dnp"], not b.meta["starter"], -(b.minutes or 0)))
+    out = []
+    for b in bundles:
+        m = b.meta
+        label = ("★ " if m["starter"] else "") + b.name + (f" #{m['jersey']}" if m.get("jersey") else "")
+        if m["dnp"]:
+            label += " · No jugó"   # segmento aparte: el traductor de la interfaz (F-21) lo traduce solo
+        pid = m.get("player_id")
+        out.append({"id": str(pid or b.name), "link": f"player:{pid}" if pid else None,
+                    "texts": {"_name": label}, "bundle": None if m["dnp"] else b})
+    tgs = next((t for t in tgs_map.values() if t.team_code == code), None)
+    if tgs is not None and tgs.team_orb is not None:
+        own = {k: 0 for k in lineups._BOX_KEYS}
+        own.update(orb=tgs.team_orb or 0, drb=tgs.team_drb or 0, tov=tgs.team_tov or 0)
+        out.append({"id": f"{code}:equipo", "link": None, "texts": {"_name": "Equipo (sin jugador)"},
+                    "bundle": StatBundle(entity_type="player", entity_id=f"{code}:equipo", name="Equipo",
+                                         own=own, opp=None, team=None, games=1, minutes=None,
+                                         team_minutes=None, seconds=None, on_court=None, shots=None,
+                                         possessions_counted=None, null_reasons={}),
+                    "team_row": True})
+    return out
+
+
+def game_lineup_rows(game_id, team_code) -> list:
+    """Quintetos del equipo en el partido con su badge de muestra (posesiones propias)."""
+    _game, code = _game_and_code(game_id, team_code)
+    events = _load_events(game_id)
+    if not events:
+        return []
+    out = []
+    for b in _game_lineup_bundles(game_id, events, code, _load_players(game_id)):
+        t_pos = _pos(b.own) if b.own else 0
+        out.append({"id": b.entity_id, "link": f"lineup:{b.entity_id}", "texts": {"_players": b.name},
+                    "bundle": b, "sample": sample_mod.sample_level("lineup", n=t_pos, unit="posesiones")})
+    return out
