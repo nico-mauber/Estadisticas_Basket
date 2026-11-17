@@ -135,7 +135,7 @@ export function contextNote(echo) {
   if (echo.level === "evento") notes.push("El game log y los totales de partido no se recortan por cuarto, marcador ni jugador.");
   if (echo.level === "posesion") notes.push("El game log y los totales de partido no se recortan por posesión.");
   if ((echo.ignored || []).length) notes.push("Hay filtros que este bloque no aplica.");
-  notes.push("Los mapas de tiro y los cierres todavía no aplican estos filtros.");
+  if (echo.level !== "partido") notes.push("Los mapas de tiro solo aplican los filtros de partido y de reloj; los cierres, los de partido.");
 
   return `<p class="td-muted ctx-note">${esc(echo.label)} · ${echo.games_used} de ${echo.games_total} partidos · ${esc(notes.join(" · "))}</p>`;
 }

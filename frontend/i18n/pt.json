@@ -1532,5 +1532,17 @@
 "Se excluyeron {#} partidos sin descanso calculable.": "{1} jogos sem descanso calculável foram excluídos.",
 "Se excluyeron {#} partido sin descanso calculable.": "{1} jogo sem descanso calculável foi excluído.",
 "Se excluyeron {#} partidos sin titulares registrados.": "{1} jogos sem titulares registrados foram excluídos.",
-"Se excluyeron {#} partido sin titulares registrados.": "{1} jogo sem titulares registrados foi excluído."
+"Se excluyeron {#} partido sin titulares registrados.": "{1} jogo sem titulares registrados foi excluído.",
+"Este mapa aplica los filtros de partido y de reloj; no aplica cuarto, marcador, con/sin jugador, origen, tipo de ataque ni oportunidad.": "Este mapa aplica os filtros de jogo e de relógio; não aplica quarto, placar, com/sem jogador, origem, tipo de ataque nem oportunidade.",
+"Los mapas de tiro solo aplican los filtros de partido y de reloj; los cierres, los de partido.": "Os mapas de arremesso só aplicam os filtros de jogo e de relógio; os finais de jogo, os de jogo.",
+"La tabla general (récord y puntos) es siempre del partido completo; los filtros recortan las métricas.": "A classificação (campanha e pontos) é sempre do jogo completo; os filtros recortam as métricas.",
+"Sin tiros que cumplan estos filtros.": "Sem arremessos que cumpram estes filtros.",
+"Diferencia aritmética: +{#} (propio − referencia)": "Diferença aritmética: +{1} (próprio − referência)",
+"Diferencia aritmética: −{#} (propio − referencia)": "Diferença aritmética: −{1} (próprio − referência)",
+"Diferencia aritmética: +{#} pp (propio − referencia)": "Diferença aritmética: +{1} pp (próprio − referência)",
+"Diferencia aritmética: −{#} pp (propio − referencia)": "Diferença aritmética: −{1} pp (próprio − referência)",
+"Riesgo": "Risco",
+"Ventaja": "Vantagem",
+"Ventajas": "Vantagens",
+"Vulnerabilidades": "Vulnerabilidades"
 }

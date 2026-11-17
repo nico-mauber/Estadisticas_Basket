@@ -424,6 +424,10 @@ def _entity_id_kwargs(entity_type: str, raw_id: str) -> dict:
 def build_payload(entity_type: str, args) -> dict:
     """Orquestación de `GET /api/metrics/<entity_type>` y del bloque `standard` de `/api/team` y
     `/api/player` (plan §4.8, 10 pasos)."""
+    if entity_type == "split":
+        # `split` (T-B14) = el equipo con el contexto de la petición (partido, evento y posesión): mismo bundle filtrado,
+        # misma población. Se resuelve como `team` para no duplicar registro, población ni ficha.
+        entity_type = "team"
     reg = _REGISTRY.get(entity_type)
     if reg is None:
         raise MetricsError("Tipo de entidad desconocido", 400, "parametro_invalido")

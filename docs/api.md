@@ -354,6 +354,8 @@ Tiros sin coordenadas (`x=0, y=0`, partido sin array `shot` en FIBA) caen en `to
 
 Mapa de tiro enriquecido con percentil y muestra por zona (C-03). Reemplaza los endpoints legacy `/api/shots/…` para el frontend.
 
+**Contexto (T-03, A-05 RF-12):** acepta el contexto de nivel partido (`last`, `venue`, `opponent`, `rest`: recortan los partidos de la entidad) y `clock=temprano|medio|tardio[,…]` / `clock_start=24|14` (cada tiro se ubica en el tramo del reloj de posesión de su oportunidad, A-01 + A-05; los tiros sin tramo quedan fuera con filtro de reloj). Sin `competition` usa todas las competencias. Los percentiles se calculan contra la población con el mismo contexto (sin los últimos N; con `opponent`, sin el rival). Los filtros de evento y `origin`/`ptype`/`chance` no recortan el mapa y van en `context.ignored` (`no_aplica`). La respuesta trae `context` (eco de T-03).
+
 **Query params:**
 | Param | Requerido | Valores | Default |
 |-------|-----------|---------|---------|
@@ -455,6 +457,8 @@ Todos los jugadores de la base con sus promedios, para el buscador avanzado (una
 ---
 
 ## GET `/api/clutch/<team_code>`
+
+> **T-03:** `/api/clutch/<team>`, `/api/lineup/<team>` y `/api/onoff/<team>/<jugador>` aplican el contexto de nivel partido (`last`, `venue`, `opponent`, `rest`; sin `competition` = todas) y devuelven `context` (eco); los filtros de evento y de posesión van en `context.ignored` (`no_aplica`).
 
 Cierres del equipo (Feature 05 **v2**, C-06): rendimiento en la **ventana de cierre** (último período REGULAR con reloj ≤ `window_secs` + todas las prórrogas) **de partidos apretados** — solo cuentan los partidos con diferencia ≤ `margin` al entrar a la ventana. Devuelve un **agregado** ("mini-partido" del equipo, todos sus cierres sumados) **más un desglose por partido**. Ver `sdd/specs/05-clutch/spec.md §10` y `sdd/specs/v2/fase-1-confiabilidad/05-C-06-umbral-cierres/`.
 
@@ -1450,7 +1454,7 @@ Población vacía o `competition=all` → 200 con `rows: []` y `population.reaso
 
 Cada fila agrega `in_population`, `rank: {clave: {rank, total, tied}}` y `pct: {clave: p}` (11 claves). Los
 valores `oer…stl` pasan a cociente de totales (pooled) de la población; `to_pct` = PER/POS (DA-04). Con
-`include=summary`: `{teams: [...], avg: {clave: v}, leaders: {clave: {id,name,value}}, population: {...}}`. Sin
+`include=summary`: `{teams: [...], avg: {clave: v}, leaders: {clave: {id,name,value}}, population: {...}, context: {...}}`. Los filtros de nivel evento y posesión de T-03 (`quarter`, `score`, `origin`, …) recortan los valores de la población (y la tabla `league_teams`); la clasificación (récord, puntos) es siempre del partido completo; `on`/`off` van en `context.ignored`. `GET /api/leaders` y `GET /api/competition-profile` aplican el mismo contexto. Las tablas `league_teams` y `search_players` aceptan los niveles evento y posesión (`TableDef.levels`); `GET /api/metrics/split?id=<equipo>` es el equipo con el contexto de la petición (alias de `team`). Sin
 `include`, la lista conserva su forma anterior más las claves nuevas por fila.
 
 ---

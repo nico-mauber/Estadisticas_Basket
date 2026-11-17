@@ -1,6 +1,6 @@
 # Progress — A-05: Tramo de reloj de posesión
 
-> **Estado:** 🔶 Implementado en Equipo (ataque y defensa), Partido y Jugador: tramos del reloj, reloj de 14 s aparte, conciliación, composición de puntos, plantel por tramo, panel de decisión, matriz zona × tramo, entidad `clock` (T-05) y tablas `team_clock` / `zone_clock_matrix` (T-06). Filtros de contexto `clock` / `clock_start` de T-03 en Equipo y Jugador. Faltan quinteto y el filtro del mapa de tiro por tramo.
+> **Estado:** 🔶 Implementado en Equipo (ataque y defensa), Partido y Jugador: tramos del reloj, reloj de 14 s aparte, conciliación, composición de puntos, plantel por tramo, panel de decisión, matriz zona × tramo, entidad `clock` (T-05) y tablas `team_clock` / `zone_clock_matrix` (T-06). Filtros de contexto `clock` / `clock_start` de T-03 en Equipo y Jugador. Filtro del mapa de tiro por tramo (2026-11-17). Falta quinteto.
 > **Fecha:** 2026-10-27
 > **Origen del pedido:** el cliente marcó como urgente (a) cómo anota cada equipo, en equipo y en partido, con el peso de triples, dobles, tiros libres, pérdidas y asistencias, y (b) la segmentación por tramo del reloj (antes de 8 s, entre 8 y 16 s, más de 16 s) con el % de triples, su cantidad y su peso. Se implementó primero esa parte (partición (a) del plan §10 D-8).
 
@@ -16,7 +16,7 @@
 - [ ] RF-9 · Por quinteto
 - [x] RF-10 · Panel de decisión de siete preguntas, con promedio de la competencia por tramo en la pregunta 2
 - [x] RF-11 (parcial) · Matriz zona × tramo con intentos, FG%, eFG% y PPT por celda; falta percentil, tooltip de 7 datos de C-03 y exportación T-06
-- [ ] RF-12 · Filtro del mapa de tiro por tramo
+- [x] RF-12 · Filtro del mapa de tiro por tramo (`/api/shot-zones?clock=…&clock_start=…`, 2026-11-17)
 - [x] RF-13 · Dimensiones de contexto `clock` / `clock_start` (T-03, 2026-11-17), entidad `clock` y tablas `team_clock` / `zone_clock_matrix`
 - [x] RF-15 · `clock.early_max` y `clock.mid_max` activadas en `CONFIG_SPEC`; cambiarlas por `PUT /api/settings` reasigna sin reiniciar
 - [x] RF-16 · Denominador 0 → `null` / `sin_intentos`; equipo sin pbp → 404 `sin_pbp`
@@ -40,7 +40,7 @@ Seed local (13 partidos): `a05_sim.py` 70/70 y `a05_browser.py` 47/47 (1280 y 36
 | CA-11 | ❌ | quinteto pendiente |
 | CA-12 | ✅ | reparto de pérdidas suma 100 %, diferencial = valor − promedio, % que llega al tardío = tardío / oportunidades |
 | CA-13 | 🔶 | Σ zonas de cada tramo = tiros del tramo y "sin reloj" = `no_clock`; falta tooltip de 7 datos y exportación |
-| CA-14 | ❌ | filtro del mapa de tiro por tramo pendiente |
+| CA-14 | ✅ | `shot-zones?entity=team&id=ALB&clock=tardio`: 37 intentos = tiros del tramo tardío; Σ tramos (134) ≤ total (136, dos sin reloj); `clock_start=14` 17 intentos; percentiles contra la población con el mismo filtro (`t03q_sim.py`) |
 | CA-15 / CA-16 | ✅ | `GET /api/metrics/team?id=ALB&clock=tardio&clock_start=14`: el filtro se aplica (no está en `ignored`) y `possessions_counted` = oportunidades que cumplen (`t03p_sim.py`); entidad `clock` con el conjunto completo (2026-11-16) |
 | CA-17 | ✅ | tramo sin tiros → `null` / `sin_intentos`, sin NaN; equipo sin pbp → 404 |
 | CA-19 | ✅ | prórrogas con el mismo criterio (reloj dentro del período) |

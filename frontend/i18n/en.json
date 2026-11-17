@@ -1532,5 +1532,17 @@
 "Se excluyeron {#} partidos sin descanso calculable.": "{1} games without computable rest were excluded.",
 "Se excluyeron {#} partido sin descanso calculable.": "{1} game without computable rest was excluded.",
 "Se excluyeron {#} partidos sin titulares registrados.": "{1} games without recorded starters were excluded.",
-"Se excluyeron {#} partido sin titulares registrados.": "{1} game without recorded starters was excluded."
+"Se excluyeron {#} partido sin titulares registrados.": "{1} game without recorded starters was excluded.",
+"Este mapa aplica los filtros de partido y de reloj; no aplica cuarto, marcador, con/sin jugador, origen, tipo de ataque ni oportunidad.": "This chart applies the game and clock filters; it does not apply quarter, score, with/without player, origin, attack type or chance.",
+"Los mapas de tiro solo aplican los filtros de partido y de reloj; los cierres, los de partido.": "Shot charts only apply the game and clock filters; closing stretches, the game filters.",
+"La tabla general (récord y puntos) es siempre del partido completo; los filtros recortan las métricas.": "The standings (record and points) always use the full game; the filters cut the metrics.",
+"Sin tiros que cumplan estos filtros.": "No shots match these filters.",
+"Diferencia aritmética: +{#} (propio − referencia)": "Arithmetic difference: +{1} (own − reference)",
+"Diferencia aritmética: −{#} (propio − referencia)": "Arithmetic difference: −{1} (own − reference)",
+"Diferencia aritmética: +{#} pp (propio − referencia)": "Arithmetic difference: +{1} pp (own − reference)",
+"Diferencia aritmética: −{#} pp (propio − referencia)": "Arithmetic difference: −{1} pp (own − reference)",
+"Riesgo": "Risk",
+"Ventaja": "Advantage",
+"Ventajas": "Advantages",
+"Vulnerabilidades": "Vulnerabilities"
 }

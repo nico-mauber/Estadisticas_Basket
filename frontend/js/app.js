@@ -1544,7 +1544,7 @@ async function renderLeague() {
         ? '<div id="league-ctx-bar" class="ctx-bar-host"></div><p class="empty">No hay partidos que cumplan estos filtros. <button type="button" class="btn btn-ghost btn-sm" id="league-clear">Limpiar filtros</button></p>'
         : '<p class="empty">Sin datos. Importa partidos primero.</p>';
       if (activeCount() > 0) {
-        mountContextBar(document.getElementById("league-ctx-bar"), { competition: _leagueComp, onChange: () => renderLeague() });
+        mountContextBar(document.getElementById("league-ctx-bar"), { competition: _leagueComp, events: true, onChange: () => renderLeague() });
         document.getElementById("league-clear").addEventListener("click", () => { clearContext(); renderLeague(); });
       }
       return;
@@ -1621,8 +1621,10 @@ async function renderLeague() {
     sec.children[0].dataset.tabs = "tabla";
     sec.children[1].dataset.tabs = "ranking";
     sec.insertAdjacentHTML("beforeend", '<div id="league-leaders" data-tabs="lideres"></div><div id="league-profile" data-tabs="perfil"></div>');
-    sec.insertAdjacentHTML("afterbegin", '<div id="league-ctx-bar" class="ctx-bar-host"></div><div id="league-tabs" class="tabs-host"></div>');
-    mountContextBar(document.getElementById("league-ctx-bar"), { competition: _leagueComp, onChange: () => renderLeague() });
+    const lgNote = res.context && res.context.level !== "partido"
+      ? `${contextNote(res.context)}<p class="td-muted ctx-note">La tabla general (récord y puntos) es siempre del partido completo; los filtros recortan las métricas.</p>` : "";
+    sec.insertAdjacentHTML("afterbegin", `<div id="league-ctx-bar" class="ctx-bar-host"></div>${lgNote}<div id="league-tabs" class="tabs-host"></div>`);
+    mountContextBar(document.getElementById("league-ctx-bar"), { competition: _leagueComp, events: true, onChange: () => renderLeague() });
     _drawTabs("league");
     applyTabs(sec, _tab.league);
     syncRoute();
@@ -1660,7 +1662,7 @@ async function renderTeamClutch(teamCode) {
   box.innerHTML = `<div class="card">${_clutchTitle(null)}<p class="empty"><span class="spinner"></span>Calculando cierres...</p></div>`;
   let d;
   try {
-    d = await api.clutchTeam(teamCode, _teamComp);
+    d = await api.clutchTeam(teamCode, _teamComp, { last: _teamLastN || null, ...contextParams() });
   } catch (e) {
     if (req === _clutchReq) box.innerHTML = `<div class="card">${_clutchTitle(null)}<p class="empty below-avg">${e.message || "No se pudieron cargar los cierres"}</p></div>`;
     return;
@@ -2147,20 +2149,26 @@ async function renderTeam(teamCode) {
   }
 }
 
+// Sin tiros: con filtros activos, el mensaje lo dice (no es que el equipo no tire).
+const _noShots = what => activeCount() > 0 ? '<p class="empty">Sin tiros que cumplan estos filtros.</p>' : `<p class="empty">${what}</p>`;
+// Filtros que el mapa no aplica (cuarto, marcador, con/sin jugador, origen, tipo de ataque, oportunidad): se avisa.
+const _shotNote = d => (d?.context?.ignored || []).length
+  ? '<p class="td-muted">Este mapa aplica los filtros de partido y de reloj; no aplica cuarto, marcador, con/sin jugador, origen, tipo de ataque ni oportunidad.</p>' : "";
+
 // Mapa de tiro AGREGADO del equipo (C-03) — usa api.shotZones + shotChart
 function renderTeamShotmapTeam(teamCode) {
   const box = document.getElementById("team-teamshot");
   if (!box) return;
   box.innerHTML = '<div class="card"><p class="empty"><span class="spinner"></span>Cargando mapa de tiro del equipo...</p></div>';
-  api.shotZones({ entity: 'team', id: teamCode, competition: _teamComp, last: _teamLastN || null }).then(shots => {
+  api.shotZones({ entity: 'team', id: teamCode, competition: _teamComp, last: _teamLastN || null, ...contextParams() }).then(shots => {
     if (!shots || !shots.summary?.total_shots) {
-      box.innerHTML = '<div class="card"><p class="empty">Sin tiros registrados para este equipo.</p></div>';
+      box.innerHTML = `<div class="card">${_noShots("Sin tiros registrados para este equipo.")}</div>`;
       return;
     }
     box.innerHTML = `
       <div class="card">
         <div class="card-title">Mapa de tiro del equipo <span style="color:var(--muted2);font-weight:400;text-transform:none;letter-spacing:0">— ${teamCode}</span></div>
-        ${shotChart(shots)}
+        ${shotChart(shots)}${_shotNote(shots)}
       </div>`;
     bindZoneTooltips(box, shots);
   }).catch(() => { box.innerHTML = ""; });
@@ -2173,15 +2181,15 @@ function renderTeamShotmap(teamCode, playerName) {
   box.innerHTML = '<div class="card"><p class="empty"><span class="spinner"></span>Cargando mapa de tiro...</p></div>';
   const playerId = _selectedPlayer()?.id;
   if (!playerId) { box.innerHTML = ""; return; }
-  api.shotZones({ entity: 'player', id: playerId, competition: _teamComp, last: _teamLastN || null }).then(shots => {
+  api.shotZones({ entity: 'player', id: playerId, competition: _teamComp, last: _teamLastN || null, ...contextParams() }).then(shots => {
     if (!shots || !shots.summary?.total_shots) {
-      box.innerHTML = '<div class="card"><p class="empty">Sin tiros registrados para este jugador.</p></div>';
+      box.innerHTML = `<div class="card">${_noShots("Sin tiros registrados para este jugador.")}</div>`;
       return;
     }
     box.innerHTML = `
       <div class="card">
         <div class="card-title">Shot chart por zonas <span style="color:var(--muted2);font-weight:400;text-transform:none;letter-spacing:0">— ${playerName}</span></div>
-        ${shotChart(shots)}
+        ${shotChart(shots)}${_shotNote(shots)}
       </div>`;
     bindZoneTooltips(box, shots);
     box.scrollIntoView({ behavior: "smooth", block: "nearest" });
@@ -2197,7 +2205,7 @@ async function renderTeamOnOff(teamCode, playerName, playerId = null) {
   const box = document.getElementById("team-onoff");
   box.innerHTML = '<div class="card"><p class="empty"><span class="spinner"></span>Calculando ON/OFF...</p></div>';
   try {
-    const r = await api.onoff(teamCode, playerName, { competition: _teamComp });
+    const r = await api.onoff(teamCode, playerName, _teamParams());
 
     box.innerHTML = `
       <div class="card">
@@ -2236,7 +2244,7 @@ async function renderTeamLineup(teamCode, players, playerIds = []) {
   const box = document.getElementById("team-lineup");
   box.innerHTML = '<div class="card"><p class="empty"><span class="spinner"></span>Calculando combinación...</p></div>';
   try {
-    const r = await api.lineup(teamCode, players, { competition: _teamComp });
+    const r = await api.lineup(teamCode, players, _teamParams());
     const lead = (l, key) => l ? `${l.name} (${l[key]})` : "—";
     box.innerHTML = `
       <div class="card">
@@ -2304,8 +2312,9 @@ function _initCompareTabs(force = null) {
     syncRoute();
     if (which === "jugadores" && !pane.dataset.mounted) {
       pane.dataset.mounted = "1";
-      renderComparePlayers(pane, { base: getBase(), initial: comparePlayersFromUrl() });
+      renderComparePlayers(pane, { base: getBase(), initial: comparePlayersFromUrl(), params: contextParams() });
     }
+    _mountCompareBar(which);
   };
   if (!_cmpTabsBound) {
     _cmpTabsBound = true;
@@ -2317,13 +2326,31 @@ function _initCompareTabs(force = null) {
   else if (comparePlayersFromUrl()) show("jugadores");
 }
 
+// Barra de contexto de Comparar (T-03): el mismo contexto para los dos lados. Jugadores aplica también los niveles
+// evento y posesión; equipos y quintetos, el nivel partido (los demás filtros se avisan en la barra).
+function _mountCompareBar(which) {
+  const rerun = () => {
+    if (which === "jugadores") {
+      renderComparePlayers(document.getElementById("cmp-pane-jugadores"), { base: getBase(), initial: comparePlayersFromUrl(), params: contextParams() });
+    } else if (which === "quintetos") {
+      renderCompareLineups(document.getElementById("cmp-pane-quintetos"), { initial: lineupsFromUrl(), params: contextParams(), onSync: _syncLineupsUrl });
+    } else if (document.getElementById("compare-a")?.value && document.getElementById("compare-b")?.value) {
+      document.getElementById("btn-compare")?.click();
+    }
+    _mountCompareBar(which);
+  };
+  mountContextBar(document.getElementById("cmp-ctx-bar"), {
+    competition: document.getElementById("compare-comp")?.value || null, events: which === "jugadores", onChange: rerun,
+  });
+}
+
 // Abre Comparar › Jugadores con dos jugadores ya elegidos (F-08 RF-5 → F-05 RF-9).
 function showComparePlayers(idA, idB) {
   setSection("compare");
   const pane = document.getElementById("cmp-pane-jugadores");
   pane.dataset.mounted = "1";
   _initCompareTabs("jugadores");
-  renderComparePlayers(pane, { base: getBase(), initial: { a: String(idA), b: String(idB) } });
+  renderComparePlayers(pane, { base: getBase(), initial: { a: String(idA), b: String(idB) }, params: contextParams() });
 }
 
 async function renderCompare() {
@@ -2348,7 +2375,7 @@ async function renderCompare() {
     try {
       // Misma competencia para ambos equipos y para el `Ø` (RF-11): los promedios los calcula el servidor
       const comp = document.getElementById("compare-comp")?.value || "";
-      const params = comp ? { competition: comp } : {};
+      const params = { ...(comp ? { competition: comp } : {}), ...contextParams() };
       const [dataA, dataB] = await Promise.all([api.team(codeA, params), api.team(codeB, params)]);
       const avA = dataA.averages, avB = dataB.averages;
       const lg  = dataA.league;
@@ -2760,18 +2787,18 @@ function _renderPlayerContent(main, data) {
     }
 
     // Shot chart — async, non-blocking (C-03: usa api.shotZones + shotChart)
-    api.shotZones({ entity: 'player', id: data.player_id, competition: _playerComp }).then(shots => {
+    api.shotZones({ entity: 'player', id: data.player_id, competition: _playerComp, last: _playerLastN || null, ...contextParams() }).then(shots => {
       const shotCard = document.createElement("div");
       shotCard.className = "card";
       shotCard.dataset.tabs = "tiro";
       if (!shots || !shots.summary?.total_shots) {
-        shotCard.innerHTML = '<p class="empty">Sin tiros registrados para este jugador.</p>';
+        shotCard.innerHTML = _noShots("Sin tiros registrados para este jugador.");
         main.insertBefore(shotCard, main.querySelector(".chart-grid"));
         return;
       }
       shotCard.innerHTML = `
         <div class="card-title">Shot chart por zonas <span style="color:var(--muted2);font-weight:400;text-transform:none;letter-spacing:0">— ${playerName}</span></div>
-        ${shotChart(shots)}`;
+        ${shotChart(shots)}${_shotNote(shots)}`;
       main.insertBefore(shotCard, main.querySelector(".chart-grid"));
       bindZoneTooltips(shotCard, shots);
     }).catch(() => {});
@@ -2835,6 +2862,15 @@ async function renderSearch() {
   });
   const main = document.getElementById("search-main");
   if (_searchTable) { _searchTable.destroy?.(); _searchTable = null; }
+  // Barra de contexto (T-03): jugadores y contextos aplican también los niveles evento y posesión; quintetos y
+  // similares, el nivel partido. Consultas guardadas no la muestra.
+  const barHost = document.getElementById("search-ctx-bar");
+  if (_searchTab === "consultas") barHost.innerHTML = "";
+  else mountContextBar(barHost, {
+    competition: (_searchTab === "contextos" ? _cross.competition : _searchComp) || null,
+    events: _searchTab === "jugadores" || _searchTab === "contextos",
+    onChange: () => { _searchPayload = null; renderSearch(); syncRoute(); },
+  });
   if (_searchTab === "quintetos") {
     const initial = _searchInit || _searchLastParams || {}, stale = _searchStale;
     _searchInit = null; _searchStale = false;
@@ -2933,7 +2969,7 @@ function _searchTeams() {
 }
 
 async function _loadSearchPayload() {
-  _searchPayload = await api.table("search_players", { competition: _searchComp || null });
+  _searchPayload = await api.table("search_players", { competition: _searchComp || null, ...contextParams() });
   _searchColIdx = {};
   _searchPayload.columns.forEach((c, i) => { _searchColIdx[c.key] = i; });
   return _searchPayload;
@@ -3242,6 +3278,7 @@ function renderApp() {
           <button class="filter-pill cmp-tab" data-cmp="jugadores">Jugadores</button>
           <button class="filter-pill cmp-tab" data-cmp="quintetos">Quintetos</button>
         </div>
+        <div id="cmp-ctx-bar" class="ctx-bar-host"></div>
         <div id="cmp-pane-equipos">
         <div class="card">
           <div class="card-title">Comparar equipos</div>
@@ -3274,6 +3311,7 @@ function renderApp() {
       <!-- Search -->
       <div class="section" id="sec-search">
         <div id="search-tabs" class="tabs-host"></div>
+        <div id="search-ctx-bar" class="ctx-bar-host"></div>
         <div id="search-main"><p class="empty"><span class="spinner"></span>Cargando buscador...</p></div>
       </div>
 

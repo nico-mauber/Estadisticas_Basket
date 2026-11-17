@@ -1,3 +1,4 @@
+import dataclasses
 import os
 import secrets
 from datetime import timedelta
@@ -504,11 +505,15 @@ def game_plan_route():
 
 
 def _comp_ctx_or_error():
-    """Contexto con una competencia concreta (líderes y perfil no tienen universo con "todas")."""
+    """Contexto con una competencia concreta (líderes y perfil no tienen universo con "todas"). Aplica los niveles
+    partido, evento y posesión (T-03); con/sin jugador es de un equipo y se informa como ignorado."""
     try:
-        ctx = context.parse_context(request.args)
+        ctx = context.parse_context(request.args, event_level=True)
     except ContextError as e:
         return None, (jsonify(e.payload()), e.status)
+    if ctx.on or ctx.off:
+        ctx = dataclasses.replace(ctx, on=(), off=(), ignored=ctx.ignored + tuple(
+            (p, "no_aplica") for p in ("on", "off") if getattr(ctx, p)))
     if ctx.competition_all or ctx.competition_id is None:
         return None, (jsonify({"error": "Elegí una competencia para ver líderes y perfil.", "code": "parametro_invalido"}), 400)
     return ctx, None
@@ -1431,24 +1436,6 @@ def shot_zones_route():
         return jsonify({"error": "Se requiere el parametro id",
                         "code": "parametro_invalido"}), 400
 
-    # Resolve competition and last from query args
-    try:
-        comp_raw = request.args.get("competition")
-        comp_id = competitions.resolve(comp_raw) if comp_raw else None
-    except CompetitionError as e:
-        return jsonify({"error": str(e)}), e.status
-
-    last_raw = request.args.get("last", "").strip()
-    last = None
-    if last_raw:
-        try:
-            last = int(last_raw)
-            if last < 1:
-                raise ValueError
-        except ValueError:
-            return jsonify({"error": "El parametro last debe ser un entero mayor a 0.",
-                            "code": "parametro_invalido"}), 400
-
     if entity == "team":
         entity_id = entity_id.upper()
         shots_fn = shot_zones._shots_for_team
@@ -1464,19 +1451,24 @@ def shot_zones_route():
             return jsonify({"error": "Jugador no encontrado"}), 404
         shots_fn = shot_zones._shots_for_player
 
-    result = shot_zones.zones_with_stats(entity, entity_id, comp_id, last, shots_fn)
+    # Contexto de T-03: competencia (ausente = todas, como antes), nivel partido y tramo de reloj (A-05 RF-12). Los
+    # filtros de evento y los de posesión que no son de reloj no recortan el mapa: se informan en `ignored`.
+    args = dict(request.args)
+    if not (args.get("competition") or "").strip():
+        args["competition"] = "all"
+    kw = {"team_code": entity_id} if entity == "team" else {"player_id": entity_id}
+    try:
+        ctx = context.parse_context(args, **kw, possession_level=True)
+    except ContextError as e:
+        return jsonify(e.payload()), e.status
+    extra_ignored = [{"param": p, "reason": "no_aplica"} for p in ("origin", "ptype", "chance") if getattr(ctx, p)]
+    ctx = dataclasses.replace(ctx, origin=(), ptype=(), chance=None)
+    comp_id = ctx.competition_id
 
-    # Build context echo
-    labels = competitions.labels()
-    comp_label = labels.get(comp_id, {}).get("label") if comp_id else None
-    result["context"] = {
-        "competition": {"id": comp_id, "label": comp_label},
-        "applied": {"last": last} if last else {},
-        # Sede, rival y descanso (T-03) todavía no recortan los tiros: se informa, no se calla.
-        "ignored": [{"param": p, "reason": "no_aplica"} for p in ("venue", "opponent", "rest")
-                    if request.args.get(p)],
-    }
-
+    result = shot_zones.zones_with_stats(entity, entity_id, comp_id, ctx.last, shots_fn, ctx=ctx)
+    result["context"] = context.context_echo(
+        ctx, games_used=result["summary"]["games"], games_total=result["summary"]["games"], games_excluded={},
+        ignored=extra_ignored, competition_label=metrics_catalog._competition_label(ctx))
     return jsonify(result)
 
 
@@ -1959,6 +1951,20 @@ def _team_pbp_games(team_code: str, comp_id: int | None = None) -> list[dict]:
     return games
 
 
+def _legacy_ctx(team_code: str):
+    """Contexto de T-03 de los endpoints de combinación, ON/OFF y cierres (T-B12/T-B13): competencia ausente = todas
+    (como antes); aplican el nivel partido y los filtros de evento o de posesión se informan en `ignored`."""
+    args = dict(request.args)
+    if not (args.get("competition") or "").strip():
+        args["competition"] = "all"
+    return context.parse_context(args, team_code=team_code)
+
+
+def _legacy_echo(ctx, games_used: int, games_total: int) -> dict:
+    return context.context_echo(ctx, games_used=games_used, games_total=games_total, games_excluded={}, ignored=[],
+                                competition_label=metrics_catalog._competition_label(ctx))
+
+
 @app.route("/api/lineup/<team_code>")
 @login_required
 def lineup_route(team_code: str):
@@ -1982,13 +1988,20 @@ def lineup_route(team_code: str):
         comp_id = competitions.resolve(request.args.get("competition"))   # ausente = todas
     except CompetitionError as e:
         return jsonify({"error": str(e)}), e.status
+    try:
+        ctx = _legacy_ctx(team_code)
+    except ContextError as e:
+        return jsonify(e.payload()), e.status
     games = _team_pbp_games(team_code, comp_id)
     if not games:
         return jsonify({"error": "Equipo no encontrado o sin play-by-play"}), 404
+    total = len(games)
+    games = context.filter_games(games, ctx, team_code)
 
     names = [db.session.get(Player, pid).display_name for pid in pids]
     result = lineups.lineup_stats(identity.canonicalize_pbp_games(games, team_code), team_code, names)
-    result.update({"team_code": team_code, "players": names, "size": len(names)})
+    result.update({"team_code": team_code, "players": names, "size": len(names),
+                   "context": _legacy_echo(ctx, len(games), total)})
     return jsonify(result)
 
 
@@ -2001,9 +2014,15 @@ def onoff_route(team_code: str, player_name: str):
         comp_id = competitions.resolve(request.args.get("competition"))   # ausente = todas
     except CompetitionError as e:
         return jsonify({"error": str(e)}), e.status
+    try:
+        ctx = _legacy_ctx(team_code)
+    except ContextError as e:
+        return jsonify(e.payload()), e.status
     games = _team_pbp_games(team_code, comp_id)
     if not games:
         return jsonify({"error": "Equipo no encontrado o sin play-by-play"}), 404
+    total = len(games)
+    games = context.filter_games(games, ctx, team_code)
 
     pid = _resolve_legacy_player(team_code, player_name)
     player_rows = (_visible(PlayerGameStats.query.filter_by(player_id=pid), PlayerGameStats).all()
@@ -2027,6 +2046,7 @@ def onoff_route(team_code: str, player_name: str):
     result["team_code"] = team_code
     result["player"] = display_name
     result["player_id"] = pid
+    result["context"] = _legacy_echo(ctx, len(games), total)
     return jsonify(result)
 
 
@@ -2058,12 +2078,20 @@ def clutch_team(team_code: str):
     if not game_ids:
         return jsonify({"error": "El equipo no tiene partidos en la competencia seleccionada."}), 404
 
+    try:
+        ctx = _legacy_ctx(team_code)
+    except ContextError as e:
+        return jsonify(e.payload()), e.status
     games = _team_pbp_games(team_code, comp_id)
     if not games:
         return jsonify({"error": "Equipo sin play-by-play. Reimportá sus partidos."}), 404
+    total = len(games)
+    without_pbp = len(game_ids) - len(games)
+    games = context.filter_games(games, ctx, team_code)
 
     result = team_clutch(games, team_code, row.team_name, margin, window_secs,
-                         games_without_pbp=len(game_ids) - len(games))
+                         games_without_pbp=without_pbp)
+    result["context"] = _legacy_echo(ctx, len(games), total)
     comp = competitions.get(comp_id) if comp_id else None
     result["competition"] = {"id": comp.id, "label": competitions.label(comp)} if comp else None
     return jsonify(result)
@@ -2224,9 +2252,14 @@ def league_overview():
         all_rows = [r for r in all_rows if r.game_id in comp_gids]
 
     try:
-        ctx = context.parse_context(request.args)   # sede, rival, descanso y últimos N (T-03): el mapa y el ranking usan la misma población
+        # Sede, rival, descanso, últimos N, cuarto, marcador y filtros de posesión (T-03): el mapa, el ranking y las
+        # métricas de la tabla usan la misma población. Con/sin jugador es de un equipo: acá se informa como ignorado.
+        ctx = context.parse_context(request.args, event_level=True)
     except ContextError as e:
         return jsonify(e.payload()), e.status
+    if ctx.on or ctx.off:
+        ctx = dataclasses.replace(ctx, on=(), off=(), ignored=ctx.ignored + tuple(
+            (p, "no_aplica") for p in ("on", "off") if getattr(ctx, p)))
     pop = population.population("team", comp_id, ctx)
     members_by_id = {m.id: m for m in pop.members}
 
@@ -2283,12 +2316,16 @@ def league_overview():
         ldr = population._leader([m for m in in_members if m.values.get(k) is not None],
                                  k, metrics_catalog.METRICS[k].direction)
         leaders[k] = ({"id": ldr.id, "name": ldr.name, "value": ldr.values[k]} if ldr else None)
+    n_games = len({r.game_id for r in all_rows})
     return jsonify({
         "teams": result,
         "avg": avg,
         "leaders": leaders,
         "population": {"size": pop.size, "criterion": pop.criterion,
                        "context_label": pop.context_label, "reason": pop.reason},
+        # La clasificación (récord, puntos) es siempre del partido completo; los filtros recortan las métricas.
+        "context": context.context_echo(ctx, games_used=n_games, games_total=n_games, games_excluded={}, ignored=[],
+                                        competition_label=metrics_catalog._competition_label(ctx)),
     })
 
 

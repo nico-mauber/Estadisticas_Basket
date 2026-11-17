@@ -1,6 +1,6 @@
 # Progress — T-03: Selector global de contexto (splits)
 
-> **Estado:** 🔶 Nivel PARTIDO, EVENTO (cuarto, marcador, con/sin jugador) y POSESIÓN (origen, tipo, oportunidad, tramo y reloj) en Equipo y Jugador, y `ui.last_competition` (RF-20); faltan Liga/Comparar/Explorar y shot-zones/cierres
+> **Estado:** 🔶 ✅ Implementado: niveles PARTIDO, EVENTO y POSESIÓN en Equipo, Jugador, Liga, Comparar y Explorar; mapa de tiro (partido + reloj), cierres/combinación/ON-OFF (partido) y `ui.last_competition` (RF-20)
 > **Fecha:** 2026-10-18
 > Spec: [spec.md](spec.md) · Plan: [plan.md](plan.md) · Tasks: [tasks.md](tasks.md)
 
@@ -18,7 +18,7 @@
 - [x] T-B10 · `context.dimensions(comp_id)`: 13 entradas (4 disponibles, 4 de evento y 5 de posesión con `available: false`)
 - [x] T-B11 · `GET /api/context/options`
 - [🔶] T-B12 · Handlers migrados (el nivel evento solo lo calcula `team`): `/api/team`, `/api/player`, `/api/rankings`, `/api/metrics/<tipo>` (team, player, lineup, onoff, clutch), `/api/table/*`. `/api/shot-zones` informa `venue/opponent/rest` en `ignored` (`no_aplica`). Pendientes: `/api/league`, `/api/lineup`, `/api/onoff`, `/api/clutch` legacy
-- [ ] T-B13 · Handlers sin nivel evento informan `ignored` (hecho para shot-zones; falta lineup/onoff/clutch legacy)
+- [x] T-B13 · Handlers sin nivel evento informan `ignored` (shot-zones, lineup/onoff/clutch, tablas sin `levels`)
 - [🔶] T-B14 · `StatBundle(entity_type="split")` para el equipo con filtros de evento o de posesión (`poss_filter.team_bundle`, los dos lados) y bundle de jugador filtrado (`poss_filter.player_bundle`); sin endpoint `/api/metrics/split` propio
 - [x] T-B15 · Población con contexto completo: `context_key` incluye sede/rival/descanso; con `opponent` el rival sale de la población; `context_label` acorde
 - [x] T-B16 · Badge de split en posesiones (mín. 15, alta 40) y ajuste a la media con K = 20 (probado en el equipo)
@@ -28,7 +28,7 @@
 - [x] T-D1 · `core/context.js` (URL > sesión; `getContext`, `setContext`, `clearContext`, `contextParams`, `dropInvalid`)
 - [x] T-D2 · `components/context-bar.js` (Sede, Rival, Descanso, "Limpiar filtros", contador)
 - [x] T-D3 · Montada en Equipo y Jugador, con los niveles evento y posesión en ambas (subpanel plegable "Posesión")
-- [ ] T-D4 · Liga / Comparar / Explorar
+- [x] T-D4 · Liga / Comparar / Explorar (2026-11-17)
 - [x] T-D5 · CSS: panel plegable "Filtros (n)" en móvil, sin scroll horizontal
 - [ ] T-D6 · Copy con `t()` (no existe `t()`, F-21)
 - [x] T-E1 · Selección sin partidos: "No hay partidos que cumplan estos filtros." + "Limpiar filtros"; el endpoint de métricas responde 404 `sin_partidos`
@@ -80,10 +80,7 @@
 - ✅ `docs/frontend.md` — barra de contexto
 
 ## Deuda / TODO
-- `/api/metrics/split`.
 - Con/sin jugador solo existe a nivel equipo: la población no se recalcula (`entity_only`).
-- Liga / Comparar / Explorar con la barra; tablas `league_teams`, `search_players`.
-- Contexto en shot-zones, `/api/league` y los endpoints legacy de lineup/onoff/clutch.
 - `ui.last_competition` (T-B17).
 - `t()` para el copy (F-21).
 
@@ -97,3 +94,13 @@
 - **Barra:** en Equipo y Jugador, subpanel plegable "Posesión" (Origen, Tipo de ataque y Tramo de reloj con selección múltiple; Reloj; Oportunidad). La nota de la tabla nombra los filtros que no aplica.
 - **Evidencia:** `t03p_sim.py` 36/36: suma de los 7 orígenes = posesiones completas (160) y sus puntos (180); `origin=robo` = entidad `origin` (14 posesiones); primera + segunda = oportunidades; `chance=segunda` = entidad `chance` (18 pts); `clock=tardio&clock_start=14` = oportunidades que cumplen (A-05 CA-15); jugador con todos los cuartos = su box (37 pts, 51,55 min contra 51,48 del box); suma de cuartos = total; con + sin compañero = total; población de 141 jugadores con `quarter=4`; valores inválidos → 400. `t03p_browser.py` 30/30 (Chromium 1280 y 360 px y en inglés, sin errores de consola ni textos sin traducir).
 - **Desvío:** los paneles de A-02…A-05 (Equipo › Posesión) no recortan sus propias tablas por los filtros de posesión: los informan en `ignored` (`no_aplica`). El cruce de dimensiones lo hace A-06.
+
+## Liga, Comparar, Explorar, mapa de tiro y endpoints viejos (2026-11-17)
+- **Liga:** `/api/league` aplica partido, evento y posesión a la población (valores, ranking, percentiles, `Ø`) y devuelve `context`; la clasificación (récord, puntos) sigue siendo del partido completo (nota en pantalla); `on`/`off` → `ignored`. Tabla `league_teams`, `GET /api/leaders` y `GET /api/competition-profile` con el mismo contexto. Barra con cuarto, marcador y Posesión.
+- **Comparar:** barra arriba de las pestañas; Jugadores con evento y posesión (`api.metrics("player")` con el contexto para los dos), Equipos y Quintetos con nivel partido. Cierra la deuda de F-05 ("el contexto no se aplica a esta comparación").
+- **Explorar:** barra en Jugadores (tabla `search_players` con `levels`), Quintetos, Contextos y Similares.
+- **Mapa de tiro (A-05 RF-12):** `/api/shot-zones` aplica `last`/`venue`/`opponent`/`rest` y `clock`/`clock_start` (tramo de la oportunidad de cada tiro), con percentiles sobre la población con el mismo contexto; el resto va en `ignored` y el mapa lo avisa.
+- **Endpoints viejos (T-B12):** `/api/lineup`, `/api/onoff`, `/api/clutch` aplican el nivel partido y devuelven el eco.
+- **`/api/metrics/split`:** alias de `team` con el contexto de la petición.
+- **Evidencia:** `t03q_sim.py` 25/25 (suma por tramo ≤ total y `clock=tardio` = tiros del tramo; `venue=local` en el mapa; onoff/clutch/lineup con eco; Liga `quarter=4` = valor de población del equipo con el mismo filtro; `league_teams origin=robo` y `search_players quarter=4` = métricas de la entidad; split = team; líderes con `quarter=4`). `t03q_browser.py` 26/26 en Chromium 1280/360 px e inglés (el único texto marcado es una frase del plan de juego que el servidor ya devuelve en inglés).
+

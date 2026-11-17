@@ -137,8 +137,8 @@ export async function renderComparePlayers(el, opts = {}) {
     let A, B;
     try {
       [A, B] = await Promise.all([
-        api.metrics("player", { id: a, base }),
-        api.metrics("player", { id: b, base }),
+        api.metrics("player", { id: a, base, ...(opts.params || {}) }),
+        api.metrics("player", { id: b, base, ...(opts.params || {}) }),
       ]);
     } catch (e) {
       if (req !== _runToken) return;
