@@ -402,3 +402,60 @@ def _build(team, comp_id, ctx, dx, dy, metric, side, limit, color, chance_mode):
         "context": context_mod.context_echo(ctx, games_used=games, games_total=data["games_total"], games_excluded=data["excluded"], ignored=[],
                                             competition_label=repository.competition_labels().get(comp_id) if comp_id is not None else None),
     }
+
+
+# ── Tabla `cross_cells` (T-06, A-06 RF-17) ───────────────────────────────────
+# Una fila por celda con datos de la matriz, con las métricas del cruce (las mismas que se pueden pintar) y el conteo de
+# posesiones u oportunidades; ordenable y exportable. Las celdas son las mismas que dibuja `GET /api/cross`.
+
+def table_rows(treq):
+    import tables
+    p = treq.params
+    try:
+        limit = int(p.get("limit") or LIMIT_DEFAULT)
+    except ValueError:
+        raise tables.TableError(400, "El límite debe ser un número.", "parametro_invalido", {"param": "limit"}) from None
+    try:
+        d = cross_matrix(p.get("team"), treq.comp_id, treq.ctx, dim_x=p.get("dim_x") or "", dim_y=p.get("dim_y") or "",
+                         metric="ppp", side=p.get("side") or "ataque", limit=limit)
+    except CrossError as e:
+        raise tables.TableError(e.status, e.message, e.code) from None
+    xs, ys = d["dims"]["x"]["values"], d["dims"]["y"]["values"]
+    rows = []
+    for i, x in enumerate(xs):
+        for j, y in enumerate(ys):
+            c = d["cells"][i][j]
+            if not c["n"]:
+                continue
+            texts = {"_x": x["label"], "_y": y["label"], "_n": c["n"], "_pts": c["counts"]["pts"]}
+            for m in ("ppp", "efg_pct", "ts_pct", "ppt", "to_pct", "or_pct", "ft_rate"):
+                texts["_" + m] = c["metrics"][m]["value"]
+            rows.append(tables.TableRow(id=f"{x['key']}|{y['key']}", link=None, texts=texts, bundle=None,
+                                        sample=c["sample"], reason_if_null="sin_intentos"))
+    return rows
+
+
+def _table_title(treq):
+    p = treq.params
+    dx, dy = DIMS.get(p.get("dim_x") or ""), DIMS.get(p.get("dim_y") or "")
+    side = " (defensa)" if p.get("side") == "defensa" else ""
+    return f"Contextos cruzados{side} — {dx['label'] if dx else ''} × {dy['label'] if dy else ''} — {_norm(p.get('team'))}"
+
+
+def _register_table():
+    import tables
+    tables.register_table(
+        "cross_cells", entity_type="cross", title="Contextos cruzados", builder=table_rows,
+        required_params=("team", "dim_x", "dim_y"),
+        default_columns=("_x", "_y", "_sample", "_n", "_pts", "_ppp", "_efg_pct", "_to_pct", "_or_pct"),
+        bulk_scopes=(), row_kind="entity",
+        extra_columns=(("_x", "Fila", "text"), ("_y", "Columna", "text"), ("_n", "Posesiones u oportunidades", "value:int"),
+                       ("_pts", "Puntos", "value:int"), ("_ppp", "PPP", "value:dec2"), ("_efg_pct", "eFG%", "value:pct"),
+                       ("_ts_pct", "TS%", "value:pct"), ("_ppt", "PPT", "value:dec2"), ("_to_pct", "TO%", "value:pct"),
+                       ("_or_pct", "OR%", "value:pct"), ("_ft_rate", "FT Rate", "value:pct")),
+        default_sort={"key": "_n", "dir": "desc", "use_adjusted": False},
+        totals_mode="none", avg_mode="none", pct_mode="none", sample_col=True, title_fn=_table_title,
+    )
+
+
+_register_table()

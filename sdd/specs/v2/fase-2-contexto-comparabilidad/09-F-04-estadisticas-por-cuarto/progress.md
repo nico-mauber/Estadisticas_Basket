@@ -1,6 +1,6 @@
 # Progress — F-04: Estadísticas por cuarto
 
-> **Estado:** 🔶 Implementado en Equipo (8 tramos con conjunto estándar, ficha, badge de split, resumen tipo Cierres y desglose por partido exportable); falta la pestaña `momentos` (X-01), la tabla T-06 `period_splits` y migrar Cierres
+> **Estado:** ✅ Implementado en Equipo › Momentos (8 tramos con conjunto estándar, ficha, badge de split, resumen tipo Cierres, desglose por partido exportable, tabla `period_splits` de T-06 y Cierres debajo en la misma pestaña). Cierres conserva su cálculo propio (`/api/clutch`), ver desvío.
 > **Fecha:** 2026-10-20
 
 ## Estado de tareas
@@ -16,7 +16,7 @@
 - [ ] T-B9 · Cierres sigue con su camino propio (`/api/clutch`, tipo `clutch`); no se migró a `events_bundle`
 - [x] T-C1 · `api.periods`
 - [x] T-D1 · `components/period-block.js`: chips, resumen, panel estándar, cambio de tramo sin requests
-- [🔶] T-D2 · Bloque montado en la vista Equipo (`#team-periods`, arriba de Cierres); `window` en la URL. Sin pestaña `momentos` (no hay router X-01)
+- [x] T-D2 · Bloque en la pestaña Momentos de Equipo (`#team-periods`, arriba de Cierres; X-01 creó la pestaña); `window` en la URL
 - [x] T-D3 · Desglose partido a partido con exportación CSV/XLSX/PNG/PDF y metadatos del tramo
 - [x] T-D4 · Chips con scroll horizontal, sin desborde de página a 360 px
 - [🔶] T-E1 · Loading, error con «Reintentar», sin conexión, sin pbp, chip Prórroga deshabilitado con `title`; sin `t()` (F-21)
@@ -58,3 +58,11 @@
 - Tabla T-06 `period_splits`, pestaña `momentos` (X-01), migración de Cierres a `events_bundle`.
 - Conciliar los puntos por cuarto con `period_pts` (F-11 v2).
 - `t()` para el copy (F-21).
+
+## Tabla `period_splits` (2026-11-16)
+- T-B8 ✅ `GET /api/table/period_splits?team=`: 8 tramos + "Partido completo", mismos valores que `GET /api/periods` y `/api/metrics/team` (`f04_table.py` 6/6; Σ cuartos + prórroga = puntos del partido). En la UI, "Comparar todos los tramos" (se carga al abrirlo), exportable; Chromium 1280/360 px e inglés (`tables_browser.py`).
+- Desvío: sin `view=partidos&window=` (el desglose por partido de cada tramo ya se exporta desde "Ver partido a partido") y sin fila de totales (los tramos se superponen).
+
+## Cierre (2026-11-16)
+- La pestaña `momentos` existe desde X-01 y muestra Por tramo y Cierres juntos (CA de navegación verificada en `x01_browser.py`).
+- T-B9 queda como desvío aceptado: Cierres sigue con `/api/clutch` y el tipo `clutch` (sus CA están verificados en C-06/F-06); migrarlo a `events_bundle` no cambia lo que ve el usuario.

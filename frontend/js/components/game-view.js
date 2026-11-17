@@ -1,11 +1,11 @@
 // ── Vista Analizar Partido (F-07 frontend) ──────────────────────────────────
 import { api } from "../api.js";
 import { fmtNumber, fmtMetric, PCT, DEC1, DEC2, isNull, nullDisplay } from "../core/format.js";
-import { metricLabel, groupsFor } from "../core/catalog.js";
+import { metricLabel, groupsFor, loadCatalog } from "../core/catalog.js";
 import { drawScoreTimeline } from "../charts.js";
 import { shotChart, bindZoneTooltips } from "./shot-chart.js";
 import { sampleBadge } from "./sample-badge.js";
-import { createDataTable, dtLoading, dtError, dtEmpty } from "./data-table.js";
+import { createDataTable, dtLoading, dtError, dtEmpty, mountTable } from "./data-table.js";
 import { momentumHTML } from "./momentum-panel.js";
 import { renderClockPanel } from "./clock-panel.js";
 import { mountGameExport } from "./game-report.js";
@@ -30,7 +30,7 @@ const BOX_LABELS = {
 };
 
 const EVENT_TYPE_LABELS = {
-  tiro:"Tiro", tiro_libre:"TL", rebote:"Rebote", asistencia:"Asistencia",
+  tiro:"Tiro de campo", tiro_libre:"TL", rebote:"Rebote", asistencia:"Asistencia",
   perdida:"Pérdida", robo:"Robo", tapon:"Tapón", falta:"Falta",
   cambio:"Cambio", tiempo_muerto:"Timeout", otro:"Otro",
 };
@@ -53,6 +53,14 @@ let _shotsHome = null;
 let _shotsAway = null;
 let _matchupsData = null;
 let _momentumData = null;
+let _opts = {};
+let _shotFilters = { quarter: "", clock: "" };
+let _matchupLevel = "quinteto";
+
+const TAB_IDS = ["resumen", "box", "tiros", "jugadas", "quintetos", "cruces", "momentum", "reloj"];
+// Nodo aparte para que el traductor (F-21) lo encuentre igual en todos los avisos.
+const NO_PBP_HINT = '<span class="gv-hint">Reimportalo desde Datos › Calidad (reprocesar) si FIBA ya publicó el jugada a jugada.</span>';
+const _live = () => _opts.mode === "vivo";
 
 function _destroy() {
   _detail = null;
@@ -63,18 +71,28 @@ function _destroy() {
   _momentumData = null;
   _tab = "resumen";
   _pbpFilters = { types: null, period: null, player: null };
+  _shotFilters = { quarter: "", clock: "" };
+  _matchupLevel = "quinteto";
 }
 
-export async function renderGameView(el, gameId) {
+/** Vista de un partido. `mode: "vivo"` (F-01, CA-2) reutiliza el componente con un `payload` del mismo shape que
+ *  `GET /api/game/<id>`: no descarga nada, oculta exportación y conciliación y dibuja box y quintetos desde el payload.
+ *  `tab` abre esa pestaña ("analizar" = Resumen) y `onTab(tab)` avisa cada cambio para la dirección (CA-3). */
+export async function renderGameView(el, gameId, { mode = "analizar", payload = null, tab = null, onTab = null, onOpenPlayer = null } = {}) {
   _destroy();
   _el = el;
-  el.innerHTML = '<p class="empty"><span class="spinner"></span>Cargando partido…</p>';
-
-  try {
-    _detail = await api.game(gameId);
-  } catch (e) {
-    _blockError(el, e.message || "No se pudo cargar el partido", () => renderGameView(el, gameId));
-    return;
+  _opts = { mode, onTab, onOpenPlayer };
+  if (tab && TAB_IDS.includes(tab)) _tab = tab;
+  if (payload) {
+    _detail = payload;
+  } else {
+    el.innerHTML = '<p class="empty"><span class="spinner"></span>Cargando partido…</p>';
+    try {
+      _detail = await api.game(gameId);
+    } catch (e) {
+      _blockError(el, e.message || "No se pudo cargar el partido", () => renderGameView(el, gameId, { mode, tab: _tab, onTab, onOpenPlayer }));
+      return;
+    }
   }
   if (!_detail || !_detail.game) {
     el.innerHTML = '<p class="empty">Partido no encontrado.</p>';
@@ -86,7 +104,7 @@ export async function renderGameView(el, gameId) {
 function _renderShell() {
   const g = _detail.game;
   const winner = g.home_score > g.away_score ? "home" : (g.away_score > g.home_score ? "away" : null);
-  const ot = g.overtimes ? ` (${g.overtimes} PR)` : "";
+  const ot = g.overtimes ? ` · ${g.overtimes} ${g.overtimes === 1 ? "prórroga" : "prórrogas"}` : "";
 
   const tabs = [
     { id: "resumen", label: "Resumen" },
@@ -101,7 +119,7 @@ function _renderShell() {
 
   _el.innerHTML = `
     <div class="gv-header card">
-      <div class="gv-meta">${esc(g.competition_label)} · ${g.date || ""}${ot}</div>
+      <div class="gv-meta">${esc([g.competition_label, g.date].filter(Boolean).join(" · "))}${ot}</div>
       <div class="gv-score">
         <span class="gv-team ${winner === 'home' ? 'gv-winner' : ''}">${esc(g.home_team)}</span>
         <span class="gv-pts">${g.home_score}</span>
@@ -109,8 +127,8 @@ function _renderShell() {
         <span class="gv-pts">${g.away_score}</span>
         <span class="gv-team ${winner === 'away' ? 'gv-winner' : ''}">${esc(g.away_team)}</span>
       </div>
-      <div class="gv-export" id="gv-export"></div>
-      ${g.needs_reprocess ? '<div class="gv-warn">Partido importado con versión anterior. Reprocesá para obtener datos completos.</div>' : ''}
+      ${_live() ? "" : '<div class="gv-export" id="gv-export"></div>'}
+      ${g.needs_reprocess && !_live() ? '<div class="gv-warn">Partido importado con una versión anterior: reprocesalo desde Datos › Calidad para ver parciales oficiales y rebotes de equipo.</div>' : ''}
     </div>
     <div class="gv-tabs">
       ${tabs.map(t => `<button class="gv-tab${t.id === _tab ? ' active' : ''}" data-tab="${t.id}">${t.label}</button>`).join("")}
@@ -121,12 +139,15 @@ function _renderShell() {
     btn.addEventListener("click", () => {
       _tab = btn.dataset.tab;
       _el.querySelectorAll(".gv-tab").forEach(b => b.classList.toggle("active", b.dataset.tab === _tab));
+      _opts.onTab?.(_tab);
       _renderTab();
     });
   });
-  mountGameExport(document.getElementById("gv-export"),
-    () => ({ detail: _detail, shots: { home: _shotsHome, away: _shotsAway }, matchups: _matchupsData }));
-  _prefetch();
+  if (!_live()) {
+    mountGameExport(document.getElementById("gv-export"),
+      () => ({ detail: _detail, shots: { home: _shotsHome, away: _shotsAway }, matchups: _matchupsData }));
+    _prefetch();
+  }
   _renderTab();
 }
 
@@ -138,9 +159,16 @@ function _prefetch() {
   if (g.has_pbp) api.gameMatchups(id).then(d => { if (_detail?.game.game_id === id) _matchupsData = d; }).catch(() => {});
 }
 
+// Pestañas que necesitan datos del servidor sobre un partido guardado: en vivo se ven al finalizar.
+const _SERVER_TABS = new Set(["tiros", "jugadas", "cruces", "momentum", "reloj"]);
+
 function _renderTab() {
   const body = document.getElementById("gv-body");
   if (!body) return;
+  if (_live() && _SERVER_TABS.has(_tab)) {
+    body.innerHTML = '<p class="empty">Disponible cuando el partido termine y quede guardado.</p>';
+    return;
+  }
   switch (_tab) {
     case "resumen":   return _renderResumen(body);
     case "box":       return _renderBox(body);
@@ -157,7 +185,7 @@ function _renderTab() {
 function _renderReloj(el) {
   const g = _detail.game;
   if (!g.has_pbp) {
-    el.innerHTML = '<p class="empty">Sin jugada a jugada: el reloj de posesión no está disponible.</p>';
+    el.innerHTML = `<p class="empty">Sin jugada a jugada: el reloj de posesión no está disponible. ${NO_PBP_HINT}</p>`;
     return;
   }
   renderClockPanel(el, g.home_code, {
@@ -177,8 +205,11 @@ function _renderResumen(el) {
 
   // Parciales
   if (partials?.length) {
+    const src = _detail.partials_source === "oficial" ? "Fuente: box oficial de FIBA."
+      : "Reconstruidos del jugada a jugada (el box oficial de este partido no trae los parciales).";
     html += `<div class="card gv-partials">
       <div class="card-title">Parciales</div>
+      <p class="td-muted gv-partials-src">${src}</p>
       <table class="gv-partials-table">
         <thead><tr><th></th>${partials.map(p => `<th>${esc(p.label)}</th>`).join("")}<th>Total</th></tr></thead>
         <tbody>
@@ -187,6 +218,10 @@ function _renderResumen(el) {
         </tbody>
       </table>
     </div>`;
+  }
+
+  if (!g.has_pbp) {
+    html += `<div class="card"><p class="empty">Este partido no tiene jugada a jugada: no hay línea de tiempo, rachas ni ratings por período. ${NO_PBP_HINT}</p></div>`;
   }
 
   // Timeline
@@ -204,8 +239,8 @@ function _renderResumen(el) {
     </div>`;
   }
 
-  // Ratings por período
-  if (partials?.length && partials.some(p => p.ratings)) {
+  // Ratings por período (del jugada a jugada)
+  if (g.has_pbp && partials?.length && partials.some(p => p.ratings)) {
     html += `<div class="card">
       <div class="card-title">Ratings por período</div>
       <div class="gv-period-ratings">${_periodRatingsHTML(partials, g)}</div>
@@ -266,7 +301,48 @@ function _stdCompareHTML(std, g) {
 }
 
 // ── Box Score ────────────────────────────────────────────────────────────────
+// Analizar: una tabla completa (T-06 `game_players`) por equipo, ordenable y exportable con la cabecera del partido
+// (CA-12); en vivo, el box se dibuja desde el payload.
+// Tabla T-06 del partido: el catálogo de métricas tiene que estar cargado para las etiquetas de columna (pantalla y CSV).
+const _loadTable = (id, extra) => async () => { await loadCatalog(); return api.table(id, _tableParams(extra)); };
+
+function _tableParams(extra = {}) {
+  const g = _detail.game;
+  return { game: g.game_id, competition: g.competition_id ?? null, base: "total", ...extra };
+}
+
+function _openPlayerFromRow(row) {
+  const m = /^player:(\d+)$/.exec(row.link || "");
+  if (m) _opts.onOpenPlayer?.(Number(m[1]));
+}
+
 function _renderBox(el) {
+  if (_live()) return _renderBoxClassic(el);
+  const g = _detail.game;
+  el.innerHTML = [["home", g.home_code, g.home_team], ["away", g.away_code, g.away_team]].map(([side, code, name]) =>
+    `<div class="card"><div class="card-title">${esc(name)} (${esc(code)})</div><div id="gv-box-${side}"></div></div>`).join("")
+    + `<div id="gv-checks"></div>`;
+  for (const [side, code] of [["home", g.home_code], ["away", g.away_code]]) {
+    mountTable(document.getElementById(`gv-box-${side}`),
+      _loadTable("game_players", { team: code }),
+      { tableId: "game_players", onRowClick: _opts.onOpenPlayer ? _openPlayerFromRow : null });
+  }
+  document.getElementById("gv-checks").innerHTML = _checksHTML(_detail.box?.checks);
+}
+
+function _checksHTML(checks) {
+  if (!checks) return "";
+  const pend = checks.items.find(c => c.check === "players_sum")?.unverified || [];
+  return `<div class="card">
+      <div class="card-title"><span>Conciliación con el box oficial</span> <span aria-hidden="true">${checks.ok ? "✓" : "⚠"}</span></div>
+      <ul class="gv-checks">${checks.items.map(c =>
+        `<li class="${c.ok === true ? 'gv-check-ok' : c.ok === false ? 'gv-check-fail' : 'gv-check-na'}"><span>${esc(c.label || c.check)}</span>: <span>${c.ok === true ? "OK" : c.ok === false ? "No cuadra" : "Sin datos"}</span></li>`
+      ).join("")}</ul>
+      ${pend.length ? `<p class="td-muted">Rebotes y pérdidas de equipo sin verificar: el partido se importó antes de que se guardaran. ${NO_PBP_HINT}</p>` : ""}
+    </div>`;
+}
+
+function _renderBoxClassic(el) {
   const g = _detail.game;
   const box = _detail.box;
   const players = _detail.players || [];
@@ -288,33 +364,31 @@ function _renderBox(el) {
         <table class="gv-box-table search-table">
           <thead><tr><th class="dt-sticky">Jugador</th><th>Min</th>${BOX_COLS.map(c => `<th>${BOX_LABELS[c]}</th>`).join("")}<th>+/−</th></tr></thead>
           <tbody>${sidePlayers.map(p => {
-            if (p.dnp) return `<tr class="dt-row-low"><td class="dt-sticky">${esc(p.player_name)}${p.jersey ? ` #${p.jersey}` : ""}</td><td colspan="${BOX_COLS.length + 2}" class="td-muted">DNP</td></tr>`;
+            if (p.dnp) return `<tr class="dt-row-low"><td class="dt-sticky">${esc(p.player_name)}${p.jersey ? ` #${p.jersey}` : ""}</td><td colspan="${BOX_COLS.length + 2}" class="td-muted">No jugó</td></tr>`;
             return `<tr>
               <td class="dt-sticky">${p.starter ? "★ " : ""}${esc(p.player_name)}${p.jersey ? ` #${p.jersey}` : ""}</td>
               <td>${fmtNumber(p.minutes, 1)}</td>
               ${BOX_COLS.map(c => `<td>${_playerBoxVal(p, c)}</td>`).join("")}
               <td>${p.plus_minus != null ? (p.plus_minus > 0 ? "+" : "") + p.plus_minus : "—"}</td>
             </tr>`;
-          }).join("")}</tbody>
+          }).join("")}${_teamExtraRow(team)}</tbody>
           ${team?.official ? `<tfoot><tr class="dt-foot"><td class="dt-sticky">Total</td><td></td>${BOX_COLS.map(c => `<td>${team.official[c] ?? "—"}</td>`).join("")}<td></td></tr></tfoot>` : ""}
         </table>
       </div>
     </div>`;
   }
 
-  // Conciliación
-  const checks = box?.checks;
-  if (checks) {
-    const ok = checks.ok;
-    html += `<div class="card">
-      <div class="card-title">Conciliación ${ok ? "✓" : "⚠"}</div>
-      <ul class="gv-checks">${checks.items.map(c =>
-        `<li class="${c.ok === true ? 'gv-check-ok' : c.ok === false ? 'gv-check-fail' : 'gv-check-na'}">${esc(c.check)}: ${c.ok === true ? "OK" : c.ok === false ? "Falla" : "N/A"}</li>`
-      ).join("")}</ul>
-    </div>`;
-  }
+  if (!_live()) html += _checksHTML(box?.checks);
 
   el.innerHTML = html;
+}
+
+// Fila "Equipo": rebotes y pérdidas sin jugador (el total oficial los incluye).
+function _teamExtraRow(team) {
+  const x = team?.team_extra;
+  if (!x || x.orb == null) return "";
+  const v = { orb: x.orb, drb: x.drb, trb: (x.orb || 0) + (x.drb || 0), tov: x.tov };
+  return `<tr class="td-muted"><td class="dt-sticky">Equipo (sin jugador)</td><td></td>${BOX_COLS.map(c => `<td>${v[c] ?? ""}</td>`).join("")}<td></td></tr>`;
 }
 
 function _playerBoxVal(p, col) {
@@ -326,37 +400,77 @@ function _playerBoxVal(p, col) {
 }
 
 // ── Tiros ────────────────────────────────────────────────────────────────────
+// Filtros de cuarto y tramo del reloj de posesión (A-05). Los tiros sin tramo (posesión incompleta) se informan
+// aparte y nunca se cuentan como "temprano" (CA-6).
+const CLOCK_LABELS = { temprano: "Temprano", medio: "Medio", tardio: "Tardío" };
+
+function _shotParams(code) {
+  const p = { team: code };
+  if (_shotFilters.quarter) p.quarter = _shotFilters.quarter;
+  if (_shotFilters.clock) p.clock = _shotFilters.clock;
+  return p;
+}
+
+function _shotSummary(d) {
+  const s = d?.summary;
+  if (!s) return "";
+  const parts = [`${fmtNumber(s.attempts, 0)} intentos`, `${fmtNumber(s.made, 0)} convertidos`];
+  if (s.attempts) parts.push(`eFG% ${PCT(s.efg_pct)}`, `PPT ${DEC2(s.ppt)}`);
+  const nb = s.no_band ? `<span class="gv-noband" title="Tiros de posesiones incompletas: no se asignan a ningún tramo">${fmtNumber(s.no_band, 0)} sin tramo</span>${_shotFilters.clock ? ' <span class="gv-noband">(fuera del filtro)</span>' : ""}` : "";
+  const ign = (d.ignored || []).some(i => i.param === "clock") ? '<span class="td-muted"> · Sin jugada a jugada: el filtro de tramo no se aplica.</span>' : "";
+  return `<p class="td-muted gv-shot-sum">${parts.join(" · ")}${nb ? " · " + nb : ""}${ign}</p>`;
+}
+
 async function _renderTiros(el) {
   const g = _detail.game;
-  el.innerHTML = '<p class="empty"><span class="spinner"></span>Cargando tiros…</p>';
+  const filtered = !!(_shotFilters.quarter || _shotFilters.clock);
+  const qOpts = [["", "Todos los cuartos"], ["1", "1.er cuarto"], ["2", "2.º cuarto"], ["3", "3.er cuarto"], ["4", "4.º cuarto"]]
+    .concat(g.overtimes ? [["pr", "Prórroga"]] : []);
+  const cOpts = [["", "Todo el reloj"], ...Object.entries(CLOCK_LABELS)];
+  el.innerHTML = `
+    <div class="gv-shot-filters">
+      <label>Cuarto <select id="gv-shot-q">${qOpts.map(([v, l]) => `<option value="${v}"${v === _shotFilters.quarter ? " selected" : ""}>${l}</option>`).join("")}</select></label>
+      <label>Tramo del reloj <select id="gv-shot-c"${g.has_pbp ? "" : " disabled"}>${cOpts.map(([v, l]) => `<option value="${v}"${v === _shotFilters.clock ? " selected" : ""}>${l}</option>`).join("")}</select></label>
+      ${g.has_pbp ? "" : '<span class="td-muted">Sin jugada a jugada no hay tramo del reloj.</span>'}
+    </div>
+    <div id="gv-shots-body"><p class="empty"><span class="spinner"></span>Cargando tiros…</p></div>`;
+  const onChange = () => {
+    _shotFilters = { quarter: document.getElementById("gv-shot-q").value, clock: document.getElementById("gv-shot-c").value };
+    _renderTiros(el);
+  };
+  document.getElementById("gv-shot-q").addEventListener("change", onChange);
+  document.getElementById("gv-shot-c").addEventListener("change", onChange);
 
+  const body = document.getElementById("gv-shots-body");
+  let home, away;
   try {
-    const [home, away] = await Promise.all([
-      _shotsHome || api.gameShots(g.game_id, { team: g.home_code }),
-      _shotsAway || api.gameShots(g.game_id, { team: g.away_code }),
+    [home, away] = await Promise.all([
+      !filtered && _shotsHome ? _shotsHome : api.gameShots(g.game_id, _shotParams(g.home_code)),
+      !filtered && _shotsAway ? _shotsAway : api.gameShots(g.game_id, _shotParams(g.away_code)),
     ]);
-    _shotsHome = home;
-    _shotsAway = away;
+    if (!filtered) { _shotsHome = home; _shotsAway = away; }
   } catch (e) {
     if (_tab !== "tiros") return;
-    _blockError(el, e.message || "No se pudo cargar los tiros", () => _renderTiros(el));
+    _blockError(body, e.message || "No se pudieron cargar los tiros", () => _renderTiros(el));
     return;
   }
-  if (_tab !== "tiros") return;
+  if (_tab !== "tiros" || !document.getElementById("gv-shots-body")) return;
 
-  el.innerHTML = `
+  body.innerHTML = `
     <div class="gv-shots-row">
       <div class="card gv-shot-card">
         <div class="card-title">${esc(g.home_team)}</div>
+        ${_shotSummary(home)}
         <div id="gv-shot-home"></div>
       </div>
       <div class="card gv-shot-card">
         <div class="card-title">${esc(g.away_team)}</div>
+        ${_shotSummary(away)}
         <div id="gv-shot-away"></div>
       </div>
     </div>`;
 
-  for (const [data, id] of [[_shotsHome, "gv-shot-home"], [_shotsAway, "gv-shot-away"]]) {
+  for (const [data, id] of [[home, "gv-shot-home"], [away, "gv-shot-away"]]) {
     const wrap = document.getElementById(id);
     if (!wrap || !data) continue;
     wrap.innerHTML = shotChart(data, { colorBy: "none" });
@@ -368,7 +482,7 @@ async function _renderTiros(el) {
 async function _renderJugadas(el) {
   const g = _detail.game;
   if (!g.has_pbp) {
-    el.innerHTML = '<p class="empty">Este partido no tiene play-by-play.</p>';
+    el.innerHTML = `<p class="empty">Este partido no tiene jugada a jugada. ${NO_PBP_HINT}</p>`;
     return;
   }
 
@@ -399,7 +513,7 @@ async function _renderJugadas(el) {
 
   el.innerHTML = `
     <div class="card">
-      <div class="card-title">Jugada a jugada (${pbp.total} eventos, ${pbp.count} filtrados)</div>
+      <div class="card-title">Jugada a jugada <span class="td-muted gv-pbp-count" id="gv-pbp-count"></span></div>
       <div class="gv-pbp-filters">
         <select id="gv-pbp-period"><option value="">Período (todos)</option>${periods.map(p => `<option value="${p}">${p}</option>`).join("")}</select>
         <select id="gv-pbp-type"><option value="">Tipo (todos)</option>${typeGroups.map(tg => `<option value="${tg.key}">${EVENT_TYPE_LABELS[tg.key] || tg.key} (${tg.count})</option>`).join("")}</select>
@@ -432,6 +546,9 @@ function _renderPbpTable(events) {
   const el = document.getElementById("gv-pbp-table");
   if (!el) return;
   const g = _detail.game;
+  const total = _pbpData?.events?.length || 0;
+  const cnt = document.getElementById("gv-pbp-count");
+  if (cnt) cnt.textContent = events.length === total ? `(${fmtNumber(total, 0)} eventos)` : `(${fmtNumber(events.length, 0)} de ${fmtNumber(total, 0)} eventos)`;
 
   if (!events.length) {
     el.innerHTML = '<p class="empty">Sin eventos para este filtro.</p>';
@@ -457,12 +574,37 @@ function _renderPbpTable(events) {
     ${events.length > 200 ? `<p class="td-muted" style="text-align:center;margin-top:8px">Mostrando 200 de ${events.length} eventos</p>` : ""}`;
 }
 
+// Subtipos de FIBA en castellano (el código crudo, p. ej. "drivinglayup", no se muestra).
+const SUBTYPE_LABELS = {
+  layup: "bandeja", drivinglayup: "bandeja en penetración", reverselayup: "bandeja reversa", tipinlayup: "palmeo",
+  jumpshot: "en suspensión", pullupjumpshot: "tras bote", floatingjumpshot: "flotadora", turnaroundjumpshot: "en giro",
+  stepbackjumpshot: "step-back", fadeaway: "cayendo hacia atrás", hookshot: "gancho", dunk: "volcada", alleyoop: "alley-oop",
+  eurostep: "eurostep", personal: "personal", technical: "técnica", unsportsmanlike: "antideportiva",
+  benchTechnical: "técnica al banco", coachTechnical: "técnica al entrenador", disqualifying: "descalificante",
+  badpass: "mal pase", ballhandling: "manejo de balón", travel: "pasos", outofbounds: "fuera de la cancha",
+  backcourt: "campo atrás", doubledribble: "doble dribling", "24sec": "24 segundos", "8sec": "8 segundos",
+  "5sec": "5 segundos", "3sec": "3 segundos", in: "entra", out: "sale", full: "completo", won: "ganado", lost: "perdido",
+  heldball: "balón retenido", startperiod: "inicio de período", start: "inicio", end: "fin",
+};
+const SUBTYPE_BY_ACTION = {
+  "rebound:offensive": "ofensivo", "rebound:defensive": "defensivo", "foul:offensive": "ofensiva",
+  "turnover:offensive": "falta ofensiva", "headcoachchallenge:foul": "falta",
+};
+function _subLabel(ev) {
+  const st = ev.sub_type;
+  if (!st) return "";
+  const ft = /^(\d)of(\d)$/.exec(st);
+  if (ft) return `${ft[1]} de ${ft[2]}`;
+  return SUBTYPE_BY_ACTION[`${ev.action_type}:${st}`] || SUBTYPE_LABELS[st] || st;
+}
+
 function _pbpDesc(ev) {
   const parts = [];
   if (ev.player) parts.push(`<strong>${esc(ev.player)}</strong>`);
   const label = EVENT_TYPE_LABELS[ev.type_group] || ev.action_type || "";
-  parts.push(label);
-  if (ev.sub_type) parts.push(`(${esc(ev.sub_type)})`);
+  parts.push(`<span>${esc(label)}</span>`);
+  const sub = _subLabel(ev);
+  if (sub) parts.push(`<span class="td-muted">(${esc(sub)})</span>`);
   if (ev.success === true) parts.push("✓");
   if (ev.success === false) parts.push("✗");
   return parts.join(" ");
@@ -471,12 +613,22 @@ function _pbpDesc(ev) {
 // ── Quintetos ────────────────────────────────────────────────────────────────
 function _renderQuintetos(el) {
   const g = _detail.game;
-  const lineups = _detail.lineups;
-
-  if (!lineups) {
-    el.innerHTML = '<p class="empty">Sin datos de quintetos (requiere play-by-play).</p>';
+  if (!g.has_pbp && !_detail.lineups) {
+    el.innerHTML = `<p class="empty">Sin quintetos: este partido no tiene jugada a jugada. ${NO_PBP_HINT}</p>`;
     return;
   }
+  if (_live()) return _renderQuintetosClassic(el);
+  el.innerHTML = [["home", g.home_code, g.home_team], ["away", g.away_code, g.away_team]].map(([side, code, name]) =>
+    `<div class="card"><div class="card-title">${esc(name)} (${esc(code)})</div><div id="gv-lu-${side}"></div></div>`).join("");
+  for (const [side, code] of [["home", g.home_code], ["away", g.away_code]]) {
+    mountTable(document.getElementById(`gv-lu-${side}`),
+      _loadTable("game_lineups", { team: code }), { tableId: "game_lineups", collapsedRows: 8 });
+  }
+}
+
+function _renderQuintetosClassic(el) {
+  const g = _detail.game;
+  const lineups = _detail.lineups;
 
   let html = "";
   for (const side of ["home", "away"]) {
@@ -515,51 +667,36 @@ function _renderQuintetos(el) {
 }
 
 // ── Cruces (Matchups) ────────────────────────────────────────────────────────
-async function _renderCruces(el) {
+// Tabla completa (T-06 `game_matchups`) por nivel. Un cruce mide lo que pasó mientras esos jugadores coincidieron en
+// cancha: no dice quién defendió a quién (CA-14).
+const MATCHUP_LEVELS = [
+  ["quinteto", "Quinteto vs quinteto", {}],
+  ["jugador", "Jugador vs jugador", {}],
+  ["jugador_quinteto", "Jugador local vs quinteto visitante", { side: "home" }],
+  ["jugador_quinteto_away", "Jugador visitante vs quinteto local", { side: "away", level: "jugador_quinteto" }],
+];
+
+function _renderCruces(el) {
   const g = _detail.game;
   if (!g.has_pbp) {
-    el.innerHTML = '<p class="empty">Sin datos de cruces (requiere play-by-play).</p>';
+    el.innerHTML = `<p class="empty">Sin cruces: este partido no tiene jugada a jugada. ${NO_PBP_HINT}</p>`;
     return;
   }
-
-  el.innerHTML = '<p class="empty"><span class="spinner"></span>Cargando cruces…</p>';
-
-  try {
-    if (!_matchupsData) _matchupsData = await api.gameMatchups(g.game_id);
-  } catch (e) {
-    if (_tab !== "cruces") return;
-    _blockError(el, e.message || "No se pudo cargar los cruces", () => _renderCruces(el));
-    return;
-  }
-  if (_tab !== "cruces") return;
-
-  const data = _matchupsData;
-  const matchups = data.rows || [];
-  if (!matchups.length) {
-    el.innerHTML = `<p class="empty">${data.reason === "titulares_incompletos" ? "Titulares incompletos: no se pueden calcular cruces." : "Sin cruces disponibles."}</p>`;
-    return;
-  }
-
-  const rows = matchups.slice(0, 50).map(mu => `<tr>
-    <td>${esc(mu.own_name || "—")}</td>
-    <td>${esc(mu.opp_name || "—")}</td>
-    <td>${fmtNumber(mu.possessions, 1)}</td>
-    <td>${mu.pts_for != null ? fmtNumber(mu.pts_for, 0) : "—"}</td>
-    <td>${mu.oer != null ? DEC2(mu.oer) : "—"}</td>
-    <td>${fmtNumber(mu.minutes, 1)}</td>
-    <td>${sampleBadge(mu.sample, { compact: true })}</td>
-  </tr>`).join("");
-
+  const cur = MATCHUP_LEVELS.find(l => l[0] === _matchupLevel) || MATCHUP_LEVELS[0];
   el.innerHTML = `<div class="card">
-    <div class="card-title">Cruces quinteto (${matchups.length})</div>
-    <div class="dt-table-wrap">
-      <table class="gv-matchup-table search-table">
-        <thead><tr><th>Local</th><th>Visitante</th><th>Pos</th><th>PTS</th><th>OER</th><th>Min</th><th>Muestra</th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table>
-    </div>
-    ${matchups.length > 50 ? `<p class="td-muted" style="text-align:center;margin-top:8px">Mostrando 50 de ${matchups.length}</p>` : ""}
+    <div class="card-title">Cruces</div>
+    <p class="td-muted gv-matchup-legend">Coincidencia en cancha: cada fila suma lo que hizo cada lado mientras esos jugadores estuvieron juntos en la cancha. No indica quién defendió a quién. Las filas en gris tienen muestra baja.</p>
+    <div class="pb-chips gv-matchup-levels" role="group" aria-label="Nivel">${MATCHUP_LEVELS.map(([id, label]) =>
+      `<button type="button" class="filter-pill${id === cur[0] ? " active" : ""}" data-level="${id}">${label}</button>`).join("")}</div>
+    <div id="gv-matchups-dt"></div>
   </div>`;
+  el.querySelectorAll(".gv-matchup-levels .filter-pill").forEach(btn => btn.addEventListener("click", () => {
+    _matchupLevel = btn.dataset.level;
+    _renderCruces(el);
+  }));
+  const extra = { level: cur[2].level || cur[0], ...(cur[2].side ? { side: cur[2].side } : {}) };
+  mountTable(document.getElementById("gv-matchups-dt"),
+    _loadTable("game_matchups", extra), { tableId: "game_matchups", collapsedRows: 12 });
 }
 
 // ── Momentum (F-02): estado al cierre ────────────────────────────────────────

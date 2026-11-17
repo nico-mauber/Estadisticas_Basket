@@ -306,3 +306,169 @@ def player_second_chance(player_id, comp_id, ctx):
                     "reconciled": True},
         "context": transition_mod._echo(ctx, used, total, excluded),
     }
+
+
+# ── Entidad `chance` (T-05) y tabla `team_second_chance` (T-06) ──────────────
+# Cada oportunidad se mide con los eventos de su tramo (desde su evento inicial hasta el que abre la siguiente). Los
+# rebotes se asignan por estructura y no por evento: el rebote ofensivo que abre la oportunidad siguiente es el
+# desenlace de ESTA (RO = 1 si hubo otra oportunidad) y el rebote defensivo del rival cierra la última si terminó en
+# fallo. Así PPP (puntos / jugadas), OER y OR% de las oportunidades quedan bien definidos.
+
+CHANCE_KINDS = ("primera", "segunda")
+CHANCE_LABELS = {"primera": "Primera oportunidad", "segunda": "Segunda oportunidad"}
+SECTIONS = ("desenlaces", "origen", "jugadores")
+_SHOT_TYPES = ("2pt", "3pt", "freethrow")
+
+
+def _chance_items(team_code, comp_id, ctx, side):
+    """[(posesión, oportunidad, caja propia, caja rival, segundos)] de las posesiones completas del lado."""
+    import lineups
+    _mine, used, total, excluded, per_game = transition_mod._selection(team_code, comp_id, ctx, side)
+    items = []
+    for g, ps in per_game:
+        order = sorted(g.get("events") or [], key=lambda e: e.get("action_number") or 0)
+        idx = {e.get("action_number"): i for i, e in enumerate(order)}
+        for p in ps:
+            if (p.team if side == "ataque" else p.opp) != team_code or p.incomplete:
+                continue
+            for k, ch in enumerate(p.chances):
+                lo = idx.get(ch.start_event)
+                if lo is None:
+                    continue
+                nxt = p.chances[k + 1] if k + 1 < len(p.chances) else None
+                if nxt is not None and nxt.start_event in idx:
+                    hi = idx[nxt.start_event]
+                else:
+                    hi = idx[p.end_event] + 1 if p.end_event in idx else len(order)
+                span = [e for e in order[lo:hi] if e.get("action_type") != "rebound"]
+                own, opp = lineups._agg(span, p.team), lineups._agg(span, p.opp)
+                shots = [e for e in span if e.get("team_code") == p.team and e.get("action_type") in _SHOT_TYPES]
+                missed_last = bool(shots) and shots[-1].get("success") != 1
+                own["orb"], own["drb"] = (1 if nxt is not None else 0), 0
+                opp["orb"], opp["drb"] = 0, (1 if nxt is None and missed_last else 0)
+                end_clock = nxt.start_clock if nxt is not None else p.end_clock
+                secs = (ch.start_clock - end_clock if ch.start_clock is not None and end_clock is not None
+                        and ch.start_clock >= end_clock else 0)
+                items.append((p, ch, own, opp, secs))
+    return items, used, total, excluded
+
+
+def _group_bundle(team_code, items, entity_id, name, meta):
+    import lineups
+    from stats_engine import StatBundle
+    own = lineups._sum_boxes([i[2] for i in items])
+    opp = lineups._sum_boxes([i[3] for i in items])
+    own["blk_received"], opp["blk_received"] = opp.get("blk", 0), own.get("blk", 0)
+    own["plus_minus"] = opp["plus_minus"] = None
+    seconds = sum(i[4] for i in items)
+    return StatBundle(
+        entity_type="split", entity_id=entity_id, name=name, own=own, opp=opp, team=None,
+        games=len({i[0].game_id for i in items}), minutes=seconds / 60, team_minutes=None, seconds=seconds,
+        on_court=None, shots=None, possessions_counted=len(items), null_reasons={},
+        meta={"team_code": team_code, "split": True, "poss_exact": True, **meta})
+
+
+def chance_bundle(team_code, kind, comp_id, ctx, side="ataque"):
+    """`StatBundle` de las primeras o segundas oportunidades (n ≥ 2) del equipo; `None` si no hay ninguna."""
+    def build():
+        items, _used, total, excluded = _chance_items(team_code, comp_id, ctx, side)
+        group = [i for i in items if (i[1].n >= 2) == (kind == "segunda")]
+        if not group:
+            return None
+        return _group_bundle(team_code, group, f"{team_code}:{kind}", f"{team_code} · {CHANCE_LABELS[kind]}",
+                             {"chance": kind, "side": side, "variant": f"{kind}:{side}",
+                              "games_total": total, "games_excluded": excluded})
+    k = ("chance_bundle", team_code, kind, comp_id, context_mod.context_key(ctx), side)
+    return repository.memo(k, build)
+
+
+def _chance_loader(req):
+    import metrics_catalog
+    team_code, _, kind = str(req.entity_id).partition(":")
+    if kind not in CHANCE_KINDS:
+        raise metrics_catalog.MetricsError("Oportunidad inválida. Usá primera o segunda.", 400, "parametro_invalido")
+    side = (req.params or {}).get("side") or "ataque"
+    if side not in SIDES:
+        raise metrics_catalog.MetricsError("El lado debe ser ataque o defensa.", 400, "parametro_invalido")
+    b = chance_bundle(team_code.upper(), kind, req.comp_id, req.ctx, side)
+    return [b] if b is not None else []
+
+
+def all_chance_bundles(comp_id, ctx, variant=None):
+    """Población del tipo `chance`: todos los equipos en la misma oportunidad y lado (`variant` = `tipo:lado`)."""
+    if not variant or ":" not in str(variant):
+        return []
+    kind, side = str(variant).split(":", 1)
+    if kind not in CHANCE_KINDS or side not in SIDES:
+        return []
+    out = []
+    for code in sorted({r["team_code"] for r in repository.team_game_rows(comp_id).values()}):
+        b = chance_bundle(code, kind, comp_id, ctx, side)
+        if b is not None:
+            out.append(b)
+    return out
+
+
+def table_rows(treq):
+    """Builder de `team_second_chance` (RF-18): una fila por desenlace, por origen del rebote o por jugador que
+    capturó el rebote ofensivo, cada una con el conjunto estándar de esas segundas oportunidades."""
+    import tables
+    team_code = (treq.params.get("team") or "").upper()
+    side = treq.params.get("side") or "ataque"
+    section = treq.params.get("section") or "desenlaces"
+    if side not in SIDES:
+        raise tables.TableError(400, "El lado debe ser ataque o defensa.", "parametro_invalido", {"param": "side"})
+    if section not in SECTIONS:
+        raise tables.TableError(400, "Sección inválida: usá desenlaces, origen o jugadores.", "parametro_invalido",
+                                {"param": "section"})
+    if section == "jugadores" and side != "ataque":
+        raise tables.TableError(400, "La sección jugadores es solo de ataque.", "parametro_invalido", {"param": "side"})
+    items, _u, _t, _e = _chance_items(team_code, treq.comp_id, treq.ctx, side)
+    second = [i for i in items if i[1].n >= 2]
+    total = len(second)
+    if section == "desenlaces":
+        groups = [(key, OUTCOME_LABELS[key], [i for i in second if i[1].outcome == key]) for key in OUTCOMES]
+    elif section == "origen":
+        groups = [(key, SOURCE_LABELS[key], [i for i in second if i[1].source == key]) for key in SOURCES]
+        groups = [g for g in groups if g[0] != "desconocido" or g[2]]
+    else:
+        by = {}
+        for i in second:
+            by.setdefault(i[1].rebounder_id, []).append(i)
+        groups = [(str(pid), _name(pid), grp) for pid, grp in by.items() if pid is not None]
+        groups.sort(key=lambda g: (-len(g[2]), g[1]))
+        if None in by:
+            groups.append(("equipo", "Rebote de equipo", by[None]))
+    rows = []
+    for key, label, grp in groups:
+        b = _group_bundle(team_code, grp, f"{team_code}:{key}", label, {"chance": "segunda", "side": side}) if grp else None
+        badge = sample.sample_level("origin", n=len(grp), unit="posesiones", team_poss=total)
+        share = "—" if not total else f"{len(grp) / total * 100:.1f}".replace(".", ",") + " %"
+        rows.append(tables.TableRow(
+            id=f"{team_code}:{section}:{key}", link=f"player:{key}" if section == "jugadores" and key.isdigit() else None,
+            texts={"_name": label, "_share": share}, bundle=b, sample=badge, reason_if_null="sin_intentos"))
+    return rows
+
+
+_TABLE_TITLES = {"desenlaces": "por desenlace", "origen": "por origen del rebote", "jugadores": "por jugador"}
+
+
+def _register():
+    import metrics_catalog
+    import tables
+    metrics_catalog.register_entity("chance", _chance_loader, enumerator=all_chance_bundles)
+    tables.register_table(
+        "team_second_chance", entity_type="chance", title="Segunda oportunidad", builder=table_rows,
+        required_params=("team",),
+        default_columns=("_name", "_sample", "possessions_counted", "_share", "pts", "ppp", "efg_pct", "to_pct",
+                         "ft_rate", "or_pct"),
+        bulk_scopes=("team",), row_kind="entity",
+        extra_columns=(("_name", "Grupo", "text"), ("_share", "% de las 2.ª oport.", "text")),
+        default_sort=None, totals_mode="sum", avg_mode="none", pct_mode="none",
+        title_fn=lambda treq: (
+            f"Segunda oportunidad{' del rival' if treq.params.get('side') == 'defensa' else ''} "
+            f"{_TABLE_TITLES.get(treq.params.get('section') or 'desenlaces', '')} — {(treq.params.get('team') or '').upper()}"),
+    )
+
+
+_register()

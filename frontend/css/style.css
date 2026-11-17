@@ -1265,6 +1265,11 @@ tbody tr.fuera-poblacion { opacity: .6; }
 
 .gv-shots-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .gv-shot-card { min-width: 0; }
+.gv-shot-filters { display: flex; gap: 8px 16px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; font-size: 13px; }
+.gv-shot-filters select { margin-left: 4px; padding: 4px 8px; border-radius: 6px; background: var(--card); border: 1px solid var(--border); color: var(--text); font-size: 13px; }
+.gv-shot-sum { margin: 0 0 8px; font-size: 12px; }
+.gv-noband { color: var(--warn, #b7791f); }
+.gv-partials-src, .gv-matchup-legend { margin: 0 0 8px; font-size: 12px; }
 
 .gv-pbp-filters { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
 .gv-pbp-filters select { padding: 4px 8px; border-radius: 6px; background: var(--card);

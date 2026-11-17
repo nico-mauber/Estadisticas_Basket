@@ -37,7 +37,7 @@ import { renderMyTeam } from "./components/my-team.js";
 import { renderLineupSuggestions } from "./components/lineup-suggestions.js";
 import { renderFixtures } from "./components/fixtures-manager.js";
 import { homeTeamButton, followButton } from "./components/my-team-controls.js";
-import { loadPrefs, getPref } from "./core/prefs.js";
+import { loadPrefs, getPref, setPref } from "./core/prefs.js";
 import { initI18n, getLanguage, onLanguageChange, deviceLanguage, isLanguage, tText } from "./core/i18n.js";
 import { mountLanguageSelector, chooseLanguage } from "./components/language-selector.js";
 import { renderSavedQueries, saveQueryDialog } from "./components/saved-queries.js";
@@ -260,7 +260,7 @@ function _fourFactorsCard(av, teamName) {
   return `
     <div class="card">
       <div class="map-header">
-        <div class="card-title" style="margin:0">Four Factors <span style="color:var(--muted2);font-weight:400;text-transform:none;letter-spacing:0">— ${teamName} vs Rival</span></div>
+        <div class="card-title" style="margin:0">Four Factors <span style="color:var(--muted2);font-weight:400;text-transform:none;letter-spacing:0">— <span class="notranslate">${teamName}</span> <span>vs Rival</span></span></div>
         <span class="xm-host" data-xm="four-factors"></span>
       </div>
       <div class="table-wrap">
@@ -344,6 +344,7 @@ let _lastSection = "import";
 let _routing = false;      // true mientras se aplica una dirección: la vista no la vuelve a escribir (X-01)
 let _routeQuery = null;    // competencia y últimos N de la dirección abierta; los consume la carga de equipo o jugador
 let _gameId = null;        // partido abierto en Partido (para la dirección)
+let _gameTab = null;       // pestaña de ese partido (resumen, box, tiros…)
 let _trendsState = { team: {}, player: {} };   // métricas, media móvil y N de Evolución y tendencias (F-18)
 let _similar = { position: "", min: "" };   // filtros de Jugador › Similares (A-09)
 let _leaders = { metric: "", min: "" };   // métrica y mínimo de minutos de Liga › Líderes (F-14)
@@ -382,6 +383,7 @@ function _renderTrends(section) {
   const st = _trendsState[section];
   renderTrends(document.getElementById(`${section}-trends`), section, id, {
     params: section === "team" ? _teamParams() : _playerParams(), base: getBase(), ...st,
+    entityName: section === "team" ? _teamData?.team_name : _playerData?.player,
     onChange: s => { _trendsState[section] = { metrics: s.metrics, ma: s.ma, lastN: s.lastN }; _renderTrends(section); },
   });
 }
@@ -503,7 +505,7 @@ function currentRoute() {
   else if (section === "import") r.tab = _importTab;
   else if (section === "compare") r.tab = _cmpTab();
   else if (section === "search") r.tab = _searchTab;
-  else if (section === "partido") r.id = _gameId;
+  else if (section === "partido") { r.id = _gameId; r.tab = _gameId ? (_gameTab || "analizar") : null; }
   return r;
 }
 
@@ -605,6 +607,7 @@ async function applyRoute({ initial = false } = {}) {
         const fromUrl = _searchParamsFromUrl();
         if (t === "quintetos" && Object.keys(fromUrl).length) _searchInit = fromUrl;
         if (t === "contextos" && !fromUrl.team && (fromUrl.competition || fromUrl.last)) _cross = { ..._cross, competition: fromUrl.competition || "", last: fromUrl.last || "" };
+        if (t === "similares" && fromUrl.player) _simX = { ..._simX, team: (fromUrl.team || "").toUpperCase(), player: fromUrl.player };
         if (t === "contextos" && fromUrl.team) _cross = { team: fromUrl.team.toUpperCase(), side: fromUrl.side || "ataque", dimX: fromUrl.dim_x || "tramo", dimY: fromUrl.dim_y || "origen",
                                                           metric: fromUrl.metric || "ppp", limit: Number(fromUrl.limit) || 8, color: fromUrl.color || "", competition: fromUrl.competition || "", last: fromUrl.last || "" };
         setSection("search", { sync: false });
@@ -621,7 +624,7 @@ async function applyRoute({ initial = false } = {}) {
         renderMyTeamView();
         break;
       case "partido":
-        if (p.id && /^\d+$/.test(p.id)) showGame(p.id); else setSection("partido", { sync: false });
+        if (p.id && /^\d+$/.test(p.id)) showGame(p.id, p.tab); else setSection("partido", { sync: false });
         break;
       case "config":
         setSection("config", { sync: false });
@@ -1512,12 +1515,22 @@ function _openTeamFromRow(row) {
   renderTeam(code);
 }
 
+// Última competencia elegida por el usuario (T-03 RF-20): la usa Liga cuando la dirección no trae una.
+function _rememberCompetition(comp) {
+  if (comp) setPref("ui", "last_competition", String(comp)).catch(() => {});
+}
+
 async function renderLeague() {
   const sec = document.getElementById("sec-league");
   sec.innerHTML = '<p class="empty"><span class="spinner"></span>Cargando...</p>';
   try {
     const comps = await api.competitions().catch(() => []);
-    // Abre en la competencia por defecto (RF-12); "Todas" solo si el usuario la eligió y sigue vigente
+    // Sin competencia en la dirección: la última que eligió el usuario (T-03 RF-20) si sigue vigente; si no, la
+    // competencia por defecto (RF-12). "Todas" solo si el usuario la eligió.
+    if (_leagueComp == null) {
+      const last = getPref("ui", "last_competition", null);
+      if (last === "all" || comps.some(c => String(c.id) === String(last))) _leagueComp = last == null ? null : String(last);
+    }
     if (_leagueComp !== "all" && !comps.some(c => String(c.id) === String(_leagueComp))) {
       const def = comps.find(c => c.is_default);
       _leagueComp = def ? String(def.id) : null;
@@ -1575,7 +1588,7 @@ async function renderLeague() {
     });
 
     const compSel = document.getElementById("league-comp");
-    if (compSel) compSel.addEventListener("change", e => { _leagueComp = e.target.value; renderLeague(); });
+    if (compSel) compSel.addEventListener("change", e => { _leagueComp = e.target.value; _rememberCompetition(_leagueComp); renderLeague(); });
     _makeCollapsible(sec.children[0], "liga-tabla");
     _makeCollapsible(sec.children[1], "liga-ranking");
 
@@ -1878,7 +1891,7 @@ function _loadTeamGameLog(teamCode) {
   const compParam = (_teamComp && _teamComp !== "all") ? _teamComp : null;
   mountTable(el,
     () => api.table("team_game_log", { team: teamCode, competition: compParam, last: _teamLastN || null, ...contextParams(), base: getBase() }),
-    { tableId: "team_game_log" });
+    { tableId: "team_game_log", onRowClick: row => showGame(row.id) });   // la fila abre Analizar partido (F-07 CA-3)
 }
 
 // Re-dibuja las grillas de fichas de Equipo/Jugador con el conjunto estándar ya
@@ -2741,6 +2754,7 @@ function _renderPlayerContent(main, data) {
     if (comps.length > 1) {
       document.getElementById("player-comp").addEventListener("change", e => {
         _playerComp = e.target.value;
+        _rememberCompetition(_playerComp);
         _reloadPlayer();
       });
     }
@@ -2772,7 +2786,7 @@ function _loadPlayerGameLog(playerId) {
   const compParam = (_playerComp && _playerComp !== "all") ? _playerComp : null;
   mountTable(el,
     () => api.table("player_game_log", { player_id: playerId, competition: compParam, last: _playerLastN || null, ...contextParams(), base: getBase() }),
-    { tableId: "player_game_log" });
+    { tableId: "player_game_log", onRowClick: row => showGame(row.id) });   // la fila abre Analizar partido (F-07 CA-3)
 }
 
 function _playerCompLabel() {
@@ -2782,14 +2796,15 @@ function _playerCompLabel() {
 }
 
 // ── Explorar (X-01, F-10): pestañas Jugadores · Quintetos · Consultas ───────────
-const SEARCH_TABS = [["jugadores", "Jugadores"], ["quintetos", "Quintetos"], ["contextos", "Contextos"], ["consultas", "Consultas"]];
+const SEARCH_TABS = [["jugadores", "Jugadores"], ["quintetos", "Quintetos"], ["contextos", "Contextos"], ["similares", "Similares"], ["consultas", "Consultas"]];
+let _simX = { team: "", player: "", position: "", min: "" };   // Explorar › Similares (A-09)
 let _cross = { team: "", side: "ataque", dimX: "tramo", dimY: "origen", metric: "ppp", limit: 8, color: "", competition: "", last: "" };   // A-06
 let _searchTab = "jugadores";
 let _searchInit = null;          // parámetros a restaurar al abrir la pestaña (consulta guardada o dirección)
 let _searchStale = false;        // la consulta que se abre se guardó con otros datos o configuración
 let _searchLastParams = null;    // última búsqueda de quintetos (la pestaña la recuerda al volver)
 let _searchKeys = new Set();     // claves de la búsqueda que hoy están en la dirección
-const _SEARCH_URL_KEYS = /^(competition|team|include|exclude|min_poss|adjusted|last|side|dim_x|dim_y|metric|limit|color|(min|max)\..+)$/;
+const _SEARCH_URL_KEYS = /^(competition|team|player|include|exclude|min_poss|adjusted|last|side|dim_x|dim_y|metric|limit|color|(min|max)\..+)$/;
 
 function _searchParamsFromUrl() {
   const out = {};
@@ -2805,6 +2820,7 @@ function _searchUrlQuery(section) {
   if (section === "search" && _searchTab === "contextos" && _cross.team)
     Object.assign(q, { competition: _cross.competition, last: _cross.last, team: _cross.team, side: _cross.side, dim_x: _cross.dimX, dim_y: _cross.dimY,
                        metric: _cross.metric, limit: _cross.limit === 8 ? "" : _cross.limit, color: _cross.color });
+  if (section === "search" && _searchTab === "similares" && _simX.player) Object.assign(q, { team: _simX.team, player: _simX.player });
   const current = new Set(Object.keys(q));
   for (const k of _searchKeys) if (!current.has(k)) q[k] = null;
   _searchKeys = current;
@@ -2834,8 +2850,39 @@ async function renderSearch() {
       onChange: s => { _cross = { ..._cross, ...s }; renderSearch(); syncRoute(); },
     });
   }
+  if (_searchTab === "similares") return _renderSearchSimilar(main);
   if (_searchTab === "consultas") return renderSavedQueries(main, { onRun: openSavedQuery, notify: toast });
   return _renderSearchPlayers();
+}
+
+// Explorar › Similares (A-09): elegir equipo y jugador y ver sus jugadores de perfil parecido sin ir a su ficha.
+async function _renderSearchSimilar(main) {
+  let teams = [];
+  try { teams = await api.teams(); } catch { teams = []; }
+  main.innerHTML = `<div class="card"><div class="card-title">Jugadores similares</div><div class="ld-controls">
+      <label class="gp-lbl">Equipo<select id="sx-team" class="map-select"><option value="">— Equipo —</option>${teams.map(t =>
+        `<option value="${esc(t.code)}"${t.code === _simX.team ? " selected" : ""}>${esc(t.name)}</option>`).join("")}</select></label>
+      <label class="gp-lbl">Jugador<select id="sx-player" class="map-select" ${_simX.team ? "" : "disabled"}><option value="">— Jugador —</option></select></label></div>
+      <p class="td-muted">Perfil parecido dentro de la competencia: uso, reparto de tiro, rebote, asistencias, pérdidas, eficiencia y minutos.</p></div>
+    <div id="sx-result">${_simX.player ? "" : '<p class="empty">Elegí un equipo y un jugador.</p>'}</div>`;
+  const teamSel = main.querySelector("#sx-team"), playerSel = main.querySelector("#sx-player");
+  teamSel.addEventListener("change", () => { _simX = { ..._simX, team: teamSel.value, player: "" }; renderSearch(); syncRoute(); });
+  if (_simX.team) {
+    try {
+      const list = await api.players(_simX.team, { competition: _searchComp || null });
+      const rows = Array.isArray(list) ? list : (list.players || []);
+      playerSel.innerHTML = '<option value="">— Jugador —</option>' + rows.filter(p => p.player_id != null).map(p =>
+        `<option value="${p.player_id}"${String(p.player_id) === String(_simX.player) ? " selected" : ""}>${esc(p.player_name || p.name)}</option>`).join("");
+    } catch { /* sin lista: queda el selector vacío */ }
+  }
+  playerSel.addEventListener("change", () => { _simX = { ..._simX, player: playerSel.value }; renderSearch(); syncRoute(); });
+  if (_simX.player) {
+    renderSimilar(main.querySelector("#sx-result"), Number(_simX.player), {
+      params: { competition: _searchComp || null, ...contextParams() }, position: _simX.position, minMinutes: _simX.min,
+      onChange: ({ position, minMinutes }) => { _simX = { ..._simX, position, min: minMinutes }; renderSearch(); },
+      onOpenPlayer: _openPlayerById,
+    });
+  }
 }
 
 // Ejecuta una consulta guardada: abre la pestaña de su tipo con los filtros restaurados.
@@ -3077,11 +3124,17 @@ const NAV_ORDER = ["myteam", "import", "league", "team", "player", "compare", "s
 const NAV_EXTRA = ["import", "compare", "search", "preparar"];
 
 // ── F-07: Analizar partido ──────────────────────────────────────────────────
-function showGame(gameId) {
+// `#/partido/<id>/<pestaña>` (CA-3): "analizar" abre el Resumen; recargar reproduce la misma pestaña.
+function showGame(gameId, tab = null) {
   destroyLiveView();
   _gameId = String(gameId);
+  _gameTab = tab && tab !== "analizar" ? tab : null;
   setSection("partido");
-  renderGameView(document.getElementById("partido-main"), gameId);
+  renderGameView(document.getElementById("partido-main"), gameId, {
+    tab: _gameTab,
+    onTab: t => { _gameTab = t === "resumen" ? null : t; syncRoute(); },
+    onOpenPlayer: id => { location.hash = buildHash({ section: "player", id }); },
+  });
 }
 
 // ── F-01: Partido en vivo ──────────────────────────────────────────────────
@@ -3318,6 +3371,7 @@ function renderApp() {
   document.getElementById("team-comp").addEventListener("change", e => {
     if (!_teamData) return;
     _teamComp = e.target.value;
+    _rememberCompetition(_teamComp);
     _reloadTeam({ clutch: true });   // los cierres también dependen de la competencia
   });
 

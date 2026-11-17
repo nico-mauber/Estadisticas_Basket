@@ -58,8 +58,15 @@ function _lookup(core) {
 }
 
 function _translateCore(core) {
+  core = core.replace(/\s+/g, " ");   // un texto partido en varias líneas del HTML se corta igual por « · »
   const whole = _lookup(core);
   if (whole !== undefined) return whole;
+  // «Posesiones ↓»: encabezado ordenado; se traduce el rótulo y se conserva la flecha.
+  const arrow = /^([\s\S]*?\S)(\s*[↑↓↕▲▼])$/.exec(core);
+  if (arrow) {
+    const t = _translateCore(arrow[1]);
+    return t === undefined ? undefined : t + arrow[2];
+  }
   // «Últimos 5 · Local · 12 partidos»: se traduce por tramos.
   for (const sep of [" · ", " | ", " — "]) {
     if (core.includes(sep)) {
@@ -77,6 +84,7 @@ function _translateCore(core) {
   for (const [prefix, value] of _prefixes()) {
     if (core.startsWith(prefix) && core.length > prefix.length) return value.replace("⁂", core.slice(prefix.length));
   }
+  if (/^https?:\/\//.test(core)) return undefined;                    // una dirección web no se traduce
   if (/\p{L}{2}/u.test(core)) _misses.add(_template(core).key);      // sin traducción: queda en español y se registra
   return undefined;
 }

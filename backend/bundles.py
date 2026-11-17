@@ -358,6 +358,28 @@ def lineup_loader(req: "metrics_catalog.EntityRequest") -> list:
     return [bundle] if bundle is not None else []
 
 
+def pair_loader(req: "metrics_catalog.EntityRequest") -> list:
+    """Pareja de jugadores (A-08, T-05): id `<equipo>:<pid>-<pid>`; lo que hizo el equipo con los dos en cancha."""
+    team_code, pids = _parse_lineup_id(req.entity_id)
+    if len(pids) != 2:
+        raise metrics_catalog.MetricsError("Id de pareja inválido: usá EQUIPO:id-id", 400, "parametro_invalido")
+    names = _names_for(team_code, pids)
+    if names is None:
+        return []
+    games = repository.team_pbp_games(team_code, req.comp_id)
+    games = _filter_pbp_games(games, req.ctx, team_code)
+    games = identity.canonicalize_pbp_games(games, team_code)
+    b = lineups.lineup_bundle(games, team_code, names, entity_id=req.entity_id, name=" · ".join(sorted(names)))
+    if b is None:
+        return []
+    return [dataclasses.replace(b, entity_type="pair", meta={**(b.meta or {}), "player_ids": sorted(pids)})]
+
+
+def all_pair_bundles(comp_id, ctx, variant=None):
+    """Población del tipo `pair` (T-01): todas las parejas de todos los equipos de la competencia."""
+    return [dataclasses.replace(b, entity_type="pair") for b in all_lineup_bundles(comp_id, ctx, size=2)]
+
+
 def onoff_loader(req: "metrics_catalog.EntityRequest") -> list:
     team_code, pids = _parse_lineup_id(req.entity_id)
     if len(pids) != 1:
@@ -451,6 +473,7 @@ metrics_catalog.register_entity("player", player_loader, game_loader=player_game
                                 enumerator=all_player_bundles)
 metrics_catalog.register_entity("lineup", lineup_loader)
 metrics_catalog.register_entity("onoff", onoff_loader)
+metrics_catalog.register_entity("pair", pair_loader, enumerator=all_pair_bundles)
 metrics_catalog.register_entity("clutch", clutch_loader, game_loader=clutch.clutch_game_bundles)
 
 

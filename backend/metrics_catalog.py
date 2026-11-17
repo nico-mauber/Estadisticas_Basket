@@ -73,7 +73,7 @@ GROUPS = [
      ]},
 ]
 
-_ALL_ENTITIES = ("team", "player", "lineup", "onoff", "clutch", "origin", "ptype")
+_ALL_ENTITIES = ("team", "player", "lineup", "onoff", "clutch", "origin", "ptype", "matchup", "pair", "chance", "clock")
 _PLAYER_ONLY = ("player",)
 _TEAM_ONLY = ("team",)
 
@@ -411,12 +411,12 @@ def _entity_id_kwargs(entity_type: str, raw_id: str) -> dict:
             return {"player_id": int(raw_id)}
         except (TypeError, ValueError):
             return {}
-    if entity_type in ("lineup", "onoff"):
+    if entity_type in ("lineup", "onoff", "pair"):
         team_code = raw_id.split(":", 1)[0] if ":" in raw_id else raw_id
         return {"team_code": team_code.upper()}
     if entity_type == "clutch":
         return {"team_code": raw_id.upper()}
-    if entity_type in ("period", "origin", "ptype"):
+    if entity_type in ("period", "origin", "ptype", "chance", "clock"):
         return {"team_code": raw_id.split(":", 1)[0].upper()}
     return {}
 
@@ -465,8 +465,12 @@ def build_payload(entity_type: str, args) -> dict:
         if window_secs not in (None, ""):
             params["window_secs"] = int(window_secs)
 
-    if entity_type in ("origin", "ptype"):
+    if entity_type in ("origin", "ptype", "chance", "clock"):
         params["side"] = args.get("side") or "ataque"
+
+    if entity_type == "matchup":
+        params["game"] = args.get("game") or None
+
 
     req = EntityRequest(entity_type=entity_type, entity_id=entity_id, comp_id=ctx.competition_id,
                         ctx=ctx, base=base, params=params)
@@ -537,7 +541,7 @@ def build_payload(entity_type: str, args) -> dict:
         }
 
     team_poss = None
-    if entity_type in ("lineup", "pair", "onoff", "split", "clutch", "origin", "ptype"):
+    if entity_type in ("lineup", "pair", "onoff", "split", "clutch", "origin", "ptype", "chance", "clock"):
         team_code = meta0.get("team_code")
         if team_code:
             team_poss = sample_mod.team_offensive_possessions(team_code, ctx.competition_id, ctx)
@@ -618,7 +622,13 @@ def _attach_fichas(payload, entity_type, b0, ctx, base, *, prior_fn) -> None:
     import population
     try:
         variant = _population_variant(entity_type, b0)
+        if entity_type == "matchup":
+            # un cruce existe solo entre dos equipos concretos: no hay universo de la competencia
+            # contra el cual rankearlo (F-07). La ficha se sirve sin puesto ni percentil.
+            payload["population"] = {"size": 0, "criterion": "", "context_label": "", "reason": "contexto_no_comparable"}
+            return
         if ctx.on or ctx.off:
+
             # con/sin jugador: la población de equipos no se puede recalcular con ese filtro (population_mode entity_only)
             payload["population"] = {"size": 0, "criterion": "", "context_label": "", "reason": "contexto_no_comparable"}
             return
@@ -660,7 +670,7 @@ def _population_variant(entity_type, bundle):
     el tramo (cada ventana tiene su propia población); si no, None."""
     if entity_type == "period":
         return (bundle.meta or {}).get("window")
-    if entity_type in ("origin", "ptype"):
+    if entity_type in ("origin", "ptype", "chance", "clock"):
         return (bundle.meta or {}).get("variant")
     if entity_type == "lineup":
         pids = (bundle.meta or {}).get("player_ids")

@@ -140,6 +140,13 @@ class TeamGameStats(db.Model):
     # nuevas, C-11); un 0 informado por FIBA se guarda como 0.
     blk_received      = db.Column(db.Integer)
     fouls_drawn       = db.Column(db.Integer)
+    # F-07: rebotes y pérdidas "de equipo" (no atribuidos a un jugador; FIBA los suma al total
+    # del equipo) y parciales oficiales por cuarto como JSON {"1": 23, …, "OT": 19}.
+    # NULL = "no importado todavía" (partido previo a la ingesta 6).
+    team_orb          = db.Column(db.Integer)
+    team_drb          = db.Column(db.Integer)
+    team_tov          = db.Column(db.Integer)
+    period_pts        = db.Column(db.Text)
 
 
 class PlayerGameStats(db.Model):
@@ -345,6 +352,12 @@ def upgrade_db(app):
         ("team_game_stats",   "fouls_drawn",  "INTEGER"),
         ("player_game_stats", "blk_received", "INTEGER"),
         ("player_game_stats", "fouls_drawn",  "INTEGER"),
+        # F-07 — rebotes/pérdidas de equipo y parciales oficiales (sin DEFAULT: NULL = "no importado todavía")
+        ("team_game_stats",   "team_orb",     "INTEGER"),
+        ("team_game_stats",   "team_drb",     "INTEGER"),
+        ("team_game_stats",   "team_tov",     "INTEGER"),
+        ("team_game_stats",   "period_pts",   "TEXT"),
+
         # F-16 — ficha de identidad cargada a mano (sin DEFAULT: NULL = "no registrado")
         ("players", "height_cm",          "INTEGER"),
         ("players", "birth_year",         "INTEGER"),

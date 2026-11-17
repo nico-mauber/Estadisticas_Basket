@@ -1,6 +1,6 @@
 # Progress — T-03: Selector global de contexto (splits)
 
-> **Estado:** 🔶 Nivel PARTIDO en Equipo y Jugador y nivel EVENTO (cuarto, marcador, con/sin jugador) en Equipo; faltan nivel evento de jugador, Liga/Comparar/Explorar, shot-zones/cierres y `ui.last_competition`
+> **Estado:** 🔶 Nivel PARTIDO en Equipo y Jugador, nivel EVENTO (cuarto, marcador, con/sin jugador) en Equipo y `ui.last_competition` (RF-20); faltan nivel evento de jugador, Liga/Comparar/Explorar y shot-zones/cierres
 > **Fecha:** 2026-10-18
 > Spec: [spec.md](spec.md) · Plan: [plan.md](plan.md) · Tasks: [tasks.md](tasks.md)
 
@@ -86,3 +86,6 @@
 - Contexto en shot-zones, `/api/league` y los endpoints legacy de lineup/onoff/clutch.
 - `ui.last_competition` (T-B17).
 - `t()` para el copy (F-21).
+
+## RF-20 `ui.last_competition` (2026-11-16)
+- Elegir competencia en Liga, Equipo o Jugador la guarda en la preferencia `ui.last_competition`; Liga la usa al abrirse sin competencia en la dirección (si sigue vigente; si no, la por defecto). La dirección siempre manda. Equipo y Jugador siguen abriendo en la competencia de su partido más reciente (DA-14). Verificado en Chromium con dos competencias (`t03_lastcomp_browser.py` 4/4).

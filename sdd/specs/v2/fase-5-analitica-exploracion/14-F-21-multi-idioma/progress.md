@@ -127,3 +127,6 @@
 - **Frontend:** `core/i18n.js`, selector en cabecera/login/Configuración, formato de números por locale, charts con `tText`, `sw.js` v66.
 - **Verificación:** navegador 25/25 (1280 y 360 px: cambio es→en→pt→es, persistencia tras recarga, números con punto en `en`, Mi equipo y plan de juego), `i18n_audit.py` sin problemas.
 - **Pendiente con el cliente:** revisión nativa de las traducciones en/pt y lista exacta de siglas que no se traducen.
+
+## Cobertura ampliada (2026-11-16)
+- La vista del partido (Resumen, Box, Tiros, Jugadas, Quintetos, Cruces, Momentum, Reloj) queda sin textos sin traducir en inglés (`f07_browser.py`, chequeo de `i18nMisses()`): ~150 entradas nuevas, subtipos de FIBA en castellano traducibles, flecha de orden conservada y saltos de línea colapsados antes de cortar por « · ».

@@ -4,6 +4,8 @@ import { api } from "../api.js";
 import { percentileBg } from "../core/colors.js";
 import { fmtNumber, PCT } from "../core/format.js";
 import { exportMenu } from "./export-menu.js";
+import { mountTable } from "./data-table.js";
+import { loadCatalog } from "../core/catalog.js";
 
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
@@ -93,7 +95,7 @@ export async function renderCross(el, opts = {}) {
       <div class="cx-n">${c.n}${low ? ' <span class="cx-badge">BAJA</span>' : ""}${c.pct != null && c.ranked ? ` · p${c.pct}` : ""}</div></td>`;
   };
   const totalCell = c => `<td class="cx-total">${c.n ? `<div class="cx-val">${c.value == null ? "—" : _fmt(m, c.value)}</div><div class="cx-n">${c.n}</div>` : "—"}</td>`;
-  const head = `<tr><th class="cx-corner">${esc(d.dims.x.label)} ╲ ${esc(d.dims.y.label)}</th>${ys.map(y => `<th>${esc(y.label)}</th>`).join("")}<th class="cx-total-h">Total</th></tr>`;
+  const head = `<tr><th class="cx-corner"><span>${esc(d.dims.x.label)}</span> ╲ <span>${esc(d.dims.y.label)}</span></th>${ys.map(y => `<th>${esc(y.label)}</th>`).join("")}<th class="cx-total-h">Total</th></tr>`;
   const body = xs.map((x, i) => `<tr><th class="cx-row-h">${esc(x.label)}</th>${d.cells[i].map((c, j) => cellHTML(c, i, j)).join("")}${totalCell(d.row_totals[i])}</tr>`).join("");
   const foot = `<tr class="cx-foot"><th>Total</th>${d.col_totals.map(totalCell).join("")}${totalCell(d.grand_total)}</tr>`;
   const ck = d.check;
@@ -104,10 +106,11 @@ export async function renderCross(el, opts = {}) {
   out.innerHTML = `<div class="card cx-card">
       <div class="cx-head"><span class="td-muted">${esc(d.team)} · ${st.side === "ataque" ? "Ataque" : "Defensa"} · ${esc(d.metric_label)} · ${d.unit}</span><span id="cx-export"></span></div>
       <div class="cx-scroll"><table class="cx-table" id="cx-table"><thead>${head}</thead><tbody>${body}</tbody><tfoot>${foot}</tfoot></table></div>
-      <p class="td-muted cx-legend">${esc(basis)}. Gris: menos de ${d.grand_total.sample ? d.grand_total.sample.min : "?"} ${d.unit} (muestra baja), sin color.</p>
+      <p class="td-muted cx-legend"><span>${esc(basis)}.</span> <span>Gris: menos de ${d.grand_total.sample ? d.grand_total.sample.min : "?"} ${d.unit} (muestra baja), sin color.</span></p>
       <p class="cx-check ${ck.ok ? "td-muted" : "below-avg"}">${ck.ok ? esc(note) : "El cuadre no cierra: revisá posesiones incompletas."}${d.excluded.incomplete ? ` Quedaron fuera ${d.excluded.incomplete} posesiones incompletas.` : ""}</p>
       <p class="td-muted">${esc(d.context.label)} · ${d.context.games_used} de ${d.context.games_total} partidos.</p>
-    </div><div id="cx-detail"></div>`;
+    </div><div id="cx-detail"></div>
+    <details class="card cx-cells-wrap"><summary>Ver todas las celdas como tabla</summary><div id="cx-cells-dt"></div></details>`;
 
   // detalle de celda: las ocho métricas y los conteos
   const detail = out.querySelector("#cx-detail");
@@ -122,6 +125,17 @@ export async function renderCross(el, opts = {}) {
     td.classList.add("sel");
     showDetail(d.cells[+td.dataset.i][+td.dataset.j]);
   }));
+
+  // Todas las celdas como tabla completa (T-06 `cross_cells`): ordenable y exportable; se pide al abrir el desplegable.
+  const cw = out.querySelector(".cx-cells-wrap");
+  cw.addEventListener("toggle", () => {
+    if (!cw.open || cw.dataset.loaded) return;
+    cw.dataset.loaded = "1";
+    mountTable(out.querySelector("#cx-cells-dt"), async () => {
+      await loadCatalog();
+      return api.table("cross_cells", { ...(opts.params || {}), team: st.team, dim_x: st.dimX, dim_y: st.dimY, side: st.side, limit: st.limit });
+    }, { tableId: "cross_cells" });
+  });
 
   exportMenu(out.querySelector("#cx-export"), {
     getNode: () => out.querySelector("#cx-table"),

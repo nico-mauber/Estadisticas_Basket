@@ -173,13 +173,8 @@ def team_matchups(team_code: str, rival_code: str, game_ids: list, level: str = 
     return _matchup_rows(datas, own, opp, level)
 
 
-def _matchup_rows(datas: list, own: str, opp: str, level: str) -> dict:
-    """Acumula los tramos 5v5 de uno o más partidos por cruce (`own` = lado propio)."""
-    id_to_name = {}
-    for _, data in datas:
-        for (tc, pn), pid in data["name_to_id"].items():
-            id_to_name[(tc, pid)] = pn
-
+def _accumulate(datas: list, own: str, opp: str, level: str) -> dict:
+    """Tramos 5v5 de uno o más partidos acumulados por cruce: `{matchup_id: entry}`."""
     acc = {}
     for gid, data in datas:
         for seg in data["segments"]:
@@ -201,7 +196,17 @@ def _matchup_rows(datas: list, own: str, opp: str, level: str) -> dict:
                 entry["events"].extend(seg["events"])
                 entry["seconds"] += seg["seconds"]
                 entry["by_game"].setdefault(gid, []).extend(seg["events"])
+    return acc
 
+
+def _matchup_rows(datas: list, own: str, opp: str, level: str) -> dict:
+    """Acumula los tramos 5v5 de uno o más partidos por cruce (`own` = lado propio)."""
+    id_to_name = {}
+    for _, data in datas:
+        for (tc, pn), pid in data["name_to_id"].items():
+            id_to_name[(tc, pid)] = pn
+
+    acc = _accumulate(datas, own, opp, level)
     rows = []
     for mid, entry in acc.items():
         own_box = _side_counts(entry["events"], entry["own_code"])
@@ -356,8 +361,95 @@ def _register():
         log.debug("matchup entity already registered or metrics_catalog not ready")
 
 
+def _parse_matchup_id(mid: str):
+    """`OWN:id-id-…|OPP:id-…` → (own_code, own_ids, opp_code, opp_ids, level) o None."""
+    own_part, sep, opp_part = str(mid or "").partition("|")
+    if not sep or ":" not in own_part or ":" not in opp_part:
+        return None
+    own_code, _, own_ids = own_part.partition(":")
+    opp_code, _, opp_ids = opp_part.partition(":")
+    n_own, n_opp = len(own_ids.split("-")), len(opp_ids.split("-"))
+    level = {(5, 5): "quinteto", (1, 1): "jugador", (1, 5): "jugador_quinteto"}.get((n_own, n_opp))
+    if level is None or not own_code or not opp_code:
+        return None
+    return own_code.upper(), own_ids, opp_code.upper(), opp_ids, level
+
+
 def _load_matchup_bundles(req):
-    pass
+    """Cargador de la entidad `matchup` (T-05 / F-07 CA-9): un `StatBundle` con lo que hizo cada
+    lado mientras el cruce coincidió en cancha. `?game=<id>` lo limita a ese partido; sin él suma
+    todos los enfrentamientos de la competencia del contexto. `[]` = cruce inexistente."""
+    import metrics_catalog
+    parsed = _parse_matchup_id(req.entity_id)
+    if parsed is None:
+        raise metrics_catalog.MetricsError(
+            "Id de cruce inválido: usá EQUIPO:ids|RIVAL:ids (el id de la fila de Cruces)", 400, "parametro_invalido")
+    own, _own_ids, opp, _opp_ids, level = parsed
+    game = (req.params or {}).get("game")
+    if game:
+        game_ids = [str(game)]
+    else:
+        game_ids = [g["game_id"] for g in repository.team_pbp_games(own, req.comp_id) if g.get("opp_code") == opp]
+    datas = []
+    for gid in game_ids:
+        data = _game_segments(gid)
+        if data and data["segments"] and {data["home_code"], data["away_code"]} == {own, opp}:
+            datas.append((gid, data))
+    if not datas:
+        return []
+    entry = _accumulate(datas, own, opp, level).get(str(req.entity_id))
+    if entry is None:
+        return []
+    return [_entry_bundle(str(req.entity_id), entry, datas, level)]
+
+
+def _entry_bundle(mid: str, entry: dict, datas: list, level: str) -> StatBundle:
+    """`StatBundle` de un cruce acumulado (lo que hizo cada lado mientras coincidieron en cancha)."""
+    own, opp = entry["own_code"], entry["opp_code"]
+    own_box = lineups._sum_boxes([_side_counts(entry["events"], own)])
+    opp_box = lineups._sum_boxes([_side_counts(entry["events"], opp)])
+    own_box["blk_received"] = opp_box.get("blk", 0)
+    opp_box["blk_received"] = own_box.get("blk", 0)
+    own_box["plus_minus"] = own_box.get("pts", 0) - opp_box.get("pts", 0)
+    opp_box["plus_minus"] = -own_box["plus_minus"]
+    seconds = entry["seconds"]
+    names = {(tc, pid): pn for _, d in datas for (tc, pn), pid in d["name_to_id"].items()}
+    label = lambda code, ids: " · ".join(names.get((code, i), str(i)) for i in
+                                         sorted(ids, key=lambda x: (isinstance(x, str), x)))
+    own_name, opp_name = label(own, entry["own_ids"]), label(opp, entry["opp_ids"])
+    return StatBundle(
+        entity_type="matchup", entity_id=mid, name=f"{own_name} vs {opp_name}",
+        own=own_box, opp=opp_box, team=None,
+        games=len(entry["by_game"]), minutes=seconds / 60 if seconds else 0.0, team_minutes=None,
+        seconds=seconds, on_court=None, shots=None, possessions_counted=None, null_reasons={},
+        meta={"team_code": own, "opp_code": opp, "level": level, "games_total": len(datas),
+              "own_name": own_name, "opp_name": opp_name},
+    )
+
+
+def game_matchup_rows(game_id: str, level: str = "quinteto", side: str = "home") -> list:
+    """Filas de la tabla T-06 `game_matchups` (F-07 RF-25): un bundle por cruce del partido con
+    su badge de muestra (posesiones propias). `side` = lado propio ("home"/"away")."""
+    if level not in LEVELS:
+        raise ValueError("Nivel inválido: usá quinteto, jugador o jugador_quinteto")
+    if side not in ("home", "away"):
+        raise ValueError("Lado inválido: usá home o away")
+    data = _game_segments(game_id)
+    if not data or not data["segments"]:
+        return []
+    own, opp = data["home_code"], data["away_code"]
+    if side == "away":
+        own, opp = opp, own
+    datas = [(game_id, data)]
+    out = []
+    for mid, entry in _accumulate(datas, own, opp, level).items():
+        b = _entry_bundle(mid, entry, datas, level)
+        t_pos = _pos(b.own)
+        out.append({"id": mid, "link": None, "bundle": b,
+                    "texts": {"_own": b.meta["own_name"], "_opp": b.meta["opp_name"]},
+                    "sample": sample_mod.sample_level("matchup", n=t_pos, unit="posesiones")})
+    out.sort(key=lambda r: -(_pos(r["bundle"].own) or 0))
+    return out
 
 
 try:
