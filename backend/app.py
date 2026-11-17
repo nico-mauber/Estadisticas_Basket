@@ -305,7 +305,8 @@ def team_periods(team_code: str):
     if echo is None:   # ningún tramo tiene datos: eco de la selección igual (sin partidos que cumplan)
         import context as context_mod
         try:
-            ctx = _no_quarter(context_mod.parse_context(request.args, team_code=team_code, event_level=True))
+            ctx = _no_quarter(context_mod.parse_context(request.args, team_code=team_code, event_level=True,
+                                                        possession_level=False))
         except ContextError as e:
             return jsonify(e.payload()), e.status
         echo = context_mod.context_echo(ctx, games_used=0, games_total=0, games_excluded={}, ignored=[],
@@ -1196,7 +1197,8 @@ def rankings_route(entity_type: str, metric_key: str):
     raw_id = request.args.get("id")
     kwargs = metrics_catalog._entity_id_kwargs(entity_type, str(raw_id)) if raw_id else {}
     try:
-        ctx = context.parse_context(request.args, **kwargs, event_level=entity_type in ("team", "period"))
+        ctx = context.parse_context(request.args, **kwargs, event_level=entity_type in ("team", "period", "player"),
+                                    possession_level=entity_type in ("team", "player"))
     except ContextError as e:
         msg = str(e)
         code = "competencia_inexistente" if "competencia" in msg.lower() else "contexto_invalido"
@@ -1298,7 +1300,7 @@ def _player_response(pid: int | None):
     if pid is None:
         return jsonify({"error": "Jugador no encontrado"}), 404
     try:
-        ctx = context.parse_context(request.args, player_id=pid)
+        ctx = context.parse_context(request.args, player_id=pid, event_level=True)   # T-03: evento y posesión
     except ContextError as e:
         return jsonify(e.payload()), e.status
     payload = population.player_profile(pid, ctx)

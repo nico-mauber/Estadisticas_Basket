@@ -426,7 +426,7 @@ def _ptype_bundle(team_code, key, comp_id, ctx, side):
     own["plus_minus"] = opp["plus_minus"] = None
     seconds = sum(p.duration or 0 for p in group)
     name = origin_mod._team_name(team_code)
-    meta = {"team_code": team_code, "team_name": name, "split": True, "poss_exact": True, "ptype": key,
+    meta = {"team_code": team_code, "team_name": name, "split": True, "poss_exact": True, "one_side": True, "ptype": key,
             "side": side, "variant": f"{key}:{side}", "games_total": total, "games_excluded": excluded}
     return StatBundle(
         entity_type="split", entity_id=team_code, name=name, own=own, opp=opp, team=None,

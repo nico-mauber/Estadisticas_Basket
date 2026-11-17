@@ -441,7 +441,8 @@ def build_payload(entity_type: str, args) -> dict:
 
     try:
         ctx = context_mod.parse_context(args, **_entity_id_kwargs(entity_type, str(entity_id)),
-                                        event_level=entity_type in ("team", "period"))
+                                        event_level=entity_type in ("team", "period", "player", "split"),
+                                        possession_level=entity_type in ("team", "player", "split"))
     except context_mod.ContextError as e:
         # `context.parse_context` envuelve tanto `CompetitionError` (competencia inexistente o en
         # borrador) como su propio `ContextError` (p. ej. `last` inválido) en `ContextError`; se
@@ -480,12 +481,10 @@ def build_payload(entity_type: str, args) -> dict:
         # Sin resultados puede ser por los filtros o porque la entidad no existe. Se distingue
         # rehaciendo la consulta SIN filtros: si tampoco así aparece, no existe (un código de equipo
         # mal escrito no debe reportarse como "no hay partidos que cumplan estos filtros").
-        filtered = (ctx.last or ctx.venue or ctx.opponent or ctx.rest
-                    or context_mod.has_event_filters(ctx) or entity_type == "period")
+        filtered = (ctx.last or ctx.venue or ctx.opponent or ctx.rest or context_mod.has_event_filters(ctx)
+                    or context_mod.has_possession_filters(ctx) or entity_type == "period")
         if filtered:
-            bare_ctx = dataclasses.replace(
-                ctx, last=None, venue=None, opponent=None, rest=None,
-                quarters=(), score=None, on=(), off=())
+            bare_ctx = context_mod.without_filters(ctx)
             bare_type = "team" if entity_type == "period" else entity_type
             bare_id = str(entity_id).split(":", 1)[0] if entity_type == "period" else entity_id
             bare_reg = _REGISTRY.get(bare_type)

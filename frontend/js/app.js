@@ -2574,7 +2574,7 @@ function _applyPlayerData(main, data) {
       onSaved: () => toast("Ficha actualizada"),
     });
   }
-  _mountCtxBar(main, _playerComp, _reloadPlayer);
+  _mountCtxBar(main, _playerComp, _reloadPlayer, data.team_code);   // nivel evento y posesión del jugador (T-03)
   mountContextHeader(document.getElementById("player-ctx-header"), {
     entity: "player", id: data.player_id, competition: _playerComp, last: _playerLastN, excludeTeam: data.team_code,
     onLast: n => { _playerLastN = n; _reloadPlayer(); },

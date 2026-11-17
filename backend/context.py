@@ -5,10 +5,10 @@ Contexto de una petición de perfil (C-02, T-03): competencia, últimos N y filt
 query son los definitivos (`?competition=<id>|all|<texto de FIBA>&last=<n>&venue=local|visitante&
 opponent=<team_code>&rest=0|1|2|3mas`).
 
-Alcance actual de T-03: nivel PARTIDO (competencia, últimos N, sede, rival, descanso) y nivel EVENTO para el
-equipo (`quarter`, `score`, `on`, `off`, ver `splits.py`). Los de posesión (`clock`, `clock_start`, `origin`,
-`ptype`, `chance`) se validan pero todavía no se aplican: se informan en `context.ignored`. Los endpoints que
-no calculan nivel evento (`event_level=False`) también los informan en `ignored`.
+Alcance de T-03: nivel PARTIDO (competencia, últimos N, sede, rival, descanso), nivel EVENTO (`quarter`, `score`,
+`on`, `off`, ver `splits.py`) y nivel POSESIÓN (`origin`, `ptype` por posesión; `chance`, `clock`, `clock_start` por
+oportunidad, ver `poss_filter.py`) para el equipo y el jugador. Los endpoints que no calculan un nivel
+(`event_level=False` / `possession_level=False`) informan esos parámetros en `context.ignored` con razón `no_aplica`.
 
 Quién decide qué: este módulo solo interpreta y filtra; la competencia por defecto se resuelve en
 `repository.resolve_competition` y el promedio de liga en `population.py`.
@@ -28,18 +28,21 @@ REST_LABELS = {"0": "0 días de descanso", "1": "1 día de descanso", "2": "2 d�
                "3mas": "3 o más días de descanso"}
 VENUE_LABELS = {"local": "Local", "visitante": "Visitante"}
 
-# Parámetros que el contrato acepta pero todavía no se calculan.
 EVENT_PARAMS = ("quarter", "score", "on", "off")                       # nivel evento
 POSSESSION_PARAMS = ("clock", "clock_start", "origin", "ptype", "chance")   # nivel posesión (A-02…A-05)
 _QUARTER_VALUES = ("1", "2", "3", "4", "pr")
+# Valores del contrato (arquitectura §3.8). `clock`, `origin` y `ptype` son listas CSV; `clock_start` y `chance`, uno solo.
 _POSSESSION_VALUES = {
     "clock": ("temprano", "medio", "tardio"),
-    "clock_start": ("temprano", "medio", "tardio"),
+    "clock_start": ("24", "14"),
     "origin": ("canasta_rival", "rebote_defensivo", "robo", "perdida_rival", "saque_banda", "tiempo_muerto",
                "tiro_libre_rival"),
     "ptype": ("transicion", "early", "media_cancha"),
-    "chance": ("1", "2", "3mas"),
+    "chance": ("primera", "segunda"),
 }
+_POSSESSION_CSV = ("clock", "origin", "ptype")
+# Filtros que actúan sobre la OPORTUNIDAD (A-04 D-7, A-05 §4.8); `origin`/`ptype` actúan sobre la posesión.
+CHANCE_PARAMS = ("clock", "clock_start", "chance")
 _SCORE_VALUES = ("ajustado", "paliza")
 
 
@@ -75,7 +78,12 @@ class Context:
     score: str | None = None      # "ajustado" | "paliza" (nivel evento)
     on: tuple = ()                # player_id en cancha (nivel evento)
     off: tuple = ()               # player_id fuera de cancha (nivel evento)
-    # Parámetros válidos pero sin cálculo todavía: ((param, razón), ...). No entra en la clave de caché.
+    clock: tuple = ()             # subconjunto de ("temprano", "medio", "tardio") (nivel posesión, por oportunidad)
+    clock_start: str | None = None   # "24" | "14" (nivel posesión, por oportunidad)
+    origin: tuple = ()            # orígenes A-02 (nivel posesión)
+    ptype: tuple = ()             # subconjunto de ("transicion", "early", "media_cancha") (nivel posesión)
+    chance: str | None = None     # "primera" | "segunda" (nivel posesión, por oportunidad)
+    # Parámetros válidos que el endpoint no calcula: ((param, razón), ...). No entra en la clave de caché.
     ignored: tuple = field(default=(), compare=False)
 
 
@@ -84,10 +92,14 @@ def _invalid(param: str, value) -> ContextError:
 
 
 def parse_context(args: Mapping[str, str], *, team_code: str | None = None,
-                  player_id: int | None = None, event_level: bool = False) -> Context:
+                  player_id: int | None = None, event_level: bool = False,
+                  possession_level: bool | None = None) -> Context:
     """Query de la petición → `Context`. `team_code` / `player_id` identifican a la entidad
-    consultada: sin `competition` se usa la de su partido más reciente (DA-14). `event_level`: el
-    endpoint calcula filtros de evento (hoy solo el equipo); si no, se informan en `ignored`."""
+    consultada: sin `competition` se usa la de su partido más reciente (DA-14). `event_level` /
+    `possession_level`: el endpoint calcula filtros de evento / de posesión (equipo y jugador); si no, se
+    informan en `ignored` con razón `no_aplica`. `possession_level` por defecto sigue a `event_level`."""
+    if possession_level is None:
+        possession_level = event_level
     try:
         res = repository.resolve_competition(args.get("competition"), team_code=team_code,
                                              player_id=player_id)
@@ -107,6 +119,9 @@ def parse_context(args: Mapping[str, str], *, team_code: str | None = None,
     if opponent is not None and opponent not in _team_codes(comp_id):
         raise _invalid("opponent", args.get("opponent"))
 
+    if team_code is None and player_id is not None:   # con/sin jugador del jugador: compañeros de su equipo
+        import identity
+        team_code = (identity.player_card(player_id) or {}).get("team_code")
     ignored = []
     quarters, score, on, off = (), None, (), ()
     for p in EVENT_PARAMS:
@@ -115,7 +130,7 @@ def parse_context(args: Mapping[str, str], *, team_code: str | None = None,
             continue
         _validate_event_param(p, v)
         if not event_level:
-            ignored.append((p, "no_implementado" if player_id is not None else "no_aplica"))
+            ignored.append((p, "no_aplica"))
         elif p == "quarter":
             quarters = tuple(q for q in _QUARTER_VALUES if q in {x.strip() for x in v.split(",")})
         elif p == "score":
@@ -126,17 +141,31 @@ def parse_context(args: Mapping[str, str], *, team_code: str | None = None,
             off = _parse_players(p, v, team_code)
     if set(on) & set(off):
         raise ContextError("Un jugador no puede estar en 'on' y en 'off' a la vez.", 400, "off", args.get("off"))
+    poss = {}
     for p in POSSESSION_PARAMS:
         v = (args.get(p) or "").strip()
         if not v:
             continue
-        if v not in _POSSESSION_VALUES[p]:
-            raise _invalid(p, v)
-        ignored.append((p, "requiere_posesiones"))
+        allowed = _POSSESSION_VALUES[p]
+        if p in _POSSESSION_CSV:
+            vals = {x.strip() for x in v.split(",") if x.strip()}
+            if not vals or vals - set(allowed):
+                raise _invalid(p, v)
+            parsed = tuple(x for x in allowed if x in vals)
+        else:
+            if v not in allowed:
+                raise _invalid(p, v)
+            parsed = v
+        if not possession_level:
+            ignored.append((p, "no_aplica"))
+        elif p not in _POSSESSION_CSV or len(parsed) < len(allowed):   # todos los valores = sin filtro
+            poss[p] = parsed
 
     return Context(res["id"], res["all"], _parse_last(args.get("last")),
                    venue=venue, opponent=opponent, rest=rest, quarters=quarters, score=score,
-                   on=on, off=off, ignored=tuple(ignored))
+                   on=on, off=off, clock=poss.get("clock", ()), clock_start=poss.get("clock_start"),
+                   origin=poss.get("origin", ()), ptype=poss.get("ptype", ()), chance=poss.get("chance"),
+                   ignored=tuple(ignored))
 
 
 def _validate_event_param(param: str, value: str) -> None:
@@ -185,14 +214,36 @@ def _parse_last(raw) -> int | None:
 def context_key(ctx: Context) -> tuple:
     """Clave de memo/caché del contexto."""
     return (ctx.competition_id, ctx.competition_all, ctx.last, ctx.venue, ctx.opponent, ctx.rest,
-            ctx.quarters, ctx.score, ctx.on, ctx.off)
+            ctx.quarters, ctx.score, ctx.on, ctx.off,
+            ctx.clock, ctx.clock_start, ctx.origin, ctx.ptype, ctx.chance)
 
 
 def has_event_filters(ctx: Context) -> bool:
     return bool(ctx.quarters or ctx.score or ctx.on or ctx.off)
 
 
+def has_possession_filters(ctx: Context) -> bool:
+    return bool(ctx.origin or ctx.ptype or has_chance_filters(ctx))
+
+
+def has_chance_filters(ctx: Context) -> bool:
+    """Filtros cuya unidad es la oportunidad (A-04/A-05): con ellos las métricas se calculan por oportunidad."""
+    return bool(ctx.clock or ctx.clock_start or ctx.chance)
+
+
+def without_possession(ctx: Context) -> Context:
+    return replace(ctx, clock=(), clock_start=None, origin=(), ptype=(), chance=None)
+
+
+def without_filters(ctx: Context) -> Context:
+    """Solo la competencia: sin partido, evento ni posesión (¿la entidad existe?)."""
+    return replace(without_possession(ctx), last=None, venue=None, opponent=None, rest=None,
+                   quarters=(), score=None, on=(), off=())
+
+
 def level(ctx: Context) -> str:
+    if has_possession_filters(ctx):
+        return "posesion"
     return "evento" if has_event_filters(ctx) else "partido"
 
 
@@ -325,6 +376,18 @@ def context_echo(ctx: Context, *, games_used: int, games_total: int, games_exclu
         if ids:
             applied[p] = ",".join(str(i) for i in ids)
             parts.append(f"{word} {_players_label(ids)}")
+    labels = possession_labels()
+    for p in ("origin", "ptype", "clock"):
+        vals = getattr(ctx, p)
+        if vals:
+            applied[p] = ",".join(vals)
+            parts.append(" | ".join(labels[p][v] for v in vals))
+    if ctx.clock_start:
+        applied["clock_start"] = ctx.clock_start
+        parts.append(labels["clock_start"][ctx.clock_start])
+    if ctx.chance:
+        applied["chance"] = ctx.chance
+        parts.append(labels["chance"][ctx.chance])
     all_ignored = list(ignored) + [{"param": p, "reason": r} for p, r in ctx.ignored]
     return {
         "competition": {"id": ctx.competition_id, "label": comp_label},
@@ -339,10 +402,26 @@ def context_echo(ctx: Context, *, games_used: int, games_total: int, games_exclu
     }
 
 
+def possession_labels() -> dict:
+    """Rótulos de los valores de posesión (los dueños son A-02…A-05)."""
+    import origin as origin_mod
+    import possession_clock
+    import transition
+    return {
+        "origin": dict(origin_mod.LABELS),
+        "ptype": dict(transition.LABELS),
+        "clock": dict(possession_clock.BAND_LABELS),
+        "clock_start": {"24": "Reloj de 24", "14": "Reloj de 14"},
+        "chance": {"primera": "Primera oportunidad", "segunda": "Segunda oportunidad o posterior"},
+    }
+
+
 def dimensions(comp_id: int | None) -> list[dict]:
-    """Dimensiones del contrato y si se pueden ofrecer hoy (RF-14, RF-15)."""
-    def d(name, level, values, available=True):
-        return {"name": name, "level": level, "values": values, "available": available}
+    """Dimensiones del contrato y si se pueden ofrecer (RF-14, RF-15). Las de posesión llevan sus rótulos y si son
+    listas (`multi`)."""
+    def d(name, level, values, available=True, **extra):
+        return {"name": name, "level": level, "values": values, "available": available, **extra}
+    labels = possession_labels()
     return [
         d("last", "partido", [3, 5, 10]),
         d("venue", "partido", list(VENUES)),
@@ -352,5 +431,7 @@ def dimensions(comp_id: int | None) -> list[dict]:
         d("score", "evento", list(_SCORE_VALUES)),
         d("on", "evento", []),
         d("off", "evento", []),
-        *[d(p, "posesion", list(_POSSESSION_VALUES[p]), False) for p in POSSESSION_PARAMS],
+        *[d(p, "posesion", list(_POSSESSION_VALUES[p]), True, multi=p in _POSSESSION_CSV,
+            labels={v: labels[p][v] for v in _POSSESSION_VALUES[p]}, unit="oportunidad" if p in CHANCE_PARAMS else "posesion")
+          for p in POSSESSION_PARAMS],
     ]

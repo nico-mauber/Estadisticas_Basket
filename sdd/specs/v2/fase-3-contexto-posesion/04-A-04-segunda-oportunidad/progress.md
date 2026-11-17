@@ -1,6 +1,6 @@
 # Progress — A-04: Segunda oportunidad
 
-> **Estado:** 🔶 Implementado en Equipo (ataque y defensa) y Jugador, con conciliación contra el box oficial, entidad `chance` (T-05) y tabla `team_second_chance` (T-06); falta el filtro de contexto `chance` sobre otras vistas
+> **Estado:** 🔶 Implementado en Equipo (ataque y defensa) y Jugador, con conciliación contra el box oficial, entidad `chance` (T-05) y tabla `team_second_chance` (T-06); filtro de contexto `chance` de T-03 en Equipo y Jugador
 
 ## Estado de tareas
 - [x] Enriquecedor `enrich_chances` (desenlace, modo, segundos, origen del rebote, captura y finalización) y campos nuevos en `Chance`
@@ -28,7 +28,7 @@ Seed local (13 partidos, todos con ingesta v5): `test_client` y Chromium 1280 px
 | CA-8 | ✅ | Sin rebotes: el panel muestra "No hay rebotes ofensivos en esta selección."; tasas `null` / `sin_intentos` |
 | CA-9 | ✅ | Badge "baja" y fila en gris bajo `sample.split.min` |
 | CA-10 | ✅ | OR% concedido de ALB = 0,3176 = 1 − DR% (0,6824) |
-| CA-11 / CA-12 | ❌ | Filtro `chance` y entidad `chance` pendientes |
+| CA-11 / CA-12 | ✅ | Entidad `chance` (2026-11-16) y filtro `chance=primera|segunda` de T-03 (2026-11-17): `chance=segunda` en el equipo = entidad `chance` (18 pts) |
 | CA-13 | ✅ (por construcción) | Partidos sin ingesta actual quedan en `reconcile.excluded` con `no_registrado`; el origen del RO no depende de `previous_action` (usa el evento de cierre de la oportunidad anterior) |
 | CA-14 | ⬜ | Móvil (360 px) no verificado para este panel (las tablas reutilizan los estilos de Origen y Transición, ya verificados) |
 
@@ -46,3 +46,6 @@ Seed local (13 partidos, todos con ingesta v5): `test_client` y Chromium 1280 px
 - Evidencia: `a04_sim.py` 18/18 (oportunidades y puntos = `GET /api/second-chance`, Σ filas = segundas oportunidades en las tres secciones, puntos por desenlace = reporte, primera = posesiones completas) y `tables_browser.py` en Chromium (1280 y 360 px, CSV con cabecera, inglés sin textos sin traducir).
 - Desvío: los rebotes se asignan por estructura (el RO que abre la siguiente oportunidad es de la que termina) para que PPP/OER/OR% por oportunidad tengan sentido; sin percentiles por fila ni promedio de competencia en la tabla (las filas son subgrupos sin población propia).
 - Pendiente: T-B10, la dimensión de contexto `chance` para filtrar otras vistas (va con el resto de filtros de posesión de T-03).
+
+## Filtro `chance` (2026-11-17)
+- Filtro de contexto `chance` de T-03 (2026-11-17): `GET /api/metrics/team|player?chance=…` y los bloques estándar de Equipo y Jugador lo aplican (ver T-03 progress, `t03p_sim.py`); la barra de contexto lo ofrece en el subpanel Posesión.
