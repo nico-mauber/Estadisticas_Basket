@@ -1557,5 +1557,14 @@
 "No se pudo calcular el conjunto estándar de la celda.": "The cell's standard set could not be computed.",
 "{#} libres": "{1} free throws",
 "{#} pérdidas": "{1} turnovers",
-"{#} tiros de campo": "{1} field goal attempts"
+"{#} tiros de campo": "{1} field goal attempts",
+"Conjunto estándar por cadena": "Standard set by chain",
+"Posesiones del rival que siguen a cada pérdida: lo que la pérdida costó.": "Opponent possessions that follow each turnover: what the turnover cost.",
+"Oportunidades tras rebote ofensivo propio.": "Chances after an own offensive rebound.",
+"Posesiones propias de la cadena.": "Own possessions in the chain.",
+"No se pudo calcular el conjunto estándar de la cadena.": "The chain's standard set could not be computed.",
+"{#} asistencias se vincularon por proximidad: sus partidos se importaron sin el vínculo de FIBA. Reprocesalos (Datos › Calidad) para el vínculo exacto.": "{1} assists were linked by proximity: their games were imported without FIBA's link. Reprocess them (Data › Quality) for the exact link.",
+"{#} asistencia se vinculó por proximidad: sus partidos se importaron sin el vínculo de FIBA. Reprocesalos (Datos › Calidad) para el vínculo exacto.": "{1} assist was linked by proximity: its games were imported without FIBA's link. Reprocess them (Data › Quality) for the exact link.",
+"{#}.º de {#} (por partido)": "#{1} of {2} (per game)",
+"={#}.º de {#} (por partido)": "=#{1} of {2} (per game)"
 }

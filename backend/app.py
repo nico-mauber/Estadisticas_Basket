@@ -1195,7 +1195,7 @@ def rankings_route(entity_type: str, metric_key: str):
     es siempre por partido)."""
     from metrics_catalog import METRICS
 
-    valid_types = ("team", "player", "lineup", "onoff", "clutch")
+    valid_types = ("team", "player", "lineup", "onoff", "clutch", "origin", "ptype", "chance", "clock", "chain")
     if entity_type not in valid_types:
         return jsonify({"error": "Tipo de entidad desconocido", "code": "parametro_invalido"}), 400
     mdef = METRICS.get(metric_key)
@@ -1221,6 +1221,15 @@ def rankings_route(entity_type: str, metric_key: str):
     if entity_type == "lineup" and raw_id and ":" in str(raw_id):
         pids = [p for p in str(raw_id).split(":", 1)[1].split("-") if p.strip()]
         variant = len(pids) or None
+    # Tipos con variante (A-02…A-05, A-07): la población es la de los equipos en el MISMO origen, tipo, oportunidad,
+    # tramo o cadena; sin `id` no hay variante y no se puede armar el ranking.
+    if entity_type in ("origin", "ptype", "chance", "clock", "chain"):
+        if not raw_id or ":" not in str(raw_id):
+            return jsonify({"error": "Indicá el id (equipo:clave) para este tipo de entidad.", "code": "parametro_invalido"}), 400
+        key = str(raw_id).split(":", 1)[1]
+        variant = key if entity_type == "chain" else f"{key}:{request.args.get('side') or 'ataque'}"
+        if entity_type != "chain":
+            raw_id = str(raw_id).split(":", 1)[0].upper()   # los miembros de esas poblaciones se identifican por equipo
 
     result = population.full_ranking(entity_type, metric_key, ctx.competition_id, ctx,
                                      highlight_id=raw_id, variant=variant)

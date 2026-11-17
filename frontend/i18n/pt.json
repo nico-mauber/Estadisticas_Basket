@@ -1557,5 +1557,14 @@
 "No se pudo calcular el conjunto estándar de la celda.": "Não foi possível calcular o conjunto padrão da célula.",
 "{#} libres": "{1} lances livres",
 "{#} pérdidas": "{1} perdas",
-"{#} tiros de campo": "{1} arremessos de quadra"
+"{#} tiros de campo": "{1} arremessos de quadra",
+"Conjunto estándar por cadena": "Conjunto padrão por cadeia",
+"Posesiones del rival que siguen a cada pérdida: lo que la pérdida costó.": "Posses do adversário que seguem cada perda: o que a perda custou.",
+"Oportunidades tras rebote ofensivo propio.": "Oportunidades após rebote ofensivo próprio.",
+"Posesiones propias de la cadena.": "Posses próprias da cadeia.",
+"No se pudo calcular el conjunto estándar de la cadena.": "Não foi possível calcular o conjunto padrão da cadeia.",
+"{#} asistencias se vincularon por proximidad: sus partidos se importaron sin el vínculo de FIBA. Reprocesalos (Datos › Calidad) para el vínculo exacto.": "{1} assistências foram vinculadas por proximidade: os jogos foram importados sem o vínculo da FIBA. Reprocesse-os (Dados › Qualidade) para o vínculo exato.",
+"{#} asistencia se vinculó por proximidad: sus partidos se importaron sin el vínculo de FIBA. Reprocesalos (Datos › Calidad) para el vínculo exacto.": "{1} assistência foi vinculada por proximidade: os jogos foram importados sem o vínculo da FIBA. Reprocesse-os (Dados › Qualidade) para o vínculo exato.",
+"{#}.º de {#} (por partido)": "{1}.º de {2} (por jogo)",
+"={#}.º de {#} (por partido)": "={1}.º de {2} (por jogo)"
 }
