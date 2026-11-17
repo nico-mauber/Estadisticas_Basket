@@ -1544,5 +1544,13 @@
 "Riesgo": "Risco",
 "Ventaja": "Vantagem",
 "Ventajas": "Vantagens",
-"Vulnerabilidades": "Vulnerabilidades"
+"Vulnerabilidades": "Vulnerabilidades",
+"Todo el equipo": "Toda a equipe",
+"Cada oportunidad y cada tiro cuentan para el quinteto en cancha al inicio de su posesión. La composición de los puntos (box oficial) es solo del equipo.": "Cada oportunidade e cada arremesso contam para o quinteto em quadra no início da sua posse. A composição dos pontos (box oficial) é só da equipe.",
+"Tiros: {#} en reloj de {#} s + {#} en reloj de {#} s + {#} sin reloj + {#} en posesiones incompletas = {#}: tiros de las posesiones de este quinteto.": "Arremessos: {1} no relógio de {2} s + {3} no relógio de {4} s + {5} sem relógio + {6} em posses incompletas = {7}: arremessos das posses deste quinteto.",
+"Tiros (y puntos por tiro) de cada zona en cada tramo, con ambos relojes. Las celdas grises tienen muestra baja. El color compara el PPT de la celda con el de los demás equipos en la misma celda (verde: tercio superior; rojo: tercio inferior).": "Arremessos (e pontos por arremesso) de cada zona em cada faixa, com ambos os relógios. As células cinzas têm amostra baixa. A cor compara o PPT da célula com o das demais equipes na mesma célula (verde: terço superior; vermelho: terço inferior).",
+"sin percentil": "sem percentil",
+"{#}% de los tiros del tramo": "{1}% dos arremessos da faixa",
+"percentil {#} (Ø PPT {#})": "percentil {1} (Ø PPT {2})",
+"Sin muestra suficiente para elegir un tramo.": "Amostra insuficiente para escolher uma faixa."
 }

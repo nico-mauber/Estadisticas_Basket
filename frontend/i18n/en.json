@@ -1544,5 +1544,13 @@
 "Riesgo": "Risk",
 "Ventaja": "Advantage",
 "Ventajas": "Advantages",
-"Vulnerabilidades": "Vulnerabilities"
+"Vulnerabilidades": "Vulnerabilities",
+"Todo el equipo": "Whole team",
+"Cada oportunidad y cada tiro cuentan para el quinteto en cancha al inicio de su posesión. La composición de los puntos (box oficial) es solo del equipo.": "Each chance and each shot counts for the lineup on the floor at the start of its possession. The points breakdown (official box score) is team-only.",
+"Tiros: {#} en reloj de {#} s + {#} en reloj de {#} s + {#} sin reloj + {#} en posesiones incompletas = {#}: tiros de las posesiones de este quinteto.": "Shots: {1} on the {2} s clock + {3} on the {4} s clock + {5} without a clock + {6} in incomplete possessions = {7}: shots from this lineup's possessions.",
+"Tiros (y puntos por tiro) de cada zona en cada tramo, con ambos relojes. Las celdas grises tienen muestra baja. El color compara el PPT de la celda con el de los demás equipos en la misma celda (verde: tercio superior; rojo: tercio inferior).": "Shots (and points per shot) from each zone in each segment, with both clocks. Gray cells have a low sample. The color compares the cell's PPT with the other teams in the same cell (green: top third; red: bottom third).",
+"sin percentil": "no percentile",
+"{#}% de los tiros del tramo": "{1}% of the segment's shots",
+"percentil {#} (Ø PPT {#})": "percentile {1} (Ø PPT {2})",
+"Sin muestra suficiente para elegir un tramo.": "Not enough sample to pick a segment."
 }

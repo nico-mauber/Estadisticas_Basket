@@ -329,8 +329,44 @@ def _players_table(chs, done_shots):
                        for b in BANDS}}
 
 
-def _matrix(done_shots):
-    """Matriz zona × tramo (ambos relojes): intentos, FG%, eFG% y PPT por celda; Σ de cada tramo = tiros del tramo."""
+def _cell_counts(done_shots):
+    """{(zona, tramo): {attempts, made, made3, pts}} de una lista de tiros (ambos relojes)."""
+    cells = defaultdict(lambda: {"attempts": 0, "made": 0, "made3": 0, "pts": 0})
+    for s in done_shots:
+        c = cells[(s.get("zone") or "sin_zona", s["band"] or "sin_reloj")]
+        c["attempts"] += 1
+        c["made"] += 1 if s["made"] else 0
+        c["made3"] += 1 if (s.get("three") and s["made"]) else 0
+        c["pts"] += s["pts"]
+    return cells
+
+
+def _league_matrix(comp_id, ctx, side):
+    """PPT de cada equipo en cada celda zona × tramo (población de la matriz, RF-11/RF-14): {(zona, tramo): {equipo: ppt}}.
+    Solo las celdas con la muestra mínima de `sample.clock_zone.min` (las de muestra baja no se colorean ni rankean)."""
+    if comp_id is None:
+        return None
+    import dataclasses
+
+    def build():
+        cx = dataclasses.replace(ctx, on=(), off=())
+        mn = config.get("sample.clock_zone.min")
+        out = defaultdict(dict)
+        for code in sorted({r["team_code"] for r in repository.team_game_rows(comp_id).values()}):
+            mine, *_ = transition_mod._selection(code, comp_id, cx, side)
+            shots = [s for p in mine if not p.incomplete for s in p.shots]
+            for key, c in _cell_counts(shots).items():
+                if c["attempts"] >= mn:
+                    out[key][code] = c["pts"] / c["attempts"]
+        return dict(out)
+    return cache.memo("poss:clock_matrix_league", (comp_id, context_mod.context_key(ctx), side), build)
+
+
+def _matrix(done_shots, league=None, team_code=None):
+    """Matriz zona × tramo (ambos relojes): intentos, FG%, eFG% y PPT por celda; Σ de cada tramo = tiros del tramo.
+    Con `league` (población por celda) cada celda con muestra suficiente lleva el percentil de su PPT contra los demás
+    equipos en la MISMA celda y el promedio de la celda (RF-11, RF-14)."""
+    import population
     import shot_zones
     zones = list(shot_zones.ZONE_KEYS_11) + ["sin_zona"]
     cells = {z: {b: {"attempts": 0, "made": 0, "made3": 0, "pts": 0} for b in MATRIX_BANDS} for z in zones}
@@ -346,13 +382,25 @@ def _matrix(done_shots):
         for b in MATRIX_BANDS:
             c = cells[z][b]
             n = c["attempts"]
-            row["bands"][b] = {"attempts": n, "made": c["made"], "fg_pct": _m(_div(c["made"], n)),
-                               "efg_pct": _m(_div(c["made"] + 0.5 * c["made3"], n)), "ppt": _m(_div(c["pts"], n)),
-                               "sample": sample.sample_level("zone", n=n, unit="intentos")}
+            smp = sample.sample_level("zone", n=n, unit="intentos")
+            cell = {"attempts": n, "made": c["made"], "fg_pct": _m(_div(c["made"], n)),
+                    "efg_pct": _m(_div(c["made"] + 0.5 * c["made3"], n)), "ppt": _m(_div(c["pts"], n)),
+                    "sample": smp, "percentile": None, "avg_ppt": None,
+                    "percentile_reason": "sin_intentos" if not n else ("sin_universo" if league is None else None)}
+            if league is not None and n:
+                others = [v for code, v in (league.get((z, b)) or {}).items() if code != team_code]
+                cell["avg_ppt"] = _div(sum(others), len(others)) if others else None
+                if smp.get("level") == "baja":
+                    cell["percentile_reason"] = "muestra_baja"
+                elif len(others) < config.get("population.min_size"):
+                    cell["percentile_reason"] = "poblacion_insuficiente"
+                else:
+                    cell["percentile"] = population.percentile(c["pts"] / n, others, "higher")
+            row["bands"][b] = cell
         out.append(row)
     return {"zones": out, "bands": list(MATRIX_BANDS),
             "totals": {b: sum(cells[z][b]["attempts"] for z in zones) for b in MATRIX_BANDS},
-            "has_coordinates": any(s.get("zone") for s in done_shots)}
+            "has_coordinates": any(s.get("zone") for s in done_shots), "league": league is not None}
 
 
 def _band_means(team_code, comp_id, ctx, side):
@@ -439,8 +487,30 @@ def _decision(rows, players, league):
     }
 
 
-def _build(team_code, comp_id, ctx, side, game_id):
+def _lineup_of(p, side):
+    """Quinteto del equipo analizado al inicio de la posesión ("id-id-id-id-id", ids canónicos) o None (RF-9). En ataque
+    es el quinteto propio; en defensa, el del equipo que defiende (la posesión es del rival)."""
+    ids = p.own_on_court if side == "ataque" else p.opp_on_court
+    if not ids or len(ids) != 5:
+        return None
+    return "-".join(str(i) for i in sorted(identity.canonical_id(i) or i for i in ids))
+
+
+def _lineups(complete, side, limit=15):
+    """Quintetos con más posesiones del lado (para el selector) y cuántas no tienen quinteto de 5 identificado."""
+    cnt = Counter(_lineup_of(p, side) for p in complete)
+    none = cnt.pop(None, 0)
+    rows = [{"key": k, "possessions": n, "names": [_pname(int(i)) for i in k.split("-")]}
+            for k, n in sorted(cnt.items(), key=lambda kv: (-kv[1], kv[0]))[:limit]]
+    return {"rows": rows, "without_lineup": none, "total": len(cnt)}
+
+
+def _build(team_code, comp_id, ctx, side, game_id, lineup=None):
     mine, used, total, excluded, per_game = _selection(team_code, comp_id, ctx, side, game_id)
+    lineups_info = _lineups([p for p in mine if not p.incomplete], side)
+    if lineup:
+        # RF-9: cada oportunidad y cada tiro se atribuyen al quinteto en cancha al inicio de su posesión
+        mine = [p for p in mine if _lineup_of(p, side) == lineup]
     complete = [p for p in mine if not p.incomplete]
     cuts = _cuts()
     all_shots = [s for p in mine for s in p.shots]
@@ -468,7 +538,7 @@ def _build(team_code, comp_id, ctx, side, game_id):
     no_clock = sum(1 for s in done_shots if s["band"] is None)
     in_inc = sum(len(p.shots) for p in mine if p.incomplete)
     box = _box_rows(per_game, team_code, side)
-    fga_team = _sum(box, "fga2") + _sum(box, "fga3")
+    fga_team = _sum(box, "fga2") + _sum(box, "fga3") if not lineup else team["fga"]
     no_clock_ch = sum(1 for _, ch in chs if ch.band is None and (ch.box or {}).get("dec"))
     players_tbl = _players_table(chs, done_shots) if side == "ataque" else None
     return {
@@ -482,10 +552,13 @@ def _build(team_code, comp_id, ctx, side, game_id):
                       "ok": in24 + in14 + no_clock + in_inc == fga_team,
                       "chances_24": sum(1 for _, ch in chs if ch.shot_clock_start >= 24),
                       "chances_14": sum(1 for _, ch in chs if ch.shot_clock_start < 24)},
-        "points_mix": points_mix(box),
-        "matrix": _matrix(done_shots),
+        "points_mix": points_mix(box) if not lineup else None,
+        "matrix": _matrix(done_shots, _league_matrix(comp_id, ctx, side) if not game_id and not lineup else None, team_code),
+        "lineup": ({"key": lineup, "names": [_pname(int(i)) for i in lineup.split("-")]} if lineup else None),
+        "lineups": lineups_info,
         "players": players_tbl,
         "decision": _decision(rows, players_tbl, _league_bands(comp_id, ctx, side) if not game_id else None),
+        "reconcile_source": "motor" if lineup else "box",
         "summary": {"possessions": len(complete), "incomplete": len(mine) - len(complete), "shots": team["fga"]},
         "games_used": used, "games_total": total, "games_excluded": excluded,
     }
@@ -519,9 +592,9 @@ def player_clock(player_id, comp_id, ctx):
     return out
 
 
-def clock_report(team_code, comp_id, ctx, *, side="ataque", game_id=None):
-    key = (team_code, comp_id, context_mod.context_key(ctx), side, game_id)
-    out = dict(cache.memo("poss:clock", key, lambda: _build(team_code, comp_id, ctx, side, game_id)))
+def clock_report(team_code, comp_id, ctx, *, side="ataque", game_id=None, lineup=None):
+    key = (team_code, comp_id, context_mod.context_key(ctx), side, game_id, lineup)
+    out = dict(cache.memo("poss:clock", key, lambda: _build(team_code, comp_id, ctx, side, game_id, lineup)))
     out["context"] = transition_mod._echo(ctx, out.pop("games_used"), out.pop("games_total"), out.pop("games_excluded"))
     if game_id:
         out["game_id"] = game_id

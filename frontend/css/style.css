@@ -1508,6 +1508,11 @@ tbody tr.fuera-poblacion { opacity: .6; }
 .ctx-hint { margin: 8px 0 0; font-size: 12px; }
 /* Filtros de posesión: subpanel plegable dentro de la barra (A-02…A-05) */
 .ctx-poss { margin-top: 10px; border-top: 1px solid var(--border); padding-top: 8px; }
+.cp-cell-good { background: rgba(34, 197, 94, .16); }
+.cp-cell-bad { background: rgba(239, 68, 68, .16); }
+.cp-cell-mid { background: rgba(148, 163, 184, .10); }
+.cp-lineup-lbl { display: flex; flex-direction: column; gap: 4px; margin: 6px 0 10px; max-width: 100%; }
+.cp-lineup-lbl select { max-width: 100%; }
 .ctx-poss > summary { cursor: pointer; font-size: 12px; font-weight: 600; color: var(--muted); }
 .ctx-poss .ctx-q { max-width: 100%; white-space: normal; text-align: left; }
 

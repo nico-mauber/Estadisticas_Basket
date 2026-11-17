@@ -1004,9 +1004,15 @@ def possession_clock_route():
         return jsonify({"error": "El lado debe ser ataque o defensa.", "code": "parametro_invalido"}), 400
     if not any(r["team_code"] == team for r in repository.team_game_rows(None).values()):
         return jsonify({"error": "No encontramos ese equipo.", "code": "no_encontrado"}), 404
+    lineup = (request.args.get("lineup") or "").strip() or None   # RF-9: "id-id-id-id-id"
+    if lineup:
+        parts = lineup.split("-")
+        if len(parts) != 5 or not all(x.isdigit() for x in parts):
+            return jsonify({"error": "El quinteto debe tener cinco jugadores.", "code": "parametro_invalido"}), 400
+        lineup = "-".join(str(i) for i in sorted(identity.canonical_id(int(x)) or int(x) for x in parts))
     try:
         ctx = context_mod.parse_context(request.args, team_code=team)
-        out = possession_clock.clock_report(team, ctx.competition_id, ctx, side=side, game_id=game)
+        out = possession_clock.clock_report(team, ctx.competition_id, ctx, side=side, game_id=game, lineup=lineup)
     except ContextError as e:
         return jsonify(e.payload()), e.status
     out["entity"] = {"type": "team", "id": team}

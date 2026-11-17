@@ -23,6 +23,17 @@ function _setSideUrl(side) {
     history.replaceState(history.state, "", url);
   } catch { /* la URL no se pudo actualizar */ }
 }
+// Quinteto elegido (RF-9) en `?clineup=id-id-id-id-id`; vacío = todo el equipo.
+function _lineupFromUrl() {
+  try { return new URL(location.href).searchParams.get("clineup") || ""; } catch { return ""; }
+}
+function _setLineupUrl(key) {
+  try {
+    const url = new URL(location.href);
+    if (key) url.searchParams.set("clineup", key); else url.searchParams.delete("clineup");
+    history.replaceState(history.state, "", url);
+  } catch { /* la URL no se pudo actualizar */ }
+}
 
 const val = (m, fmt) => (!m || isNull(m.value) ? nullDisplay(m?.reason || "sin_intentos") : fmt(m.value));
 const low = o => o?.sample?.level === "baja";
@@ -90,6 +101,7 @@ function _bands(d) {
 function _reconcile(d) {
   const r = d.reconcile;
   const txt = `Tiros: ${r.in_bands_24} en reloj de 24 s + ${r.in_bands_14} en reloj de 14 s + ${r.no_clock} sin reloj + ${r.in_incomplete} en posesiones incompletas = ${r.in_bands_24 + r.in_bands_14 + r.no_clock + r.in_incomplete}`;
+  if (d.reconcile_source === "motor") return `<p class="td-muted">${txt}: tiros de las posesiones de este quinteto.</p>`;
   return r.ok
     ? `<p class="td-muted">${txt} (iguala los ${r.fga_team} del box oficial).</p>`
     : `<p class="td-muted below-avg">${txt}: diferencia con los ${r.fga_team} del box oficial. Revisá el motor de posesiones.</p>`;
@@ -157,6 +169,10 @@ function _decision(d, side) {
 }
 
 // ── Matriz zona × tramo ──
+// Color por percentil del PPT de la celda contra los demás equipos en la misma celda (RF-11); sin color si la muestra
+// es baja o no hay población. Tooltip con los 7 datos de C-03: zona y tramo, convertidos/intentos, FG%, eFG%, PPT,
+// peso en los tiros del tramo y percentil (con el promedio de la celda).
+const _pctClass = p => (p == null ? "" : p >= 67 ? " cp-cell-good" : p <= 33 ? " cp-cell-bad" : " cp-cell-mid");
 function _matrix(m) {
   if (!m.has_coordinates) {
     return '<p class="td-muted">Las zonas son aproximadas: reprocesá los partidos para ubicar cada tiro.</p>';
@@ -165,12 +181,25 @@ function _matrix(m) {
   const rows = m.zones.filter(z => cols.some(b => z.bands[b].attempts > 0)).map(z => `<tr><td class="of-origin">${esc(z.label)}</td>${cols.map(b => {
     const c = z.bands[b];
     if (!c.attempts) return '<td class="td-muted">—</td>';
-    return `<td class="${c.sample.level === "baja" ? "cp-cell-low" : ""}" title="${esc(`${c.made} de ${c.attempts} · FG% ${isNull(c.fg_pct.value) ? "—" : PCT(c.fg_pct.value)} · eFG% ${isNull(c.efg_pct.value) ? "—" : PCT(c.efg_pct.value)}`)}">
+    const share = m.totals[b] ? PCT(c.attempts / m.totals[b]) : "—";
+    const pctTxt = c.percentile == null ? "sin percentil" : `percentil ${c.percentile}${c.avg_ppt == null ? "" : ` (Ø PPT ${DEC2(c.avg_ppt)})`}`;
+    const tip = `${z.label} · ${BAND_NAME[b]}: ${c.made} de ${c.attempts} · FG% ${isNull(c.fg_pct.value) ? "—" : PCT(c.fg_pct.value)} · eFG% ${isNull(c.efg_pct.value) ? "—" : PCT(c.efg_pct.value)} · PPT ${isNull(c.ppt.value) ? "—" : DEC2(c.ppt.value)} · ${share} de los tiros del tramo · ${pctTxt}`;
+    return `<td class="${c.sample.level === "baja" ? "cp-cell-low" : _pctClass(c.percentile).trim()}" title="${esc(tip)}">
       <strong>${c.attempts}</strong> <small>· PPT ${isNull(c.ppt.value) ? "—" : DEC2(c.ppt.value)}</small></td>`;
   }).join("")}</tr>`);
   rows.push(`<tr class="of-total"><td class="of-origin">Total</td>${cols.map(b => `<td>${m.totals[b]}</td>`).join("")}</tr>`);
-  return `<p class="td-muted">Tiros (y puntos por tiro) de cada zona en cada tramo, con ambos relojes. Las celdas grises tienen muestra baja.</p>`
+  const legend = m.league ? " El color compara el PPT de la celda con el de los demás equipos en la misma celda (verde: tercio superior; rojo: tercio inferior)." : "";
+  return `<p class="td-muted">Tiros (y puntos por tiro) de cada zona en cada tramo, con ambos relojes. Las celdas grises tienen muestra baja.${legend}</p>`
     + table(["Zona", ...cols.map(b => BAND_NAME[b])], rows);
+}
+
+// Selector de quinteto (RF-9): el panel completo para las posesiones de un quinteto.
+function _lineupPicker(d, current) {
+  const ls = d.lineups;
+  if (!ls || !ls.rows.length) return "";
+  const opts = ls.rows.map(r => `<option class="notranslate" value="${esc(r.key)}"${r.key === current ? " selected" : ""}>${esc(r.names.join(", "))} (${r.possessions})</option>`);
+  return `<label class="gp-lbl cp-lineup-lbl">Quinteto <select class="map-select cp-lineup"><option value="">Todo el equipo</option>${opts.join("")}</select></label>`
+    + (current ? '<p class="td-muted">Cada oportunidad y cada tiro cuentan para el quinteto en cancha al inicio de su posesión. La composición de los puntos (box oficial) es solo del equipo.</p>' : "");
 }
 
 // ── Plantel por tramo (equipo, ataque) ──
@@ -228,7 +257,8 @@ export async function renderClockPanel(el, teamCode, opts = {}) {
 
   let d;
   try {
-    d = await api.possessionClock({ team, side, ...(game ? { game: opts.gameId } : (opts.params || {})) });
+    const lineup = game ? "" : _lineupFromUrl();
+    d = await api.possessionClock({ team, side, ...(game ? { game: opts.gameId } : { ...(opts.params || {}), ...(lineup ? { lineup } : {}) }) });
   } catch (e) {
     if (token !== _token) return;
     const offline = typeof navigator !== "undefined" && navigator.onLine === false;
@@ -241,15 +271,21 @@ export async function renderClockPanel(el, teamCode, opts = {}) {
   if (token !== _token) return;
   if (!d.summary.shots) { shell('<p class="empty">No hay tiros en esta selección.</p>'); return; }
   const ctx = d.context?.label ? `<p class="td-muted">${esc(d.context.label)}</p>` : "";
-  shell(ctx + sec("Composición de los puntos", _mix(d.points_mix, side)) + sec("Tramo del reloj de posesión", _bands(d))
+  const curLineup = d.lineup?.key || "";
+  shell(ctx + (game ? "" : _lineupPicker(d, curLineup))
+    + (d.points_mix ? sec("Composición de los puntos", _mix(d.points_mix, side)) : "") + sec("Tramo del reloj de posesión", _bands(d))
     + sec("Panel de decisión", _decision(d, side)) + sec("Matriz zona × tramo", _matrix(d.matrix))
     + (d.players ? sec("Jugadores por tramo", _playersTable(d.players)) : "") + _reconcile(d)
-    + (game ? "" : _clockTableShell()));
+    + (game || curLineup ? "" : _clockTableShell()));
+  el.querySelector(".cp-lineup")?.addEventListener("change", e => {
+    _setLineupUrl(e.target.value);
+    renderClockPanel(el, teamCode, opts);
+  });
   el.querySelectorAll(".cp-goside").forEach(b => b.addEventListener("click", () => {
     _setSideUrl(b.dataset.side);
     renderClockPanel(el, teamCode, opts);
   }));
-  if (!game) _mountClockTable(el, teamCode, side, opts.params || {});
+  if (!game && !curLineup) _mountClockTable(el, teamCode, side, opts.params || {});
 }
 
 // Tablas completas (T-06): conjunto estándar por tramo y reloj (`team_clock`) y matriz zona × tramo (`zone_clock_matrix`).
