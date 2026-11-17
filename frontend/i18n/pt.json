@@ -1566,5 +1566,10 @@
 "{#} asistencias se vincularon por proximidad: sus partidos se importaron sin el vínculo de FIBA. Reprocesalos (Datos › Calidad) para el vínculo exacto.": "{1} assistências foram vinculadas por proximidade: os jogos foram importados sem o vínculo da FIBA. Reprocesse-os (Dados › Qualidade) para o vínculo exato.",
 "{#} asistencia se vinculó por proximidad: sus partidos se importaron sin el vínculo de FIBA. Reprocesalos (Datos › Calidad) para el vínculo exacto.": "{1} assistência foi vinculada por proximidade: os jogos foram importados sem o vínculo da FIBA. Reprocesse-os (Dados › Qualidade) para o vínculo exato.",
 "{#}.º de {#} (por partido)": "{1}.º de {2} (por jogo)",
-"={#}.º de {#} (por partido)": "={1}.º de {2} (por jogo)"
+"={#}.º de {#} (por partido)": "={1}.º de {2} (por jogo)",
+"+/- del quinteto en el partido (solo con los cinco en cancha). Verde = victoria del equipo, rojo = derrota.": "+/- do quinteto no jogo (só com os cinco em quadra). Verde = vitória da equipe, vermelho = derrota.",
+"Ver tendencias": "Ver tendências",
+"Avanzado": "Avançado",
+"Muestra baja": "Amostra baixa",
+"fuera de la población": "fora da população"
 }

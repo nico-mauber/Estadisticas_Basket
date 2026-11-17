@@ -10,6 +10,7 @@ import { exportMenu } from "./export-menu.js";
 import { sampleBadge } from "./sample-badge.js";
 import { metricLabel } from "../core/catalog.js";
 import { DEC1, DEC2, PCT, isNull, fmtMetric, nullDisplay } from "../core/format.js";
+import { renderTrends } from "./trends-panel.js";
 
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
@@ -204,6 +205,10 @@ export async function renderLineupsBlock(el, teamCode, opts = {}) {
     detailHost.hidden = false;
     detailHost.innerHTML = _detailHTML(p, row);
     el.classList.add("lb-detail-open");
+    // Evolución del quinteto partido a partido (F-18): solo los partidos en que jugaron los jugadores elegidos juntos.
+    const lid = _lineupTrendId(row.link);
+    const th = detailHost.querySelector(".lb-trends");
+    if (lid && th) renderTrends(th, "lineup", lid, { params, base, entityName: row.values[p.columns.findIndex(c => c.key === "_players")] });
     detailHost.querySelector(".lb-back").addEventListener("click", () => {
       _openDetailId = null;
       detailHost.hidden = true;
@@ -288,6 +293,12 @@ export async function renderLineupsBlock(el, teamCode, opts = {}) {
 }
 
 // Detalle de un quinteto: se abre al tocar una fila o una tarjeta y se cierra con "Volver".
+// `lineup:EQUIPO:pid-pid-…` (link de la tabla `team_lineups`) → id de la entidad `EQUIPO:pid-pid-…`.
+function _lineupTrendId(link) {
+  const m = /^lineup:(.+)$/.exec(String(link || ""));
+  return m ? m[1] : null;
+}
+
 function _detailHTML(payload, row) {
   const idx = k => payload.columns.findIndex(c => c.key === k);
   const names = String(row.values[idx("_players")] || "").split(" · ");
@@ -312,6 +323,7 @@ function _detailHTML(payload, row) {
       <div class="card-title">${b.label}</div>
       <div class="stat-grid">${b.keys.map(cell).join("")}</div>
     </div>`).join("")}
+    <div class="lb-trends"></div>
   </div>`;
 }
 

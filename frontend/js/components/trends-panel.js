@@ -1,5 +1,5 @@
 // ── Tendencias y evolución (F-18) ────────────────────────────────────────────
-// Un único componente para equipo y jugador: hasta tres métricas del conjunto estándar partido a partido, con media móvil,
+// Un único componente para equipo, jugador y quinteto: hasta tres métricas del conjunto estándar partido a partido, con media móvil,
 // Ø de la competencia como referencia, diferencia de puntos por partido, indicador de tendencia (últimos N contra el resto,
 // con significancia) y hitos (sede, racha cortada, ausencias de jugadores clave). El cálculo es del servidor (`/api/trends`).
 import { api } from "../api.js";
@@ -13,40 +13,56 @@ const COLORS = ["#ff6a00", "#4ea1ff", "#3ecf8e"];
 const PRESET_LABEL = { pts_vs_rec: "Puntos anotados y recibidos", oer_der: "OER y DER", efg_to: "eFG% y TO%" };
 const PRESETS = [["pts_vs_rec", ["pts", "pts_against"]], ["oer_der", ["oer", "der"]], ["efg_to", ["efg_pct", "to_pct"]]];
 const MA_OPTIONS = [["3", "Media móvil de 3"], ["5", "Media móvil de 5"], ["10", "Media móvil de 10"], ["0", "Sin media móvil"]];
-let _token = 0;
-const _charts = {};
+// Cada instancia (Resumen compacto, Game log / Tendencias, detalle de un quinteto) vive en su propio `el`: los controles y los
+// lienzos se buscan dentro de él y el token de respuesta es por elemento.
 
 const _scale = fmt => (fmt === "pct" ? "pct" : fmt === "dec2" || fmt === "signed_dec2" ? "ratio" : "count");
 const _fmt = (fmt, v) => v == null ? "—" : fmt === "pct" ? PCT(v) : fmt === "dec1" ? DEC1(v) : fmt === "signed_dec2" ? fmtSigned(v, 2) : fmt === "int" ? fmtNumber(v, 0) : DEC2(v);
 const _dfmt = (fmt, v) => v == null ? "—" : fmt === "pct" ? fmtSigned(v * 100, 1) + " pp" : fmt === "dec1" ? fmtSigned(v, 1) : fmtSigned(v, 2);
 const _reason = r => ({ dnp: "No jugó", sin_intentos: "Sin intentos", sin_perdidas: "Sin pérdidas", sin_datos: "Sin datos", no_registrado: "No registrado", sin_pbp: "Sin play-by-play" }[r] || "Sin dato");
 
-function _destroy(id) { if (_charts[id]) { _charts[id].destroy(); delete _charts[id]; } }
+function _destroyIn(el) {
+  el.querySelectorAll("canvas").forEach(c => { try { (window.Chart?.getChart?.(c))?.destroy(); } catch { /* sin gráfico */ } });
+}
 
-function _fixedState(opts) {
-  const defaults = ["oer", "der"];
+// Por defecto: el equipo y el quinteto miran OER y DER; el jugador, puntos y TS%.
+const DEFAULTS = { team: ["oer", "der"], lineup: ["oer", "der"], player: ["pts", "ts_pct"] };
+function _fixedState(opts, entity) {
+  const defaults = DEFAULTS[entity] || ["oer", "der"];
   return { metrics: opts.metrics?.length ? opts.metrics : defaults, ma: opts.ma ?? null, lastN: opts.lastN ?? null };
 }
 
-/** `entity`: "team" | "player". `opts`: `params` (contexto), `base`, `metrics`, `ma`, `lastN`, `onChange(state)`. */
+/** `entity`: "team" | "player" | "lineup" (id `EQUIPO:pid-pid-…`). `opts`: `params` (contexto), `base`, `metrics`, `ma`, `lastN`,
+ * `onChange(state)`, `entityName`. `compact`: una tarjeta "Evolución por partido" con el gráfico y un enlace `onMore` a la vista
+ * completa (reemplaza los gráficos fijos de Resumen). */
 export async function renderTrends(el, entity, id, opts = {}) {
   if (!el) return;
-  const token = ++_token;
-  const st = _fixedState(opts);
-  el.innerHTML = '<div class="card"><div class="card-title">Evolución y tendencias</div><p class="empty"><span class="spinner"></span>Calculando…</p></div>';
+  const token = el._trToken = (el._trToken || 0) + 1;
+  const st = _fixedState(opts, entity);
+  _destroyIn(el);
+  el.innerHTML = `<div class="card"><div class="card-title">${opts.compact ? "Evolución por partido" : "Evolución y tendencias"}</div><p class="empty"><span class="spinner"></span>Calculando…</p></div>`;
   let d;
   try {
     await loadCatalog();
     d = await api.trends({ entity, id, metrics: st.metrics.join(","), ma: st.ma && st.ma !== 0 ? st.ma : null, last_n: st.lastN, base: opts.base || "partido", ...(opts.params || {}) });
   } catch (e) {
-    if (token !== _token) return;
+    if (token !== el._trToken) return;
     const msg = e instanceof TypeError || navigator.onLine === false ? "Sin conexión: el gráfico necesita conexión." : e.message || "No se pudo cargar.";
-    el.innerHTML = `<div class="card"><div class="card-title">Evolución y tendencias</div><p class="empty below-avg">${esc(msg)}</p></div>`;
+    el.innerHTML = `<div class="card"><div class="card-title">${opts.compact ? "Evolución por partido" : "Evolución y tendencias"}</div><p class="empty below-avg">${esc(msg)}</p></div>`;
     return;
   }
-  if (token !== _token) return;
+  if (token !== el._trToken) return;
   const maOn = st.ma !== 0;
   const ma = st.ma ?? d.ma;
+  if (opts.compact) {
+    // Resumen: solo el gráfico de las métricas por defecto, con media móvil y Ø; el resto está en la vista completa.
+    el.innerHTML = `<div class="card tr-card tr-compact"><div class="card-title">Evolución por partido</div>
+      ${d.games.length ? '<div class="tr-chart"><canvas class="tr-canvas" height="200"></canvas></div>' : '<p class="empty">Sin partidos en la selección.</p>'}
+      ${opts.onMore ? '<button type="button" class="btn btn-ghost btn-sm tr-more">Ver tendencias</button>' : ""}</div>`;
+    el.querySelector(".tr-more")?.addEventListener("click", () => opts.onMore());
+    _draw(d, maOn, entity, el);
+    return;
+  }
   const metricsAll = groupsFor(entity).map(g => `<optgroup label="${esc(g.label)}">${g.metrics.filter(k => metricDef(k)?.base_mode !== "volume" && metricDef(k)?.direction !== undefined)
     .map(k => `<option value="${esc(k)}">${esc(metricLabel(k))}</option>`).join("")}</optgroup>`).join("");
   const sel = i => `<select class="map-select tr-metric" data-i="${i}" aria-label="Serie ${i + 1}"><option value="">${i === 0 ? "Métrica" : "— ninguna —"}</option>${metricsAll}</select>`;
@@ -55,16 +71,16 @@ export async function renderTrends(el, entity, id, opts = {}) {
       <label class="gp-lbl">Pares frecuentes<span class="tr-presets">${PRESETS.map(([k]) => `<button type="button" class="filter-pill tr-preset" data-preset="${k}">${esc(PRESET_LABEL[k])}</button>`).join("")}</span></label>
     </div>
     <div class="ld-controls tr-controls">${[0, 1, 2].map(sel).join("")}
-      <label class="gp-lbl">Media móvil<select class="map-select" id="tr-ma">${MA_OPTIONS.map(([v, l]) => `<option value="${v}"${(maOn ? String(ma) : "0") === v ? " selected" : ""}>${l}</option>`).join("")}</select></label>
-      <label class="gp-lbl">Últimos N (tendencia)<input id="tr-n" type="number" min="1" class="ld-min" value="${d.last_n}"></label>
-      <span id="tr-export"></span></div>
-    <p class="tr-warn below-avg" id="tr-warn" role="status" hidden></p>
-    <div class="tr-chart"><canvas id="tr-canvas" height="240"></canvas></div>
+      <label class="gp-lbl">Media móvil<select class="map-select tr-ma">${MA_OPTIONS.map(([v, l]) => `<option value="${v}"${(maOn ? String(ma) : "0") === v ? " selected" : ""}>${l}</option>`).join("")}</select></label>
+      <label class="gp-lbl">Últimos N (tendencia)<input type="number" min="1" class="ld-min tr-n" value="${d.last_n}"></label>
+      <span class="tr-export"></span></div>
+    <p class="tr-warn below-avg" role="status" hidden></p>
+    <div class="tr-chart"><canvas class="tr-canvas" height="240"></canvas></div>
     <p class="td-muted">Línea punteada: media móvil. Línea fina horizontal: Ø de la competencia. Los partidos sin valor quedan como hueco (no se dibujan como 0).
       Marcadores: ▲ visitante, ● local; el borde rojo marca un partido que cortó una racha; el tooltip muestra las ausencias de jugadores clave.</p></div>
-    <div class="card"><div class="card-title">Diferencia de puntos por partido</div><div class="tr-chart"><canvas id="tr-diff" height="150"></canvas></div>
-      <p class="td-muted">${entity === "team" ? "Puntos anotados menos puntos recibidos." : "+/- del jugador en el partido."} Verde = victoria del equipo, rojo = derrota.</p></div>
-    <div class="card"><div class="card-title">Tendencia: últimos ${d.last_n} partidos contra el resto</div><div class="tr-trends" id="tr-trends"></div></div>`;
+    <div class="card"><div class="card-title">Diferencia de puntos por partido</div><div class="tr-chart"><canvas class="tr-diff" height="150"></canvas></div>
+      <p class="td-muted">${entity === "team" ? "Puntos anotados menos puntos recibidos." : entity === "lineup" ? "+/- del quinteto en el partido (solo con los cinco en cancha)." : "+/- del jugador en el partido."} Verde = victoria del equipo, rojo = derrota.</p></div>
+    <div class="card"><div class="card-title">Tendencia: últimos ${d.last_n} partidos contra el resto</div><div class="tr-trends"></div></div>`;
   el.querySelectorAll(".tr-metric").forEach((s, i) => { s.value = d.series[i]?.metric || ""; });
 
   const change = patch => opts.onChange?.({ metrics: st.metrics, ma: maOn ? ma : 0, lastN: d.last_n, ...patch });
@@ -72,7 +88,7 @@ export async function renderTrends(el, entity, id, opts = {}) {
   el.querySelectorAll(".tr-metric").forEach(s => s.addEventListener("change", () => {
     const m = picked();
     const scales = new Set(m.map(k => _scale(metricDef(k)?.fmt)));
-    const warn = el.querySelector("#tr-warn");
+    const warn = el.querySelector(".tr-warn");
     if (!m.length) return;
     if (new Set(m).size !== m.length) { warn.textContent = "Elegí métricas distintas."; warn.hidden = false; return; }
     if (scales.size > 2) { warn.textContent = "Solo hay dos ejes: elegí métricas de, como mucho, dos escalas distintas (porcentajes, razones o conteos)."; warn.hidden = false; return; }
@@ -80,11 +96,11 @@ export async function renderTrends(el, entity, id, opts = {}) {
     change({ metrics: m });
   }));
   el.querySelectorAll(".tr-preset").forEach(b => b.addEventListener("click", () => change({ metrics: PRESETS.find(p => p[0] === b.dataset.preset)[1].filter(k => !metricDef(k) || metricDef(k).entities.includes(entity)) })));
-  el.querySelector("#tr-ma").addEventListener("change", e => change({ ma: Number(e.target.value) }));
-  el.querySelector("#tr-n").addEventListener("change", e => change({ lastN: Math.max(1, Number(e.target.value) || d.last_n) }));
+  el.querySelector(".tr-ma").addEventListener("change", e => change({ ma: Number(e.target.value) }));
+  el.querySelector(".tr-n").addEventListener("change", e => change({ lastN: Math.max(1, Number(e.target.value) || d.last_n) }));
 
-  _draw(d, maOn, entity);
-  _renderTrends(el.querySelector("#tr-trends"), d);
+  _draw(d, maOn, entity, el);
+  _renderTrends(el.querySelector(".tr-trends"), d);
   // Exportación (F-18 RF-14): CSV/XLSX con la serie partido a partido (valor y media móvil de cada métrica) y PNG/PDF con los
   // gráficos y la cabecera de contexto. El canvas no se clona: va como imagen.
   const meta = {
@@ -107,8 +123,8 @@ export async function renderTrends(el, entity, id, opts = {}) {
   });
   const imageNode = () => {
     const box = document.createElement("div");
-    for (const cid of ["tr-canvas", "tr-diff"]) {
-      const c = document.getElementById(cid);
+    for (const cls of ["tr-canvas", "tr-diff"]) {
+      const c = el.querySelector(`.${cls}`);
       if (!c) continue;
       const img = document.createElement("img");
       img.src = c.toDataURL("image/png");
@@ -117,12 +133,11 @@ export async function renderTrends(el, entity, id, opts = {}) {
     }
     return buildExportNode(box, meta, `${d.games.length} partidos`);
   };
-  exportMenu(el.querySelector("#tr-export"), { getData, render: { png: imageNode, pdf: imageNode } });
+  exportMenu(el.querySelector(".tr-export"), { getData, render: { png: imageNode, pdf: imageNode } });
 }
 
-function _draw(d, maOn, entity) {
-  _destroy("tr-canvas"); _destroy("tr-diff");
-  const canvas = document.getElementById("tr-canvas");
+function _draw(d, maOn, entity, el) {
+  const canvas = el.querySelector(".tr-canvas");
   if (!canvas || !d.games.length) return;
   const labels = d.games.map((g, i) => g.date ? g.date.slice(5) : `P${i + 1}`);
   const scales = {}; const axisOf = {}; const order = [];
@@ -141,7 +156,7 @@ function _draw(d, maOn, entity) {
   scales.x = { ticks: { maxRotation: 0, autoSkip: true } };
   scales.y = { position: "left", title: { display: true, text: d.series.filter(s => axisOf[s.metric] === "y").map(s => s.label).join(" · ") } };
   if (order.length > 1) scales.y1 = { position: "right", grid: { drawOnChartArea: false }, title: { display: true, text: d.series.filter(s => axisOf[s.metric] === "y1").map(s => s.label).join(" · ") } };
-  _charts["tr-canvas"] = new Chart(canvas, {
+  new Chart(canvas, {
     type: "line", data: { labels, datasets },
     options: { responsive: true, interaction: { mode: "index", intersect: false }, scales,
       plugins: { legend: { labels: { usePointStyle: true } },
@@ -156,9 +171,9 @@ function _draw(d, maOn, entity) {
             return lines;
           } } } } },
   });
-  const diff = document.getElementById("tr-diff");
+  const diff = el.querySelector(".tr-diff");
   if (diff) {
-    _charts["tr-diff"] = new Chart(diff, {
+    new Chart(diff, {
       type: "bar",
       data: { labels, datasets: [{ label: entity === "team" ? "Diferencia de puntos" : "+/-", data: d.games.map(g => (g.diff == null ? null : g.diff)),
         backgroundColor: d.games.map(g => (g.result === "V" ? "#3ecf8e" : g.result === "D" ? "#e5484d" : "#8b949e")) }] },
@@ -186,4 +201,7 @@ function _renderTrends(el, d) {
   }).join("");
 }
 
-export function destroyTrends() { _token++; _destroy("tr-canvas"); _destroy("tr-diff"); }
+export function destroyTrends(el) {
+  const els = el ? [el] : [...document.querySelectorAll(".tr-host, [data-tr-host]")];
+  els.forEach(e => { e._trToken = (e._trToken || 0) + 1; _destroyIn(e); });
+}

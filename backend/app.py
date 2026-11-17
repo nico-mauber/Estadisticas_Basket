@@ -569,8 +569,8 @@ def trends_route():
     import trends
     entity = (request.args.get("entity") or "").strip()
     ident = (request.args.get("id") or "").strip()
-    if entity not in ("team", "player") or not ident:
-        return jsonify({"error": "Indicá entity (team o player) e id.", "code": "parametro_invalido"}), 400
+    if entity not in ("team", "player", "lineup") or not ident:
+        return jsonify({"error": "Indicá entity (team, player o lineup) e id.", "code": "parametro_invalido"}), 400
     metrics = [m.strip() for m in (request.args.get("metrics") or "oer,der").split(",") if m.strip()]
     if not 1 <= len(metrics) <= 3 or len(set(metrics)) != len(metrics):
         return jsonify({"error": "Elegí entre una y tres métricas distintas.", "code": "parametro_invalido"}), 400
@@ -597,6 +597,14 @@ def trends_route():
                 return jsonify({"error": "Equipo no encontrado", "code": "no_encontrado"}), 404
             ctx = context.parse_context(request.args, team_code=code)
             out = trends.trends("team", code, ctx.competition_id, ctx, metrics=metrics, ma=ma, last_n=last_n, base=base)
+        elif entity == "lineup":
+            code, _, rest = ident.partition(":")
+            code = code.upper()
+            ids = [x for x in rest.split("-") if x.isdigit()]
+            if not 3 <= len(ids) <= 5:
+                return jsonify({"error": "El quinteto es EQUIPO:id-id-id (3 a 5 jugadores).", "code": "parametro_invalido"}), 400
+            ctx = context.parse_context(request.args, team_code=code)
+            out = trends.trends("lineup", f"{code}:{'-'.join(ids)}", ctx.competition_id, ctx, metrics=metrics, ma=ma, last_n=last_n, base=base)
         else:
             if not ident.isdigit():
                 return jsonify({"error": "Indicá el id del jugador.", "code": "parametro_invalido"}), 400

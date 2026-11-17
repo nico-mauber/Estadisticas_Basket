@@ -1566,5 +1566,10 @@
 "{#} asistencias se vincularon por proximidad: sus partidos se importaron sin el vínculo de FIBA. Reprocesalos (Datos › Calidad) para el vínculo exacto.": "{1} assists were linked by proximity: their games were imported without FIBA's link. Reprocess them (Data › Quality) for the exact link.",
 "{#} asistencia se vinculó por proximidad: sus partidos se importaron sin el vínculo de FIBA. Reprocesalos (Datos › Calidad) para el vínculo exacto.": "{1} assist was linked by proximity: its games were imported without FIBA's link. Reprocess them (Data › Quality) for the exact link.",
 "{#}.º de {#} (por partido)": "#{1} of {2} (per game)",
-"={#}.º de {#} (por partido)": "=#{1} of {2} (per game)"
+"={#}.º de {#} (por partido)": "=#{1} of {2} (per game)",
+"+/- del quinteto en el partido (solo con los cinco en cancha). Verde = victoria del equipo, rojo = derrota.": "Lineup +/- in the game (only with all five on the floor). Green = team win, red = loss.",
+"Ver tendencias": "See trends",
+"Avanzado": "Advanced",
+"Muestra baja": "Low sample",
+"fuera de la población": "outside the population"
 }

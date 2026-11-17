@@ -1,5 +1,5 @@
 import { api, setUnauthorizedHandler } from "./api.js";
-import { drawRadar, drawEvolution, drawPlayerEvolution, drawLeagueScatter, drawCompareRadar, resetZoom, applyChartLocale } from "./charts.js";
+import { drawRadar, drawLeagueScatter, drawCompareRadar, resetZoom, applyChartLocale } from "./charts.js";
 import { PCT, PCT0, DEC1, DEC2, fmtNumber, isNull, nullDisplay, fmtOrNull, cmpNullsLast } from "./core/format.js";
 import { renderDuplicateItems } from "./components/identity-merge.js";
 import { renderSettingsForm } from "./components/settings-form.js";
@@ -385,6 +385,15 @@ function _renderTrends(section) {
     params: section === "team" ? _teamParams() : _playerParams(), base: getBase(), ...st,
     entityName: section === "team" ? _teamData?.team_name : _playerData?.player,
     onChange: s => { _trendsState[section] = { metrics: s.metrics, ma: s.ma, lastN: s.lastN }; _renderTrends(section); },
+  });
+}
+// Evolución por partido del Resumen (F-18): el mismo componente en modo compacto (reemplaza los gráficos fijos de OER/eFG%).
+function _renderCompactTrends(section) {
+  const id = section === "team" ? _teamData?.team_code : _playerData?.player_id;
+  if (id == null) return;
+  renderTrends(document.getElementById(`${section}-evo-compact`), section, id, {
+    compact: true, params: section === "team" ? _teamParams() : _playerParams(), base: getBase(),
+    onMore: () => setTab(section, section === "team" ? "gamelog" : "tendencias"),
   });
 }
 // Sinergias (A-08): Equipo › Quintetos y Jugador › Impacto.
@@ -1766,11 +1775,7 @@ function _renderTeamContent(main, data) {
             : radarOk ? '<div class="radar-wrap"><canvas id="chart-radar"></canvas></div>'
             : `<p class="empty">${_radarMsg(data)}</p>`}
         </div>`;
-  const evoCard = `
-        <div class="card">
-          <div class="card-title">Evolución por partido</div>
-          ${hasGames ? '<canvas id="chart-evo" height="200"></canvas>' : '<p class="empty">Sin partidos en la selección.</p>'}
-        </div>`;
+  const evoCard = '<div id="team-evo-compact"></div>';
 
   // Definición de las cards con ficha (T-01): etiqueta, clave (legada o canónica),
   // valor promedio y display de respaldo para cuando no hay conjunto estándar.
@@ -1846,7 +1851,7 @@ function _renderTeamContent(main, data) {
 
   if (hasGames) {
     if (radarOk) drawRadar("chart-radar", av, lg, data.team_name);
-    drawEvolution("chart-evo", data.game_log, lg?.oer?.avg);
+    _renderCompactTrends("team");
   }
   _teamCardGroups = TEAM_CARD_GROUPS;
   _loadTeamStandard(data.team_code);
@@ -2756,10 +2761,7 @@ function _renderPlayerContent(main, data) {
           ${radarOk ? '<div class="radar-wrap"><canvas id="chart-player-radar"></canvas></div>'
                     : `<p class="empty">${_radarMsg(data)}</p>`}
         </div>
-        <div class="card">
-          <div class="card-title">Evolución por partido</div>
-          <canvas id="chart-player-evo" height="200"></canvas>
-        </div>
+        <div id="player-evo-compact"></div>
       </div>
       <div class="card" data-tabs="resumen">
         <div class="card-title">Conjunto estándar</div>
@@ -2774,7 +2776,7 @@ function _renderPlayerContent(main, data) {
         <div id="player-gamelog-dt"></div>
       </div>`;
     if (radarOk) drawRadar("chart-player-radar", av, lg, playerName);
-    drawPlayerEvolution("chart-player-evo", log, lg?.oer?.avg);
+    _renderCompactTrends("player");
     _loadPlayerGameLog(data.player_id);
     _mountShotDetailExports(main, playerName, String(data.player_id ?? ""), _playerCompLabel());
 
