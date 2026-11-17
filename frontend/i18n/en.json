@@ -1552,5 +1552,10 @@
 "sin percentil": "no percentile",
 "{#}% de los tiros del tramo": "{1}% of the segment's shots",
 "percentil {#} (Ø PPT {#})": "percentile {1} (Ø PPT {2})",
-"Sin muestra suficiente para elegir un tramo.": "Not enough sample to pick a segment."
+"Sin muestra suficiente para elegir un tramo.": "Not enough sample to pick a segment.",
+"Conjunto estándar de la celda": "Standard set for the cell",
+"No se pudo calcular el conjunto estándar de la celda.": "The cell's standard set could not be computed.",
+"{#} libres": "{1} free throws",
+"{#} pérdidas": "{1} turnovers",
+"{#} tiros de campo": "{1} field goal attempts"
 }

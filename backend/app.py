@@ -625,7 +625,7 @@ def cross_route():
     except ValueError:
         return jsonify({"error": "El límite debe ser un entero.", "code": "parametro_invalido"}), 400
     try:
-        ctx = context.parse_context(request.args, team_code=team)
+        ctx = context.parse_context(request.args, team_code=team, event_level=True)   # A-06: evento y posesión (T-03)
         out = cross_context.cross_matrix(team, ctx.competition_id, ctx, dim_x=(request.args.get("dim_x") or "").strip(),
                                          dim_y=(request.args.get("dim_y") or "").strip(), metric=(request.args.get("metric") or "ppp").strip(),
                                          side=(request.args.get("side") or "ataque").strip(), limit=limit,

@@ -1552,5 +1552,10 @@
 "sin percentil": "sem percentil",
 "{#}% de los tiros del tramo": "{1}% dos arremessos da faixa",
 "percentil {#} (Ø PPT {#})": "percentil {1} (Ø PPT {2})",
-"Sin muestra suficiente para elegir un tramo.": "Amostra insuficiente para escolher uma faixa."
+"Sin muestra suficiente para elegir un tramo.": "Amostra insuficiente para escolher uma faixa.",
+"Conjunto estándar de la celda": "Conjunto padrão da célula",
+"No se pudo calcular el conjunto estándar de la celda.": "Não foi possível calcular o conjunto padrão da célula.",
+"{#} libres": "{1} lances livres",
+"{#} pérdidas": "{1} perdas",
+"{#} tiros de campo": "{1} arremessos de quadra"
 }

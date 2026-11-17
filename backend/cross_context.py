@@ -174,11 +174,17 @@ def _dims_of(p, ch, game, side, clutch_info):
 
 
 def _items(team, comp_id, ctx, side, chance_mode):
+    """Posesiones (u oportunidades) del lado que pasan el contexto de T-03: partido, evento (cuarto, marcador, con/sin
+    jugador, con el estado al inicio de la posesión) y posesión (origen, tipo; oportunidad y reloj por oportunidad)."""
+    import poss_filter
+
     def build():
         all_games = repository.team_pbp_games(team, comp_id)
         games, excluded = context_mod.filter_games_ex(all_games, ctx, team)
         window = config.get("clutch.window_secs")
         margin = config.get("clutch.margin")
+        close = config.get("context.close_margin")
+        filtered = context_mod.has_event_filters(ctx) or context_mod.has_possession_filters(ctx)
         items, incomplete = [], 0
         for g in games:
             evs = g["events"]
@@ -191,10 +197,17 @@ def _items(team, comp_id, ctx, side, chance_mode):
                 if p.incomplete:
                     incomplete += 1
                     continue
+                if filtered:
+                    court = poss_filter._canon_ids(p.own_on_court if side == "ataque" else p.opp_on_court)
+                    if not poss_filter.possession_pass(p, ctx, court, close):
+                        continue
                 for ch in (p.chances if chance_mode else [None]):
                     if chance_mode and ch.box is None:
                         continue
-                    items.append({"game_id": g["game_id"], "c": _item_counts(p, ch), "dv": _dims_of(p, ch, g, side, info)})
+                    if ch is not None and not poss_filter.chance_pass(ch, ctx):
+                        continue
+                    items.append({"game_id": g["game_id"], "c": _item_counts(p, ch), "dv": _dims_of(p, ch, g, side, info),
+                                  "p": p, "ch": ch})
         return {"items": items, "games_used": len(games), "games_total": len(all_games), "excluded": excluded, "incomplete": incomplete}
     return cache.memo("cross:items", (team, comp_id, context_key(ctx), side, chance_mode), build)
 
@@ -318,7 +331,8 @@ def cross_matrix(team_code, comp_id, ctx, *, dim_x, dim_y, metric, side="ataque"
         raise CrossError(404, "Equipo no encontrado", "no_encontrado")
     if not repository.team_pbp_games(team, comp_id):
         raise CrossError(404, "Este equipo no tiene play-by-play importado. Reimportá sus partidos.", "sin_pbp")
-    chance_mode = "oportunidad" in (dim_x, dim_y)
+    # con la dimensión oportunidad o con filtros de oportunidad/reloj (T-03), la unidad es la oportunidad
+    chance_mode = "oportunidad" in (dim_x, dim_y) or context_mod.has_chance_filters(ctx)
     key = (team, comp_id, context_key(ctx), dim_x, dim_y, metric, side, limit, color or "")
     return cache.memo("cross:matrix", key, lambda: _build(team, comp_id, ctx, dim_x, dim_y, metric, side, limit, color or "", chance_mode))
 
@@ -404,6 +418,94 @@ def _build(team, comp_id, ctx, dx, dy, metric, side, limit, color, chance_mode):
     }
 
 
+# ── Detalle de celda: conjunto estándar de T-05 (A-06 RF-16, CA-15) ──────────
+# Tipo de entidad `cross_cell` (id `EQUIPO|dim_x|x|dim_y|y`, params `side` y `limit`): las posesiones (u oportunidades) de
+# la celda como un split de contexto con el conjunto estándar completo. Es de un solo lado (el que se mira: el ataque del
+# equipo o el del rival), así que ritmo, DER y Net van `no_aplica`. Una celda existe solo para un equipo: sin población.
+
+def _parse_cell_id(entity_id):
+    parts = str(entity_id).split("|")
+    if len(parts) != 5:
+        raise CrossError(400, "Celda inválida: equipo|dim_x|x|dim_y|y.")
+    team, dx, x, dy, y = parts
+    if dx not in DIMS or dy not in DIMS or dx == dy:
+        raise CrossError(400, "Dimensión inválida.")
+    return _norm(team), dx, x, dy, y
+
+
+def cell_items(team, comp_id, ctx, side, dx, x, dy, y, limit=LIMIT_DEFAULT):
+    """Ítems de UNA celda (las mismas reglas de ejes y «Otros» que la matriz)."""
+    chance_mode = "oportunidad" in (dx, dy) or context_mod.has_chance_filters(ctx)
+    data = _items(team, comp_id, ctx, side, chance_mode)
+    items = data["items"]
+    _, xrest = _axis(dx, items, limit)
+    _, yrest = _axis(dy, items, limit)
+    return [it for it in items if x in _keys_for(it, dx, xrest) and y in _keys_for(it, dy, yrest)], chance_mode, data
+
+
+def cell_bundle(team, comp_id, ctx, side, dx, x, dy, y, limit=LIMIT_DEFAULT):
+    import poss_filter
+    from stats_engine import StatBundle
+    import lineups
+    sel, chance_mode, data = cell_items(team, comp_id, ctx, side, dx, x, dy, y, limit)
+    if not sel:
+        return None
+    own, opp = poss_filter._empty(), poss_filter._empty()
+    seconds = 0.0
+    if chance_mode:
+        games = {g["game_id"]: g for g in repository.team_pbp_games(team, comp_id)}
+        spans_by_poss = {}
+        for it in sel:
+            p = it["p"]
+            if id(p) not in spans_by_poss:
+                order = sorted(games[it["game_id"]].get("events") or [], key=lambda e: e.get("action_number") or 0)
+                idx = {e.get("action_number"): i for i, e in enumerate(order)}
+                spans_by_poss[id(p)] = {ch.n: (a, d, s) for ch, a, d, s, _ev in poss_filter._chance_spans(p, order, idx)}
+            span = spans_by_poss[id(p)].get(it["ch"].n)
+            if span is None:
+                continue
+            poss_filter._add(own, span[0])
+            poss_filter._add(opp, span[1])
+            seconds += span[2]
+    else:
+        for it in sel:
+            a, d = poss_filter._poss_box(it["p"])
+            poss_filter._add(own, a)
+            poss_filter._add(opp, d)
+            seconds += it["p"].duration or 0
+    own["blk_received"], opp["blk_received"] = opp.get("blk", 0), own.get("blk", 0)
+    own["plus_minus"] = opp["plus_minus"] = None
+    name = f"{team} · {x} × {y}"
+    meta = {"team_code": team, "split": True, "poss_exact": True, "one_side": True, "side": side,
+            "unit": "oportunidad" if chance_mode else "posesion", "cell": {"dim_x": dx, "x": x, "dim_y": dy, "y": y},
+            "games_total": data["games_total"], "games_excluded": data["excluded"]}
+    return StatBundle(entity_type="split", entity_id=f"{team}|{dx}|{x}|{dy}|{y}", name=name, own=own, opp=opp, team=None,
+                      games=len({it["game_id"] for it in sel}), minutes=seconds / 60, team_minutes=None, seconds=seconds,
+                      on_court=None, shots=None, possessions_counted=len(sel), null_reasons={}, meta=meta)
+
+
+def _cell_loader(req):
+    import metrics_catalog
+    try:
+        team, dx, x, dy, y = _parse_cell_id(req.entity_id)
+        side = (req.params or {}).get("side") or "ataque"
+        if side not in ("ataque", "defensa"):
+            raise CrossError(400, "El lado debe ser ataque o defensa.")
+        limit = int((req.params or {}).get("limit") or LIMIT_DEFAULT)
+        b = cell_bundle(team, req.comp_id, req.ctx, side, dx, x, dy, y, limit)
+    except CrossError as e:
+        raise metrics_catalog.MetricsError(e.message, e.status, e.code) from None
+    return [b] if b is not None else []
+
+
+def _register_entity():
+    import metrics_catalog
+    metrics_catalog.register_entity("cross_cell", _cell_loader)
+
+
+_register_entity()
+
+
 # ── Tabla `cross_cells` (T-06, A-06 RF-17) ───────────────────────────────────
 # Una fila por celda con datos de la matriz, con las métricas del cruce (las mismas que se pueden pintar) y el conteo de
 # posesiones u oportunidades; ordenable y exportable. Las celdas son las mismas que dibuja `GET /api/cross`.
@@ -454,7 +556,7 @@ def _register_table():
                        ("_ts_pct", "TS%", "value:pct"), ("_ppt", "PPT", "value:dec2"), ("_to_pct", "TO%", "value:pct"),
                        ("_or_pct", "OR%", "value:pct"), ("_ft_rate", "FT Rate", "value:pct")),
         default_sort={"key": "_n", "dir": "desc", "use_adjusted": False},
-        totals_mode="none", avg_mode="none", pct_mode="none", sample_col=True, title_fn=_table_title,
+        totals_mode="none", avg_mode="none", pct_mode="none", sample_col=True, title_fn=_table_title, levels=True,
     )
 
 

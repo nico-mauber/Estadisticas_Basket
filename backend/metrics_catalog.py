@@ -73,7 +73,8 @@ GROUPS = [
      ]},
 ]
 
-_ALL_ENTITIES = ("team", "player", "lineup", "onoff", "clutch", "origin", "ptype", "matchup", "pair", "chance", "clock")
+_ALL_ENTITIES = ("team", "player", "lineup", "onoff", "clutch", "origin", "ptype", "matchup", "pair", "chance", "clock",
+                 "cross_cell")
 _PLAYER_ONLY = ("player",)
 _TEAM_ONLY = ("team",)
 
@@ -418,6 +419,8 @@ def _entity_id_kwargs(entity_type: str, raw_id: str) -> dict:
         return {"team_code": raw_id.upper()}
     if entity_type in ("period", "origin", "ptype", "chance", "clock"):
         return {"team_code": raw_id.split(":", 1)[0].upper()}
+    if entity_type == "cross_cell":
+        return {"team_code": raw_id.split("|", 1)[0].upper()}
     return {}
 
 
@@ -445,8 +448,8 @@ def build_payload(entity_type: str, args) -> dict:
 
     try:
         ctx = context_mod.parse_context(args, **_entity_id_kwargs(entity_type, str(entity_id)),
-                                        event_level=entity_type in ("team", "period", "player", "split"),
-                                        possession_level=entity_type in ("team", "player", "split"))
+                                        event_level=entity_type in ("team", "period", "player", "split", "cross_cell"),
+                                        possession_level=entity_type in ("team", "player", "split", "cross_cell"))
     except context_mod.ContextError as e:
         # `context.parse_context` envuelve tanto `CompetitionError` (competencia inexistente o en
         # borrador) como su propio `ContextError` (p. ej. `last` inválido) en `ContextError`; se
@@ -470,8 +473,10 @@ def build_payload(entity_type: str, args) -> dict:
         if window_secs not in (None, ""):
             params["window_secs"] = int(window_secs)
 
-    if entity_type in ("origin", "ptype", "chance", "clock"):
+    if entity_type in ("origin", "ptype", "chance", "clock", "cross_cell"):
         params["side"] = args.get("side") or "ataque"
+    if entity_type == "cross_cell":
+        params["limit"] = args.get("limit") or None
 
     if entity_type == "matchup":
         params["game"] = args.get("game") or None
@@ -544,7 +549,7 @@ def build_payload(entity_type: str, args) -> dict:
         }
 
     team_poss = None
-    if entity_type in ("lineup", "pair", "onoff", "split", "clutch", "origin", "ptype", "chance", "clock"):
+    if entity_type in ("lineup", "pair", "onoff", "split", "clutch", "origin", "ptype", "chance", "clock", "cross_cell"):
         team_code = meta0.get("team_code")
         if team_code:
             team_poss = sample_mod.team_offensive_possessions(team_code, ctx.competition_id, ctx)
@@ -625,8 +630,9 @@ def _attach_fichas(payload, entity_type, b0, ctx, base, *, prior_fn) -> None:
     import population
     try:
         variant = _population_variant(entity_type, b0)
-        if entity_type == "matchup":
-            # un cruce existe solo entre dos equipos concretos: no hay universo de la competencia
+        if entity_type in ("matchup", "cross_cell"):
+            # un cruce (o una celda de contextos cruzados) existe solo para un equipo o un par concreto: no hay universo
+            # de la competencia
             # contra el cual rankearlo (F-07). La ficha se sirve sin puesto ni percentil.
             payload["population"] = {"size": 0, "criterion": "", "context_label": "", "reason": "contexto_no_comparable"}
             return

@@ -88,7 +88,7 @@ class TableDef:
     pct_mode: str = "population"          # population | none (F-07: tablas de un partido, sin percentil)
     columns_fn: Callable | None = None    # F-14: columnas visibles por defecto según la petición (la métrica elegida)
     sample_col: bool | None = None        # None = según el tipo de entidad
-    levels: bool = False                  # T-03: la tabla calcula filtros de evento y posesión (equipo/jugador)
+    levels: bool | str = False            # T-03: calcula evento y posesión; "multi" = toda la competencia (sin con/sin)
 
 
 @dataclass
@@ -204,8 +204,8 @@ def build_table(table_id: str, args: Mapping[str, str]) -> dict:
     # 3. Contexto
     id_kwargs = _id_kwargs(tdef, args)
     try:
-        ctx = context_mod.parse_context(args, **id_kwargs, event_level=tdef.levels)
-        if tdef.levels and (ctx.on or ctx.off):
+        ctx = context_mod.parse_context(args, **id_kwargs, event_level=bool(tdef.levels))
+        if tdef.levels == "multi" and (ctx.on or ctx.off):
             # tablas de toda la competencia: con/sin jugador es de UN equipo, se informa como ignorado
             ctx = dataclasses.replace(ctx, on=(), off=(), ignored=ctx.ignored + tuple(
                 (p, "no_aplica") for p in ("on", "off") if getattr(ctx, p)))
@@ -1219,7 +1219,7 @@ register_table(
 
 register_table(
     "league_teams", entity_type="team", title="Ranking de Liga",
-    builder=_build_league_teams, levels=True,
+    builder=_build_league_teams, levels="multi",
     default_columns=("_name", "games", "oer", "der", "net_rating", "pace", "efg_pct", "ts_pct",
                      "or_pct", "dr_pct", "to_pct", "ft_rate", "fg2_uso", "fg3_uso", "ft_uso", "ast_to", "stl"),
     bulk_scopes=("competition",), row_kind="entity",
@@ -1265,7 +1265,7 @@ register_table(
 
 register_table(
     "search_players", entity_type="player", title="Buscador de jugadores",
-    builder=_build_search_players, levels=True,
+    builder=_build_search_players, levels="multi",
     default_columns=("_name", "_team", "_position", "games", "minutes", "pts", "trb", "ast",
                      "ts_pct", "efg_pct", "uso_pct", "ast_to"),
     bulk_scopes=("competition", "team"), row_kind="entity",
