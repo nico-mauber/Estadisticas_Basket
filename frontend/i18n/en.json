@@ -1571,5 +1571,17 @@
 "Ver tendencias": "See trends",
 "Avanzado": "Advanced",
 "Muestra baja": "Low sample",
-"fuera de la población": "outside the population"
+"fuera de la población": "outside the population",
+"Cancelar": "Cancel",
+"Cargando consultas…": "Loading queries…",
+"Consulta eliminada.": "Query deleted.",
+"Consultas guardadas": "Saved queries",
+"Ejecutar": "Run",
+"Eliminar": "Delete",
+"Eliminar consulta": "Delete query",
+"Todavía no guardaste ninguna consulta.": "You have not saved any query yet.",
+"Comparar con": "Compare with",
+"— otro quinteto —": "— another lineup —",
+"No se pudo eliminar la consulta.": "The query could not be deleted.",
+"¿Eliminar esta consulta?": "Delete this query?"
 }

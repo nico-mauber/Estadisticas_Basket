@@ -2016,9 +2016,36 @@ function _renderTeamRoster(teamCode) {
 
 // Bloques "Mejores quintetos" / "Todos los quintetos" / "ON/OFF del plantel" (F-06).
 function _renderTeamLineups(teamCode, teamName) {
+  // Enlace profundo (F-10): `?lineup=EQUIPO:pid-pid-…` abre el detalle de ese quinteto; se consume una vez.
+  let open = _pendingLineup;
+  _pendingLineup = null;
+  if (!open) { try { open = new URL(location.href).searchParams.get("lineup"); } catch { open = null; } }
   renderLineupsBlock(document.getElementById("team-lineups-block"), teamCode, {
     params: _teamParams(), base: getBase(), teamName, competitionLabel: _teamCompLabel(),
+    openLineup: open && open.split(":")[0].toUpperCase() === teamCode ? open : null,
+    onCompare: (a, b) => showCompareLineups(a, b),
   });
+}
+
+// Abre Equipo › Quintetos en el detalle de un quinteto (desde el buscador de quintetos, F-10).
+let _pendingLineup = null;
+function openTeamLineup(lineupId) {
+  const team = String(lineupId).split(":")[0].toUpperCase();
+  _pendingLineup = lineupId;
+  location.hash = `#/equipo/${encodeURIComponent(team)}/quintetos`;
+}
+
+// Abre Comparar › Quintetos con dos quintetos ya elegidos (F-09, desde el detalle de un quinteto).
+function showCompareLineups(idA, idB) {
+  try {
+    const url = new URL(location.href);
+    url.searchParams.set("cmp_qa", idA); url.searchParams.set("cmp_qb", idB);
+    history.replaceState(history.state, "", url);
+  } catch { /* sin dirección */ }
+  setSection("compare");
+  const qPane = document.getElementById("cmp-pane-quintetos");
+  delete qPane.dataset.mounted;
+  _initCompareTabs("quintetos");
 }
 
 // Bloque "Por tramo del partido" (F-04): los 8 tramos en una llamada; cambiar de tramo no vuelve a pedir nada.
@@ -2880,6 +2907,7 @@ async function renderSearch() {
       initial, stale,
       onState: p => { _searchLastParams = p; syncRoute(); },
       onSave: p => saveQueryDialog({ kind: "quintetos", params: p, notify: toast }),
+      onOpenLineup: openTeamLineup,
     });
   }
   if (_searchTab === "contextos") {

@@ -17,14 +17,14 @@ function _val(key, v) {
 /** Resumen legible de los filtros de una consulta guardada. */
 export function summarizeParams(kind, p) {
   const out = [];
-  if (p.team) out.push(`Equipo ${p.team}`);
-  if (p.name) out.push(`Nombre «${p.name}»`);
-  if (p.position) out.push(`Posición ${p.position}`);
+  if (p.team) out.push(`Equipo: ${p.team}`);
+  if (p.name) out.push(`Nombre: «${p.name}»`);
+  if (p.position) out.push(`Posición: ${p.position}`);
   if (p.include) out.push(`Incluye ${p.include.split(",").length} jugador${p.include.split(",").length > 1 ? "es" : ""}`);
   if (p.exclude) out.push(`Excluye ${p.exclude.split(",").length} jugador${p.exclude.split(",").length > 1 ? "es" : ""}`);
   if (p.min_poss) out.push(`≥ ${p.min_poss} posesiones`);
   if (p.last) out.push(`Últimos ${p.last}`);
-  if (p.venue) out.push(`Sede ${p.venue}`);
+  if (p.venue) out.push(`Sede: ${p.venue}`);
   for (const [k, v] of Object.entries(p)) {
     const m = /^(min|max)\.(.+)$/.exec(k);
     if (m) out.push(`${metricLabel(m[2])} ${m[1] === "min" ? "≥" : "≤"} ${_val(m[2], v)}`);
@@ -67,10 +67,32 @@ export async function renderSavedQueries(el, { onRun, notify = () => {} } = {}) 
     const q = list.find(x => String(x.id) === row.dataset.id);
     row.querySelector(".sq-run").addEventListener("click", () => onRun?.(q));
     row.querySelector(".sq-del").addEventListener("click", () => {
-      if (!confirm(`¿Eliminar la consulta «${q.name}»?`)) return;
-      api.deleteQuery(q.id).then(() => { notify("Consulta eliminada."); renderSavedQueries(el, { onRun, notify }); })
-        .catch(() => notify("No se pudo eliminar la consulta.", "err"));
+      confirmDialog({ title: "Eliminar consulta", text: "¿Eliminar esta consulta?", detail: `«${q.name}»`, confirmLabel: "Eliminar" }).then(ok => {
+        if (!ok) return;
+        api.deleteQuery(q.id).then(() => { notify("Consulta eliminada."); renderSavedQueries(el, { onRun, notify }); })
+          .catch(() => notify("No se pudo eliminar la consulta.", "err"));
+      });
     });
+  });
+}
+
+/** Confirmación propia de la app (modal con foco y Escape; reemplaza al `confirm()` del navegador). Resuelve true/false. */
+export function confirmDialog({ title = "Confirmar", text = "", detail = "", confirmLabel = "Aceptar" } = {}) {
+  return new Promise(resolve => {
+    const backdrop = document.createElement("div");
+    backdrop.className = "modal-backdrop";
+    backdrop.innerHTML = `<div class="modal" role="dialog" aria-modal="true" aria-label="${esc(title)}">
+      <h3>${esc(title)}</h3><p><span>${esc(text)}</span>${detail ? ` <strong class="notranslate">${esc(detail)}</strong>` : ""}</p>
+      <div class="modal-actions"><button type="button" class="btn btn-ghost btn-sm" data-cancel>Cancelar</button>
+        <button type="button" class="btn btn-sm" data-ok>${esc(confirmLabel)}</button></div></div>`;
+    document.body.appendChild(backdrop);
+    const done = v => { document.removeEventListener("keydown", onKey); backdrop.remove(); resolve(v); };
+    const onKey = e => { if (e.key === "Escape") done(false); };
+    document.addEventListener("keydown", onKey);
+    backdrop.addEventListener("click", e => { if (e.target === backdrop) done(false); });
+    backdrop.querySelector("[data-cancel]").addEventListener("click", () => done(false));
+    backdrop.querySelector("[data-ok]").addEventListener("click", () => done(true));
+    backdrop.querySelector("[data-ok]").focus();
   });
 }
 

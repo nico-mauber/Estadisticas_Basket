@@ -54,7 +54,7 @@ function _isNeutral(col) {
 // `collapsedRows`: la tabla arranca mostrando solo las primeras N filas, con "Ver todos" para extenderla (y
 // "Ver menos" para volver a acortarla); el orden, la exportación y las filas tocables no cambian.
 export function createDataTable(el, {
-  tableId, payload, onRowClick, rowFilter, filterLabels, title, exportFormats, collapsedRows,
+  tableId, payload, onRowClick, rowFilter, filterLabels, title, exportFormats, collapsedRows, initialSort, onSortChange,
 } = {}) {
   const _collapsedRows = Number(collapsedRows) > 0 ? Number(collapsedRows) : 0;
   let collapsed = _collapsedRows > 0;
@@ -64,7 +64,8 @@ export function createDataTable(el, {
 
   // ── Estado (paso 1) ────────────────────────────────────────────────────────
   let visible = _initVisible();
-  let sort = getPref("table.sort", tableId, null) || (_payload?.default_sort ? { key: _payload.default_sort.key, dir: _payload.default_sort.dir } : null);
+  // `initialSort` ({key, dir}, p. ej. el de una consulta guardada) manda sobre el orden recordado del usuario.
+  let sort = initialSort || getPref("table.sort", tableId, null) || (_payload?.default_sort ? { key: _payload.default_sort.key, dir: _payload.default_sort.dir } : null);
   let colorize = getPref("table.colorize", tableId, true);
   let page = 0;
   let showAll = false;
@@ -348,6 +349,7 @@ export function createDataTable(el, {
         }
         page = 0;
         setPref("table.sort", tableId, sort).catch(_prefFail);
+        onSortChange?.(sort);
         render();
       });
     });

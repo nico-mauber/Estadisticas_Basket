@@ -19,7 +19,7 @@ const fromInput = (key, v) => isPct(key) ? String(Math.round(parseFloat(v) * 100
 
 const EXCL_LABELS = [["jugadores", "por jugadores"], ["min_poss", "por muestra"], ["rangos", "por rangos"], ["nulos", "por dato nulo"]];
 
-export async function renderLineupSearch(el, { initial = {}, onState, onSave, stale = false } = {}) {
+export async function renderLineupSearch(el, { initial = {}, onState, onSave, onOpenLineup, stale = false } = {}) {
   el.innerHTML = '<p class="empty"><span class="spinner"></span>Cargando quintetos…</p>';
   let comps = [], catalogOk = true;
   try { await loadCatalog(); } catch { catalogOk = false; }
@@ -34,6 +34,7 @@ export async function renderLineupSearch(el, { initial = {}, onState, onSave, st
     competition: initial.competition || "", team: initial.team || "",
     include: (initial.include || "").split(",").filter(Boolean), exclude: (initial.exclude || "").split(",").filter(Boolean),
     min_poss: initial.min_poss ?? "", adjusted: initial.adjusted !== "0", last: initial.last || "",
+    sort: (() => { const [k, d] = String(initial["ui.sort"] || "").split(":"); return k && (d === "asc" || d === "desc") ? { key: k, dir: d } : null; })(),
     ranges: {},   // key → {min, max} en la unidad del servidor (fracción para porcentajes)
   };
   for (const [k, v] of Object.entries(initial)) {
@@ -181,6 +182,7 @@ export async function renderLineupSearch(el, { initial = {}, onState, onSave, st
       if (r.min != null) p[`min.${k}`] = r.min;
       if (r.max != null) p[`max.${k}`] = r.max;
     }
+    if (st.sort) p["ui.sort"] = `${st.sort.key}:${st.sort.dir}`;   // el orden de la tabla viaja con la consulta (F-10)
     Object.assign(p, ctxFixed || Object.fromEntries(Object.entries(contextParams()).filter(([k]) => k !== "last" && CONTEXT_KEYS.includes(k))));
     return p;
   }
@@ -226,7 +228,10 @@ export async function renderLineupSearch(el, { initial = {}, onState, onSave, st
     box.innerHTML = "";
     table = createDataTable(box, {
       tableId: "lineup_search", payload,
-      onRowClick: row => { const team = String(row.id).split(":")[0]; location.hash = `#/equipo/${encodeURIComponent(team)}/quintetos`; },
+      initialSort: st.sort || undefined,
+      onSortChange: s => { st.sort = { key: s.key, dir: s.dir }; if (lastParams) lastParams["ui.sort"] = `${s.key}:${s.dir}`; },
+      // abre Equipo › Quintetos directamente en el detalle de ESE quinteto (id `EQUIPO:pid-pid-…`)
+      onRowClick: row => onOpenLineup ? onOpenLineup(String(row.id)) : (location.hash = `#/equipo/${encodeURIComponent(String(row.id).split(":")[0])}/quintetos`),
     });
   }
 

@@ -1,6 +1,6 @@
 # Progress — F-10: Buscador de quintetos y consultas guardadas
 
-> **Estado:** 🔶 Implementado (buscador de quintetos, consultas guardadas de quintetos y de jugadores, exportación CSV). Faltan algunos detalles de forma listados en Desviaciones.
+> **Estado:** ✅ Implementado (buscador de quintetos, consultas guardadas de quintetos y de jugadores, exportación CSV). Faltan algunos detalles de forma listados en Desviaciones.
 > **Fecha:** 2026-11-04
 
 ## Qué se hizo
@@ -32,7 +32,13 @@
 
 ## Desviaciones
 - `min_poss` cuenta posesiones totales aunque la tabla se muestre por partido.
-- Tocar una fila abre Equipo › Quintetos, no el quinteto puntual (no hay enlace profundo `?lineup=`).
-- La consulta eliminada se confirma con el diálogo del navegador.
-- Sin `ui.sort` guardado en la consulta (la tabla usa el orden por defecto).
+- ~~Tocar una fila abre Equipo › Quintetos, no el quinteto puntual~~: resuelto el 2026-11-17 (abre el detalle del quinteto; `?lineup=EQUIPO:ids` en la dirección también).
+- ~~Confirmación con el diálogo del navegador~~: resuelto el 2026-11-17 (`confirmDialog` propio, con Escape y foco).
+- ~~Sin `ui.sort` guardado~~: resuelto el 2026-11-17 (el orden de la tabla viaja como `ui.sort=clave:dir` y se restaura al ejecutar la consulta).
 - Copy sin `t()` (F-21).
+
+## Detalles de forma (2026-11-17)
+- Fila del buscador → Equipo › Quintetos con el detalle de ESE quinteto abierto; `?lineup=EQUIPO:pid-…` en la dirección hace lo mismo.
+- Eliminar una consulta usa la confirmación propia de la app (`saved-queries.confirmDialog`).
+- El orden de la tabla del buscador se guarda en la consulta (`ui.sort`, `createDataTable({initialSort, onSortChange})`) y se restaura.
+- Evidencia: `f10q_browser.py` 25/25 (sin diálogos nativos; Chromium 1280/360 px e inglés) y la suite anterior `f10_browser.py` 52/52 (actualizada a la confirmación propia y a la pestaña Similares).
