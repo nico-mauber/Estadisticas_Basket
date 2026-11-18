@@ -45,7 +45,7 @@ export async function renderSimilar(el, playerId, opts = {}) {
     <td class="ld-val" title="Distancia ${fmtNumber(r.distance, 2)}">${fmtNumber(r.similarity, 0)}</td>
     <td class="td-muted">${r.closest.map(x => `<span>${esc(x.label)}</span>`).join(", ")}</td><td class="td-muted">${r.farthest.map(x => `<span>${esc(x.label)}</span>`).join(", ")}</td>
     ${dims.map(x => `<td class="td-muted">${_val(x, r.values[x.key])}</td>`).join("")}</tr>`).join("");
-  el.innerHTML = `<div class="card"><div class="card-title">Jugadores similares a ${esc(ref.name)} <span class="sm-export"></span> <span class="sm-validate" title="Hoja para el protocolo de validación con alguien del ambiente (A-09 RF-17)"></span></div>${controls}
+  el.innerHTML = `<div class="card"><div class="card-title">Jugadores similares a ${esc(ref.name)} <span class="sm-export"></span> <span class="sm-validate" title="Hoja para validar los resultados con alguien del ambiente"></span></div>${controls}
     ${ref.low_sample ? '<p class="td-muted below-avg">La muestra del jugador de referencia es baja: el perfil puede ser poco estable.</p>' : ""}
     <p class="td-muted">${sampleBadge(ref.sample, { compact: true })} Población: ${d.population.size} jugadores de la competencia (${esc(d.population.criterion)}).
       Se descartaron ${ex.minutos || 0} por minutos, ${ex.posicion || 0} por posición y ${ex.perfil_incompleto || 0} por perfil incompleto.</p></div>

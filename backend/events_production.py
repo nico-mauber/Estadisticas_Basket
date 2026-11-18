@@ -372,7 +372,7 @@ def table_rows(treq):
 def _register_table():
     import tables
     tables.register_table(
-        "events_production", entity_type="chain", title="Producción desde eventos", builder=table_rows,
+        "events_production", entity_type="chain_events", title="Producción desde eventos", builder=table_rows,
         required_params=("team",),
         default_columns=("_name", "_sample", "_events", "_share", "_pts", "_pts_per", "_scored"),
         bulk_scopes=(), row_kind="entity",
