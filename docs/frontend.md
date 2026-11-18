@@ -12,7 +12,9 @@ frontend/
 ├── css/
 │   └── style.css       # Estilos globales, dark mode, responsive
 ├── js/
-│   ├── app.js          # Lógica SPA: vistas, routing, renders
+│   ├── app.js          # Arranque, cáscara (header, nav), secciones y pestañas, router (applyRoute/syncRoute)
+│   ├── state.js        # `S`: estado compartido de la SPA (competencia, últimos N, pestañas, payloads) (X-01)
+│   ├── views/          # Una vista por módulo (X-01): shared, panels, datos, league, team, compare, player, search, config
 │   ├── api.js          # Capa de fetching (wrappers sobre fetch())
 │   ├── charts.js       # Chart.js: scatter, radar, helpers
 │   ├── chart.umd.min.js  # Chart.js v4 (bundled localmente)
@@ -149,9 +151,11 @@ Wrappers sobre Chart.js v4.
 - `hammerjs@2.0.8` — touch events para pinch-zoom
 - `chartjs-plugin-zoom@2.0.1` — zoom/pan sobre Chart.js
 
-## `app.js`
+## `app.js` y `views/`
 
-Lógica principal. Funciones clave:
+**Partición (X-01, 2026-11-17).** `app.js` quedó con el arranque (`boot`, `showLogin`), la cáscara (`renderApp`), las secciones y pestañas (`setSection`, `setTab`, `TAB_DEFS`) y el router (`applyRoute`, `syncRoute`, `currentRoute`). Cada vista vive en `views/<vista>.js` (`datos`, `league`, `team`, `compare`, `player`, `search`, `config`; `panels.js` agrupa los paneles que comparten Equipo y Jugador: tendencias, eventos, partido, Preparar, Mi equipo; `shared.js` los ayudantes comunes: `toast`, `esc`, `statBox`, `_baseMeta`, exportaciones, `_makeCollapsible`). Las variables que antes eran `let` de nivel superior están en `state.js` como propiedades de `S` (`S._teamComp`, `S._tab`…): un binding importado es de solo lectura y el router, las vistas y la configuración las asignan desde módulos distintos. Las vistas se importan entre sí solo con funciones (ciclos seguros: no hay cálculos de nivel superior que dependan de otro módulo). Todo módulo nuevo va a `STATIC` en `sw.js`.
+
+Funciones clave:
 
 | Función | Descripción |
 |---------|-------------|

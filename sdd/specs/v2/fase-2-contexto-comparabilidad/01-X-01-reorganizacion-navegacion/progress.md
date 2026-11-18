@@ -1,6 +1,6 @@
 # Progress — X-01: Reorganización de la navegación en secciones y pestañas
 
-> **Estado:** 🔶 Implementado sobre `app.js` sin partirlo en vistas: direcciones con deep links e historial, pestañas en Equipo, Jugador y Liga, barra con "Más" en móvil y avisos de dirección inválida. Faltan las secciones y pestañas de requisitos posteriores, la partición en `views/` y el panel plegable genérico.
+> **Estado:** 🔶 Implementado sobre `app.js` sin partirlo en vistas: direcciones con deep links e historial, pestañas en Equipo, Jugador y Liga, barra con "Más" en móvil y avisos de dirección inválida; partición en `views/`, panel plegable genérico y Configuración con dirección por módulo (2026-11-17).
 > **Fecha:** 2026-11-03
 
 ## Qué se hizo
@@ -36,7 +36,7 @@
 | CA-16 | ✅ | los nulos no se tocaron |
 
 ## Desviaciones
-- **Sin partir `app.js` en `views/`:** la reorganización se hace sobre el monolito, con bloques marcados por `data-tabs`. Reduce el riesgo de regresión; la partición queda para después.
+- ~~Sin partir `app.js` en `views/`~~: hecho el 2026-11-17 (ver abajo).
 - **Los filtros van en la query y la vista en el hash** (`/?last=3#/equipo/ALB/resumen`), no dentro del hash: el contexto global y varios paneles ya leían y escribían la query.
 - **Mapa de tiro del equipo queda en Resumen** (boceto del cliente de la pestaña Equipo); Tiro agrupa el mapa de un jugador. El especificado "Tiro con mapa del equipo" no se movió.
 - **Plantel, Posesión y Momentos** son pestañas de Equipo adicionales a la lista de X-01 porque ya existen los bloques de F-08, A-02…A-05 y F-04.
@@ -53,3 +53,11 @@
 - `makeCollapsible(card, key, {defaultOpen})` reemplaza al helper de `app.js`; el estado se guarda por usuario (`panel.collapsed[key]`) y un clic antes de que lleguen las preferencias manda sobre ellas.
 - Configuración: el módulo activo viaja en la dirección (`#/configuracion/<módulo>`).
 - Evidencia: `x01q_browser.py` 21/21 (Chromium 1280/360 px e inglés).
+
+## Partición de `app.js` (2026-11-17)
+- `app.js` (3653 líneas) → `app.js` (cáscara, secciones, pestañas y router, ~580), `state.js` (`S`, 57 variables compartidas) y `views/` (`shared`, `panels`, `datos`, `league`, `team`, `compare`, `player`, `search`, `config`).
+- Hecho con un divisor mecánico sobre el árbol sintáctico (acorn, solo como herramienta en el scratchpad, sin dependencia nueva del proyecto): cada sentencia de nivel superior se mueve sin tocar su cuerpo; las `let` compartidas pasan a `S.<nombre>` (incluidas las propiedades abreviadas); los imports se calculan con lo que usa cada módulo; se verificó que no hay identificadores libres, que cada import existe en su módulo y que ningún cálculo de nivel superior depende de otro módulo (ciclos seguros).
+- Desvío del plan: un solo commit en vez de uno por vista: el cambio es mecánico y atómico (los estados intermedios no compilan) y se verificó entero.
+- Arreglo de paso: Configuración › Guardar llamaba a `arguments.callee` (prohibido en módulos ES, modo estricto): tiraba un error después de guardar. Se quitó; la vista se vuelve a dibujar con `renderConfig()`.
+- `sw.js`: `state.js` y `views/*.js` en `STATIC`.
+
