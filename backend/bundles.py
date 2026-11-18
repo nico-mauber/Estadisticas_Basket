@@ -122,6 +122,9 @@ def team_game_bundles(team_code: str, comp_id: int | None, ctx: "context.Context
 
 
 def _team_bundle_from_games(team_code, comp_id, ctx):
+    if context.has_possession_filters(ctx):
+        import poss_filter   # nivel posesión (T-03 + A-02…A-05): origen, tipo, oportunidad, reloj
+        return poss_filter.team_bundle(team_code, comp_id, ctx)
     if context.has_event_filters(ctx):
         import splits   # nivel evento (T-03): cuarto, marcador, con/sin jugador
         return splits.team_event_bundle(team_code, comp_id, ctx)
@@ -269,7 +272,10 @@ def player_game_bundles(player_id: int, comp_id: int | None, ctx: "context.Conte
 
 
 def _player_bundle_from_games(player_id, comp_id, ctx):
-    per_game = [(info, b) for info, b in player_game_bundles(player_id, comp_id, ctx) if b is not None]
+    if context.has_event_filters(ctx) or context.has_possession_filters(ctx):
+        import poss_filter   # nivel evento / posesión del jugador (T-03)
+        return poss_filter.player_bundle(player_id, comp_id, ctx)
+    per_game =[(info, b) for info, b in player_game_bundles(player_id, comp_id, ctx) if b is not None]
     if not per_game:
         return None
     card = identity.player_card(player_id)

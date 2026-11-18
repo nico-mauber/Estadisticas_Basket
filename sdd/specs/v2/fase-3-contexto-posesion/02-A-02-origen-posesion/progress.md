@@ -1,6 +1,6 @@
 # Progress — A-02: Origen de la posesión
 
-> **Estado:** 🔶 Implementado en Equipo y Jugador (clasificación, tabla por origen en ataque y defensa, conciliación, tipo de entidad `origin` de T-05 con ficha de T-01, tabla exportable `team_origins` de T-06); falta el filtro de contexto `origin` sobre otras vistas
+> **Estado:** 🔶 Implementado en Equipo y Jugador (clasificación, tabla por origen en ataque y defensa, conciliación, tipo de entidad `origin` de T-05 con ficha de T-01, tabla exportable `team_origins` de T-06); filtro de contexto `origin` de T-03 en Equipo y Jugador
 
 ## Estado de tareas
 
@@ -53,7 +53,7 @@ Verificado con el seed local (Liga de Ascenso, 13 partidos, 14 equipos) por `tes
 | CA-7 | ✅ | Defensa se arma con las posesiones del rival del mismo partido: mismo dato que el ataque del rival por construcción |
 | CA-8 | ✅ | Badge "baja" en gris bajo `sample.split.min` (15) |
 | CA-9 | ❌ | Filtro `origin` aún ignorado (T-B2) |
-| CA-10 | 🔶 | `/api/metrics/origin?id=ALB:robo` devuelve las 89 claves; uso_*, paint_*, second_chance… con `no_aplica`. `pace` y `net_rating`/`der` salen calculados aunque no tienen sentido en un subconjunto de posesiones: pendiente marcarlos `no_aplica` en `compute_standard` |
+| CA-10 | ✅ | `/api/metrics/origin?id=ALB:robo` devuelve todas las claves; uso_*, paint_*, second_chance… con `no_aplica`. `pace`, `der` y `net_rating` → `no_aplica` en los bundles de un solo lado (`meta.one_side`: origin, ptype, chance, clock; 2026-11-17) |
 | CA-11 | ✅ | Los 2 partidos con prórroga del seed: primera posesión de la prórroga = `saque_banda` |
 | CA-12 | ✅ | 360 px: sin scroll horizontal de página (`scrollWidth` 360), consola sin errores |
 
@@ -64,3 +64,6 @@ Verificado con el seed local (Liga de Ascenso, 13 partidos, 14 equipos) por `tes
 
 ## Docs pendientes
 Ninguno.
+
+## Filtro `origin` (2026-11-17)
+- Filtro de contexto `origin` de T-03 (2026-11-17): `GET /api/metrics/team|player?origin=…` y los bloques estándar de Equipo y Jugador lo aplican (ver T-03 progress, `t03p_sim.py`); la barra de contexto lo ofrece en el subpanel Posesión.

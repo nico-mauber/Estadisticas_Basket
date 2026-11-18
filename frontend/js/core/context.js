@@ -19,6 +19,21 @@ export const QUARTER_OPTIONS = [
 export const SCORE_OPTIONS = [
   { key: "", label: "Todos" }, { key: "ajustado", label: "Ajustado" }, { key: "paliza", label: "Paliza" },
 ];
+// Nivel posesión (A-02…A-05): `origin`, `ptype` y `clock` son listas; `clock_start` y `chance`, un valor.
+export const ORIGIN_OPTIONS = [
+  { key: "canasta_rival", label: "Tras canasta rival" }, { key: "rebote_defensivo", label: "Tras rebote defensivo" },
+  { key: "robo", label: "Tras robo" }, { key: "perdida_rival", label: "Tras pérdida rival sin robo" },
+  { key: "saque_banda", label: "Saque de banda" }, { key: "tiempo_muerto", label: "Saque de fondo tras tiempo muerto" },
+  { key: "tiro_libre_rival", label: "Tras tiro libre rival" },
+];
+export const PTYPE_OPTIONS = [
+  { key: "transicion", label: "Transición" }, { key: "early", label: "Ataque temprano" }, { key: "media_cancha", label: "Media cancha" },
+];
+export const CLOCK_OPTIONS = [{ key: "temprano", label: "Temprano" }, { key: "medio", label: "Medio" }, { key: "tardio", label: "Tardío" }];
+export const CLOCK_START_OPTIONS = [{ key: "", label: "Todos" }, { key: "24", label: "Reloj de 24" }, { key: "14", label: "Reloj de 14" }];
+export const CHANCE_OPTIONS = [{ key: "", label: "Todas" }, { key: "primera", label: "Primera" }, { key: "segunda", label: "Segunda o posterior" }];
+const _keysOf = list => list.map(o => o.key);
+const _orderCsv = keys => v => _csvOf(v, x => keys.includes(x), (a, b) => keys.indexOf(a) - keys.indexOf(b));
 const QUARTERS = QUARTER_OPTIONS.map(o => o.key);
 // CSV válido → CSV normalizado (cuartos en orden, ids sin repetir); "" si algo no se reconoce
 const _csvOf = (v, ok, sortFn) => {
@@ -33,9 +48,16 @@ const VALID = {
   quarter: v => _csvOf(v, q => QUARTERS.includes(q), (a, b) => QUARTERS.indexOf(a) - QUARTERS.indexOf(b)),
   on: v => _csvOf(v, x => /^\d+$/.test(x), (a, b) => a - b),
   off: v => _csvOf(v, x => /^\d+$/.test(x), (a, b) => a - b),
+  origin: _orderCsv(_keysOf(ORIGIN_OPTIONS)),
+  ptype: _orderCsv(_keysOf(PTYPE_OPTIONS)),
+  clock: _orderCsv(_keysOf(CLOCK_OPTIONS)),
+  clock_start: new Set(["24", "14"]),
+  chance: new Set(["primera", "segunda"]),
 };
-// Filtros de nivel evento: solo los calcula Equipo (el servidor los informa como ignorados en el resto)
+// Filtros de nivel evento y de posesión: los calculan Equipo y Jugador (el resto los informa como ignorados)
 export const EVENT_KEYS = ["quarter", "score", "on", "off"];
+export const POSSESSION_KEYS = ["origin", "ptype", "clock", "clock_start", "chance"];
+
 const KEYS = Object.keys(VALID);
 const STORAGE_KEY = "sb.ctx";
 

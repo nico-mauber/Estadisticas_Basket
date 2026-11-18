@@ -88,6 +88,7 @@ class TableDef:
     pct_mode: str = "population"          # population | none (F-07: tablas de un partido, sin percentil)
     columns_fn: Callable | None = None    # F-14: columnas visibles por defecto según la petición (la métrica elegida)
     sample_col: bool | None = None        # None = según el tipo de entidad
+    levels: bool | str = False            # T-03: calcula evento y posesión; "multi" = toda la competencia (sin con/sin)
 
 
 @dataclass
@@ -124,6 +125,7 @@ def register_table(table_id: str, *, entity_type: str, title: str, builder: Call
         pct_mode=kwargs.get("pct_mode", "population"),
         sample_col=kwargs.get("sample_col"),
         columns_fn=kwargs.get("columns_fn"),
+        levels=kwargs.get("levels", False),
     )
 
 
@@ -202,7 +204,11 @@ def build_table(table_id: str, args: Mapping[str, str]) -> dict:
     # 3. Contexto
     id_kwargs = _id_kwargs(tdef, args)
     try:
-        ctx = context_mod.parse_context(args, **id_kwargs)
+        ctx = context_mod.parse_context(args, **id_kwargs, event_level=bool(tdef.levels))
+        if tdef.levels == "multi" and (ctx.on or ctx.off):
+            # tablas de toda la competencia: con/sin jugador es de UN equipo, se informa como ignorado
+            ctx = dataclasses.replace(ctx, on=(), off=(), ignored=ctx.ignored + tuple(
+                (p, "no_aplica") for p in ("on", "off") if getattr(ctx, p)))
     except context_mod.ContextError as e:
         msg = str(e)
         code = "competencia_inexistente" if "competencia" in msg.lower() else "contexto_invalido"
@@ -630,7 +636,7 @@ def _meta_entity(tdef, treq) -> tuple:
         gid = str(treq.params.get("game") or "")
         team = (treq.params.get("team") or "").upper()
         return gid, f"Partido {gid}" + (f" · {team}" if team else ""), f"partido-{gid}" + (f"-{team.lower()}" if team else "")
-    if et in ("lineup", "onoff", "pair", "chance", "origin", "ptype", "clock", "zone_clock", "chain", "cross") or (et == "player" and treq.table_id == "team_roster"):
+    if et in ("lineup", "onoff", "pair", "chance", "origin", "ptype", "clock", "zone_clock", "chain", "chain_events", "cross") or (et == "player" and treq.table_id == "team_roster"):
         if treq.params.get("team"):
             code = treq.params["team"].upper()
             return code, code, code   # quintetos, ON/OFF y plantel son de UN equipo (F-06, F-08)
@@ -763,7 +769,16 @@ def _team_season_rows(comp_id, ctx) -> list:
     rows = repository.team_game_rows(comp_id)
     codes = sorted({r["team_code"] for r in rows.values()})
     out = []
+    import context as _ctx
+    filtered = _ctx.has_event_filters(ctx) or _ctx.has_possession_filters(ctx)
     for code in codes:
+        if filtered:   # nivel evento / posesión (T-03): el bundle filtrado del equipo; sin resultados por partido
+            import bundles
+            b = bundles._team_bundle_from_games(code, comp_id, ctx)
+            if b is not None:
+                name = next((r.get("team_name") for r in rows.values() if r["team_code"] == code), code)
+                out.append((code, name, b, []))
+            continue
         req = EntityRequest(entity_type="team", entity_id=code, comp_id=comp_id, ctx=ctx,
                             base="partido")
         per_game = load_game_bundles(req)
@@ -883,12 +898,21 @@ def _build_search_players(treq: TableRequest) -> list:
     rows = repository.player_game_rows(comp_id)
     pids = sorted({identity.canonical_id(r["player_id"]) for r in rows
                    if r.get("player_id") is not None} - {None})
+    import context as _ctx
+    filtered = _ctx.has_event_filters(treq.ctx) or _ctx.has_possession_filters(treq.ctx)
     out = []
     for pid in pids:
         card = identity.player_card(pid)
         if card is None:
             continue
         if team_filter and card["team_code"] != team_filter:
+            continue
+        if filtered:   # nivel evento / posesión (T-03): bundle del jugador dentro de la selección
+            import bundles
+            b = bundles._player_bundle_from_games(pid, comp_id, treq.ctx)
+            out.append(TableRow(id=str(pid), link=f"player:{pid}", texts={
+                "_name": card["display_name"], "_team": card["team_code"], "_position": card.get("position") or ""},
+                bundle=b, sample=_player_sample(b) if b is not None else None, reason_if_null="sin_datos"))
             continue
         req = EntityRequest(entity_type="player", entity_id=pid, comp_id=comp_id, ctx=treq.ctx,
                             base=treq.base)
@@ -1195,7 +1219,7 @@ register_table(
 
 register_table(
     "league_teams", entity_type="team", title="Ranking de Liga",
-    builder=_build_league_teams,
+    builder=_build_league_teams, levels="multi",
     default_columns=("_name", "games", "oer", "der", "net_rating", "pace", "efg_pct", "ts_pct",
                      "or_pct", "dr_pct", "to_pct", "ft_rate", "fg2_uso", "fg3_uso", "ft_uso", "ast_to", "stl"),
     bulk_scopes=("competition",), row_kind="entity",
@@ -1241,7 +1265,7 @@ register_table(
 
 register_table(
     "search_players", entity_type="player", title="Buscador de jugadores",
-    builder=_build_search_players,
+    builder=_build_search_players, levels="multi",
     default_columns=("_name", "_team", "_position", "games", "minutes", "pts", "trb", "ast",
                      "ts_pct", "efg_pct", "uso_pct", "ast_to"),
     bulk_scopes=("competition", "team"), row_kind="entity",

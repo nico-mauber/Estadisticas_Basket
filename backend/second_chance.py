@@ -365,7 +365,7 @@ def _group_bundle(team_code, items, entity_id, name, meta):
         entity_type="split", entity_id=entity_id, name=name, own=own, opp=opp, team=None,
         games=len({i[0].game_id for i in items}), minutes=seconds / 60, team_minutes=None, seconds=seconds,
         on_court=None, shots=None, possessions_counted=len(items), null_reasons={},
-        meta={"team_code": team_code, "split": True, "poss_exact": True, **meta})
+        meta={"team_code": team_code, "split": True, "poss_exact": True, "one_side": True, **meta})
 
 
 def chance_bundle(team_code, kind, comp_id, ctx, side="ataque"):

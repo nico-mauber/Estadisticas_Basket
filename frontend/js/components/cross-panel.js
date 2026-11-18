@@ -6,6 +6,7 @@ import { fmtNumber, PCT } from "../core/format.js";
 import { exportMenu } from "./export-menu.js";
 import { mountTable } from "./data-table.js";
 import { loadCatalog } from "../core/catalog.js";
+import { renderStandardPanel } from "./standard-panel.js";
 
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
@@ -118,7 +119,24 @@ export async function renderCross(el, opts = {}) {
     const rows = CROSS_METRICS.map(([k, l]) => { const v = c.metrics[k]; return `<tr><td>${l}</td><td class="num">${v.value == null ? `<span title="${esc(REASONS[v.reason] || v.reason || "")}">—</span>` : _fmt(k, v.value)}</td></tr>`; }).join("");
     detail.innerHTML = `<div class="card"><div class="card-title">${esc(c.x ? xs.find(v => v.key === c.x).label : "")} · ${esc(c.y ? ys.find(v => v.key === c.y).label : "")}</div>
       <p class="td-muted">${c.n} ${d.unit} · ${c.counts.pts} puntos · ${c.counts.fga2 + c.counts.fga3} tiros de campo · ${c.counts.fta} libres · ${c.counts.tov} pérdidas</p>
-      <table class="ld-table cx-detail-table"><tbody>${rows}</tbody></table></div>`;
+      <table class="ld-table cx-detail-table"><tbody>${rows}</tbody></table>
+      <details class="cx-std"><summary>Conjunto estándar de la celda</summary><div class="cx-std-host"></div></details></div>`;
+    // Conjunto estándar completo de la celda (A-06 RF-16): entidad `cross_cell`, un solo lado (ritmo, DER y Net no aplican).
+    const std = detail.querySelector(".cx-std");
+    std.addEventListener("toggle", async () => {
+      if (!std.open || std.dataset.loaded) return;
+      std.dataset.loaded = "1";
+      const host = std.querySelector(".cx-std-host");
+      renderStandardPanel(host, null);
+      try {
+        await loadCatalog();
+        const payload = await api.metrics("cross_cell", { ...(opts.params || {}), id: `${d.team}|${d.dims.x.key}|${c.x}|${d.dims.y.key}|${c.y}`,
+                                                          side: st.side, limit: st.limit, base: "total" });
+        renderStandardPanel(host, payload, { compact: true, base: "total" });
+      } catch (e) {
+        renderStandardPanel(host, { error: e.message || "No se pudo calcular el conjunto estándar de la celda." });
+      }
+    });
   };
   out.querySelectorAll(".cx-cell[data-i]").forEach(td => td.addEventListener("click", () => {
     out.querySelectorAll(".cx-cell.sel").forEach(x => x.classList.remove("sel"));

@@ -1,6 +1,6 @@
 # Progress — F-09: Comparar quintetos
 
-> **Estado:** ✅ Implementado (pestaña Quintetos de Comparar con radar, tabla enfrentada, badge de muestra y valor ajustado). Falta la acción "Comparar" desde la tabla de quintetos de F-06.
+> **Estado:** ✅ Implementado (pestaña Quintetos de Comparar con radar, tabla enfrentada, badge de muestra y valor ajustado). Acción "Comparar" desde el detalle de un quinteto de F-06 (2026-11-17).
 > **Fecha:** 2026-11-04
 
 ## Qué se hizo
@@ -24,3 +24,6 @@
 - Sin la acción "Comparar" en la tabla de quintetos de F-06 (RF-10).
 - Sin exportación del resultado.
 - Copy sin `t()` (F-21).
+
+## Comparar desde F-06 (2026-11-17)
+- El detalle de un quinteto (Equipo › Quintetos) tiene "Comparar con" + otro quinteto de la tabla: abre Comparar › Quintetos con los dos cargados (`?cmp_qa=&cmp_qb=`). Evidencia: `f10q_browser.py`.

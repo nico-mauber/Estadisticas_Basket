@@ -90,7 +90,7 @@ export const api = {
   searchPlayers: (params = {}) => apiFetch(`/api/search/players${qs(params)}`),
   mergePlayers:  (targetId, sourceId) => send("/api/identity/merge", "POST", { target_id: targetId, source_id: sourceId }),
   // Cierres: "all" (todas las competencias) se envía como "sin parámetro": este endpoint no entiende "all"
-  clutchTeam:    (team, comp) => apiFetch(`/api/clutch/${encodeURIComponent(team)}${qs({ competition: comp === "all" ? "" : comp })}`),
+  clutchTeam:    (team, comp, params = {}) => apiFetch(`/api/clutch/${encodeURIComponent(team)}${qs({ competition: comp === "all" ? "" : comp, ...params })}`),
   lineup:        (code, players, params = {}) => apiFetch(`/api/lineup/${encodeURIComponent(code)}${qs({ players: players.join("|"), ...params })}`),
   onoff:         (code, name, params = {}) => apiFetch(`/api/onoff/${encodeURIComponent(code)}/${encodeURIComponent(name)}${qs(params)}`),
   league:        (comp, { summary, ...params } = {}) => apiFetch(`/api/league${qs({ competition: comp, include: summary ? "summary" : "", ...params })}`),

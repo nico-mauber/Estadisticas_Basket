@@ -76,4 +76,10 @@ pendiente de navegador gráfico. Grupo G diferido (T-03, T-04, X-01, F-21, F-05/
 ## Deuda / TODO
 - Verificación visual pendiente: selector de columnas DOM, paginación, colores, export PNG/PDF, mobile 360 px, offline, multi-usuario.
 - PNG en iOS/Safari (riesgo R-1, T-F23): no probado.
-- Tablas legacy pendientes de migración a `createDataTable` (T-G5, diferido a F-05/F-06/F-08): comparar, ON/OFF, combinación, ranking de uso.
+- ~~Tablas legacy pendientes de migración (T-G5)~~: cerrado el 2026-11-17 (ver abajo).
+
+## T-G5 cerrado (2026-11-17)
+- Las listas que eran tablas viejas ya son tablas registradas de T-06: el ranking por USO% es `team_roster` (F-08), el ON/OFF de todo el plantel es `team_onoff` y las combinaciones de 3 a 5 jugadores son `team_lineups` (F-06), con columnas, orden, colores y exportación.
+- Lo que queda en Comparar (equipos, jugadores, quintetos), en el ON/OFF de un jugador y en la combinación elegida son comparaciones de dos lados (una fila por métrica y una columna por lado), no listas: siguen con el panel estándar en modo `compare` y su exportación con metadatos (`_mountPanelExport`, T-D10). Pasarlas a `createDataTable` no agrega orden ni columnas útiles.
+- Más de mil filas: `tg5_browser.py` arma un payload real de `team_lineups` replicado a 1500 filas: 50 filas por página, 30 páginas, render en 18 ms y orden por Net Rating sin errores.
+

@@ -274,7 +274,7 @@ def _origin_bundle(team_code, key, comp_id, ctx, side):
     own["plus_minus"] = opp["plus_minus"] = None
     seconds = sum(p.duration or 0 for p in group)
     name = _team_name(team_code)
-    meta = {"team_code": team_code, "team_name": name, "split": True, "poss_exact": True,
+    meta = {"team_code": team_code, "team_name": name, "split": True, "poss_exact": True, "one_side": True,
             "origin": key, "side": side, "variant": f"{key}:{side}",
             "games_total": total, "games_excluded": excluded}
     return StatBundle(

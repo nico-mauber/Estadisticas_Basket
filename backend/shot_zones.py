@@ -214,12 +214,79 @@ def _shots_for_player(player_id, comp_id, last):
     return q.all()
 
 
-def _ppt_per_zone_for_entity(entity_type, entity_id, comp_id, last):
+# ── Contexto de T-03 sobre los tiros ─────────────────────────────────────────
+# Nivel partido (sede, rival, descanso, últimos N) recorta los partidos; `clock` / `clock_start` (A-05 RF-12) recortan
+# los tiros por el tramo del reloj de posesión de su oportunidad (A-01 + A-05). Un tiro sin tramo (partido sin pbp o
+# reloj no derivable) queda fuera cuando hay filtro de reloj.
+
+def _game_filtered(ctx) -> bool:
+    return bool(ctx is not None and (ctx.last or ctx.venue or ctx.opponent or ctx.rest))
+
+
+def _allowed_games(entity_type, entity_id, comp_id, ctx):
+    """Partidos de la entidad que pasan el contexto de nivel partido; None = sin filtro."""
+    if not _game_filtered(ctx):
+        return None
+    import context as context_mod
+    import repository
+    if entity_type == "team":
+        rows = [r for r in repository.team_game_rows(comp_id).values() if r["team_code"] == entity_id]
+        sel = context_mod.filter_games(rows, ctx, entity_id)
+    else:
+        import bundles
+        card = identity.player_card(entity_id)
+        if card is None:
+            return set()
+        rows = [r for r in bundles._rows_by_player(comp_id).get(card["player_id"], []) if played(r.get("minutes"))]
+        sel = context_mod.filter_games(rows, ctx, card["team_code"])
+    return {r["game_id"] for r in sel}
+
+
+def shot_bands(game_id) -> dict:
+    """`{action_number: (tramo, reloj de inicio)}` de los tiros de campo del partido (A-05); {} sin pbp."""
+    def build():
+        import possessions
+        out = {}
+        try:
+            for p in possessions.game_possessions(game_id) or []:
+                for s in (p.shots or []):
+                    an = s.get("action_number")
+                    if an is not None:
+                        out[an] = (s.get("band"), s.get("clock_start"))
+        except Exception:
+            return {}
+        return out
+    import cache
+    return cache.memo("shot_bands", game_id, build)
+
+
+def apply_context(shots, entity_type, entity_id, comp_id, ctx):
+    """Tiros que pasan el contexto (partidos y tramo de reloj)."""
+    if ctx is None:
+        return shots
+    allowed = _allowed_games(entity_type, entity_id, comp_id, ctx)
+    if allowed is not None:
+        shots = [s for s in shots if _get_game_id(s) in allowed]
+    if ctx.clock or ctx.clock_start:
+        out = []
+        for s in shots:
+            band, start = shot_bands(_get_game_id(s)).get(getattr(s, "action_number", None), (None, None))
+            if ctx.clock and band not in ctx.clock:
+                continue
+            if ctx.clock_start and str(start) != ctx.clock_start:
+                continue
+            out.append(s)
+        shots = out
+    return shots
+
+
+def _ppt_per_zone_for_entity(entity_type, entity_id, comp_id, last, ctx=None):
     """Compute zone table for an entity, return {zone_key: ppt} for zones with attempts."""
     if entity_type == "team":
-        shots = _shots_for_team(entity_id, comp_id, last)
+        shots = _shots_for_team(entity_id, comp_id, None if ctx is not None else last)
     else:
-        shots = _shots_for_player(entity_id, comp_id, last)
+        shots = _shots_for_player(entity_id, comp_id, None if ctx is not None else last)
+    shots = apply_context(shots, entity_type, entity_id, comp_id, ctx)
     zones, *_ = zone_table(shots)
     return {k: z["ppt"] for k, z in zones.items() if z["attempts"] > 0}
 
@@ -256,7 +323,7 @@ def _other_player_ids(exclude_pid, comp_id):
     return pids
 
 
-def zones_with_stats(entity_type, entity_id, comp_id, last, shots_query_fn):
+def zones_with_stats(entity_type, entity_id, comp_id, last, shots_query_fn, ctx=None):
     """Build enriched zone data with PPT percentile and sample badge.
 
     Parameters
@@ -271,8 +338,14 @@ def zones_with_stats(entity_type, entity_id, comp_id, last, shots_query_fn):
         Last N games filter
     shots_query_fn : callable
         Function(entity_id, comp_id, last) -> list of Shot rows
+    ctx : context.Context or None
+        Contexto de T-03: partidos (sede, rival, descanso, últimos N) y tramo de reloj (`clock`, `clock_start`). La
+        población de percentiles usa el mismo contexto sin los últimos N (sin el rival como miembro).
     """
-    shots = shots_query_fn(entity_id, comp_id, last)
+    if ctx is not None:
+        shots = apply_context(shots_query_fn(entity_id, comp_id, None), entity_type, entity_id, comp_id, ctx)
+    else:
+        shots = shots_query_fn(entity_id, comp_id, last)
     zones, total_fga, total_pts, fgm2, fgm3, has_coordinates = zone_table(shots)
 
     # Count distinct games
@@ -288,8 +361,14 @@ def zones_with_stats(entity_type, entity_id, comp_id, last, shots_query_fn):
         # Gather PPT values from other entities of same type
         if entity_type == "team":
             other_ids = _other_team_codes(entity_id, comp_id)
+            if ctx is not None and ctx.opponent:
+                other_ids = [o for o in other_ids if o != ctx.opponent]
         else:
             other_ids = _other_player_ids(entity_id, comp_id)
+        pop_ctx = None
+        if ctx is not None:
+            import context as context_mod
+            pop_ctx = context_mod.without_last(ctx)
 
         min_pop = config.get("population.min_size")
         if len(other_ids) < min_pop:
@@ -300,7 +379,7 @@ def zones_with_stats(entity_type, entity_id, comp_id, last, shots_query_fn):
             for zone_key in ZONE_KEYS_11:
                 others_ppt[zone_key] = []
             for oid in other_ids:
-                other_zones = _ppt_per_zone_for_entity(entity_type, oid, comp_id, None)
+                other_zones = _ppt_per_zone_for_entity(entity_type, oid, comp_id, None, pop_ctx)
                 for zone_key, ppt_val in other_zones.items():
                     if ppt_val is not None:
                         others_ppt[zone_key].append(ppt_val)

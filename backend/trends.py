@@ -98,9 +98,42 @@ def moving_average(values: list, k: int) -> list:
 
 # ── Series ───────────────────────────────────────────────────────────────────
 
+def _lineup_pairs(entity_id, comp_id, ctx):
+    """`[(info, bundle | None)]` por partido del equipo con pbp: el bundle del quinteto en ese partido (solo con los jugadores
+    elegidos en cancha); `None` si no jugaron juntos o el partido no tiene titulares (F-18 RF-1, quinteto)."""
+    import identity
+    import lineups
+    team_code, pids = bundles._parse_lineup_id(entity_id)
+    if not (3 <= len(pids) <= 5):
+        return []
+    names = bundles._names_for(team_code, pids)
+    if names is None:
+        return []
+    games = bundles._filter_pbp_games(repository.team_pbp_games(team_code, comp_id), ctx, team_code)
+    games = identity.canonicalize_pbp_games(games, team_code)
+    rows = repository.team_game_rows(comp_id)
+    out = []
+    for g in games:
+        b = lineups.lineup_bundle([g], team_code, names, entity_id=entity_id, name=" · ".join(sorted(names)))
+        if b is not None and not b.games:
+            b = None
+        trow = rows.get((g["game_id"], team_code))
+        orow = repository.opponent_row(rows, trow) if trow else None
+        info = {"game_id": g["game_id"], "date": (g.get("info") or {}).get("date"),
+                "opponent_code": g["opp_code"], "opponent": orow["team_name"] if orow else g["opp_code"],
+                "home_away": (g.get("info") or {}).get("home_away"),
+                "team_pts": trow.get("pts") if trow else None, "opp_pts": orow.get("pts") if orow else None, "played": b is not None}
+        if b is not None:
+            b.own["plus_minus"] = b.own.get("pts", 0) - b.opp.get("pts", 0)
+        out.append((info, b))
+    return out
+
+
 def _pairs(entity_type, entity_id, comp_id, ctx):
     if entity_type == "team":
         return bundles.team_game_bundles(str(entity_id).upper(), comp_id, ctx)
+    if entity_type == "lineup":
+        return _lineup_pairs(entity_id, comp_id, ctx)
     return bundles.player_game_bundles(int(entity_id), comp_id, ctx)
 
 
@@ -133,14 +166,14 @@ def _build(entity_type, entity_id, comp_id, ctx, metrics, ma, last_n, base) -> d
         tp, op = info.get("team_pts"), info.get("opp_pts")
         row["result"] = None if tp is None or op is None or tp == op else ("V" if tp > op else "D")
         row["diff"] = None if tp is None or op is None else tp - op
-        if entity_type == "player":
+        if entity_type in ("player", "lineup"):
             row["diff"] = (b.own.get("plus_minus") if b is not None else None)
         vals = _values(b, base) if b is not None else {}
         for m in metrics:
             obj = vals.get(m) or {}
             v = obj.get("value")
             row["values"][m] = v
-            row["reasons"][m] = None if v is not None else ("dnp" if b is None else obj.get("reason") or "sin_datos")
+            row["reasons"][m] = None if v is not None else (("sin_quinteto" if entity_type == "lineup" else "dnp") if b is None else obj.get("reason") or "sin_datos")
         games.append(row)
 
     series = []
@@ -246,7 +279,8 @@ def _reference(entity_type, entity_id, comp_id, ctx, metrics, base) -> dict:
     if base != "partido" or ctx.competition_all or comp_id is None or context_key(ctx)[0] is None:
         return {}
     try:
-        ref = population.league_reference(entity_type, comp_id, context_mod.without_last(ctx))   # el Ø no cambia con los últimos N
+        variant = len(str(entity_id).split(':', 1)[1].split('-')) if entity_type == 'lineup' else None   # población de quintetos del mismo tamaño
+        ref = population.league_reference(entity_type, comp_id, context_mod.without_last(ctx), variant=variant)   # el Ø no cambia con los últimos N
     except Exception:
         return {}
     return {m: ref.get(m) for m in metrics if ref.get(m) is not None}

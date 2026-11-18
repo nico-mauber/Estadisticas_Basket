@@ -41,5 +41,5 @@
 - ✅ `docs/frontend.md`
 
 ## Deuda / TODO
-- El contexto de T-03 no se aplica a esta comparación (cada jugador usa su selección completa).
+- ~~El contexto de T-03 no se aplica a esta comparación~~: resuelto el 2026-11-17 (barra de contexto en Comparar, los dos jugadores con el mismo contexto, niveles partido, evento y posesión).
 - `t()` para el copy (F-21).
