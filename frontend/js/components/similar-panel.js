@@ -45,7 +45,7 @@ export async function renderSimilar(el, playerId, opts = {}) {
     <td class="ld-val" title="Distancia ${fmtNumber(r.distance, 2)}">${fmtNumber(r.similarity, 0)}</td>
     <td class="td-muted">${r.closest.map(x => `<span>${esc(x.label)}</span>`).join(", ")}</td><td class="td-muted">${r.farthest.map(x => `<span>${esc(x.label)}</span>`).join(", ")}</td>
     ${dims.map(x => `<td class="td-muted">${_val(x, r.values[x.key])}</td>`).join("")}</tr>`).join("");
-  el.innerHTML = `<div class="card"><div class="card-title">Jugadores similares a ${esc(ref.name)} <span class="sm-export"></span></div>${controls}
+  el.innerHTML = `<div class="card"><div class="card-title">Jugadores similares a ${esc(ref.name)} <span class="sm-export"></span> <span class="sm-validate" title="Hoja para el protocolo de validación con alguien del ambiente (A-09 RF-17)"></span></div>${controls}
     ${ref.low_sample ? '<p class="td-muted below-avg">La muestra del jugador de referencia es baja: el perfil puede ser poco estable.</p>' : ""}
     <p class="td-muted">${sampleBadge(ref.sample, { compact: true })} Población: ${d.population.size} jugadores de la competencia (${esc(d.population.criterion)}).
       Se descartaron ${ex.minutos || 0} por minutos, ${ex.posicion || 0} por posición y ${ex.perfil_incompleto || 0} por perfil incompleto.</p></div>
@@ -74,6 +74,23 @@ export async function renderSimilar(el, playerId, opts = {}) {
       }),
       getNode: () => table.closest(".vs-table-wrap"),
     });
+    // Hoja de validación (A-09 RF-17): los 10 primeros SIN similitud ni distancia, con columnas para marcar
+    // "equivalente", "parecido" o "no" y un comentario. Es la planilla del protocolo de validación con alguien del ambiente.
+    const sheet = el.querySelector(".sm-validate");
+    exportMenu(sheet, {
+      formats: ["csv", "xlsx"],
+      getData: () => ({
+        meta: { title: `Validación de similares — ${ref.name}`, entity: { type: "player", id: ref.id, name: ref.name },
+                competition: { label: opts.competitionLabel || "" },
+                filters: [{ label: "Instrucción", value: "Marcá cada jugador: equivalente (juega parecido), parecido (comparte rasgos principales) o no." }],
+                generated_at: new Date().toISOString(), file_name: `validacion_similares_jugador-${ref.id}` },
+        columns: [{ key: "n", label: "N.º", fmt: "int" }, { key: "name", label: "Jugador", fmt: "text" }, { key: "team", label: "Equipo", fmt: "text" },
+                  { key: "pos", label: "Posición", fmt: "text" }, { key: "min", label: "Min/partido", fmt: "dec1" },
+                  { key: "mark", label: "Marca (equivalente / parecido / no)", fmt: "text" }, { key: "note", label: "Comentario", fmt: "text" }],
+        rows: d.results.slice(0, 10).map((r, i) => [i + 1, r.name, r.team_code || "", r.position_group || "", r.minutes_pg, "", ""]),
+      }),
+    });
+    sheet.querySelector(".xm-btn").textContent = "⬇ Hoja de validación";
   }
 }
 

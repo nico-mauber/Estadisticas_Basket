@@ -1131,6 +1131,8 @@ Lo que está cambiando el partido ahora (no el acumulado). Misma fuente, caché 
 
 Informe de scouting de un rival (Preparar partido), en una sola respuesta. Cacheado por `(team, rival, competencia, last)` y versión de datos/configuración; < 10 s en frío.
 
+**Plan de juego y emparejamiento por perfil (2026-11-17).** La respuesta suma `game_plan` (`{advantages, risks, reason, sample_warning}`: las frases de F-17 en modo `matchup` contra el rival, en el idioma de la petición; el informe se cachea por idioma) y `profile_matchups` (`{rows: [{threat: {player_id, name, mpg, uso_pct}, candidates: [{player_id, name, similarity, mpg, uso_pct, sample, closest}], reason}], note, method}`): para las 3 amenazas de mayor USO% del rival, los 3 jugadores propios de perfil más parecido según A-09. Es una estimación, no un marcaje individual.
+
 **Query:** `team`, `rival` (códigos, requeridos), `competition` (opcional; default: la del partido más reciente de `team`), `last` (opcional: últimos N partidos **del rival**; aplica a todo el informe salvo el historial).
 
 **Response 200:**

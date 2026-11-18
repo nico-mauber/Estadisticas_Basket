@@ -95,7 +95,8 @@ def prepare_report(team: str, rival: str, comp_id: int, *, last: int | None = No
         raise PrepareError("Equipo no encontrado", 404, "no_encontrado")
     if rival not in codes:
         raise PrepareError("Rival no encontrado", 404, "no_encontrado")
-    return cache.memo("prepare", (team, rival, comp_id, last), lambda: _build(team, rival, comp_id, last, rows))
+    import i18n   # las frases del plan de juego (F-17) salen en el idioma de la petición
+    return cache.memo("prepare", (team, rival, comp_id, last, i18n.current_lang()), lambda: _build(team, rival, comp_id, last, rows))
 
 
 def _build(team, rival, comp_id, last, rows) -> dict:
@@ -109,6 +110,7 @@ def _build(team, rival, comp_id, last, rows) -> dict:
     mu_games = [g["game_id"] for g in h2h["games"] if g["game_id"] in considered]
     advantages, threats, warning = _advantages_and_threats(team, rival, comp_id, ctx_team, ctx_rival,
                                                            len(team_rows), len(rival_rows))
+    rival_threats = _rival_threats(rival, comp_id, ctx_rival, last, rival_rows)
     return {
         "summary": {
             "team": {"code": team, "name": _name(team_rows, team)},
@@ -122,11 +124,59 @@ def _build(team, rival, comp_id, last, rows) -> dict:
         "threats": threats,
         "sample_warning": warning,
         "rival_lineups": _rival_lineups(rival, comp_id, ctx_rival),
-        "rival_threats": _rival_threats(rival, comp_id, ctx_rival, last, rival_rows),
+        "rival_threats": rival_threats,
         "h2h": h2h,
         "matchups": _matchups_block(team, rival, mu_games),
+        "game_plan": _game_plan(team, rival, comp_id, ctx_team),
+        "profile_matchups": _profile_matchups(team, comp_id, ctx_team, rival_threats),
         "suggestions_profile": None,
     }
+
+
+# ── Plan de juego de F-17 en el informe (F-17 T-G3: se muestra junto a los duelos) ──
+
+def _game_plan(team, rival, comp_id, ctx):
+    """Frases del plan de juego contra el rival (`phrases.game_plan(mode="matchup")`); `None` con la razón si no se puede."""
+    import phrases
+    try:
+        gp = phrases.game_plan("team", team, reference="rival", rival=rival, comp_id=comp_id, ctx=ctx, mode="matchup")
+    except phrases.PhraseError as e:
+        return {"advantages": [], "risks": [], "reason": e.code, "message": str(e)}
+    return {"advantages": gp.get("advantages") or [], "risks": gp.get("risks") or [],
+            "reason": gp.get("reason"), "sample_warning": gp.get("sample_warning")}
+
+
+# ── Emparejamiento propuesto por perfil (A-09 RF-15, incremento de F-03) ─────
+# Para cada amenaza ofensiva del rival (los de mayor USO% de `rival_threats`), los jugadores PROPIOS de perfil más parecido
+# (A-09, misma competencia), con sus minutos por partido y su USO%. Es una estimación para orientar el trabajo (a quién usar
+# para emular a esa amenaza en el entrenamiento o considerar en su emparejamiento), no un marcaje individual.
+
+PROFILE_THREATS = 3
+PROFILE_CANDIDATES = 3
+
+
+def _profile_matchups(team, comp_id, ctx, rival_threats) -> dict:
+    import similar
+    out = {"rows": [], "note": "Estimación por similitud de perfil (A-09): no es un marcaje individual.",
+           "method": "z-score por dimensión dentro de la competencia; similitud = 100 · exp(−distancia)"}
+    for t in (rival_threats.get("top_usage") or [])[:PROFILE_THREATS]:
+        row = {"threat": {"player_id": t["player_id"], "name": t["name"], "mpg": t["mpg"], "uso_pct": t.get("uso_pct")},
+               "candidates": [], "reason": None}
+        try:
+            res = similar.similar_players(int(t["player_id"]), comp_id, ctx, top_n=10_000, min_minutes=0)
+        except similar.SimilarError as e:
+            row["reason"] = e.code
+            out["rows"].append(row)
+            continue
+        own = [c for c in res["results"] if c["team_code"] == team][:PROFILE_CANDIDATES]
+        row["candidates"] = [{"player_id": c["id"], "name": c["name"], "similarity": c["similarity"],
+                              "mpg": None if c["minutes_pg"] is None else round(c["minutes_pg"], 1),
+                              "uso_pct": c["values"].get("uso_pct"), "sample": c.get("sample"),
+                              "closest": c["closest"]} for c in own]
+        if not own:
+            row["reason"] = "sin_candidatos"
+        out["rows"].append(row)
+    return out
 
 
 def _chrono(r: dict) -> tuple:

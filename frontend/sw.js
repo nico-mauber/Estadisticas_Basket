@@ -1,4 +1,4 @@
-const CACHE = "smart-basket-v84";
+const CACHE = "smart-basket-v85";
 const STATIC = [
   "/",
   "/manifest.json",

@@ -25,7 +25,7 @@
 - [x] T-F1 … T-F19 · verificación con `f17_sim.py` (61 chequeos) y `f17_browser.py` (58 chequeos, 1280 y 360 px)
 - [x] T-G1 · referencia `rival_proximo` (F-12)
 - [x] T-G2 · panel en Mi equipo (F-12, `panelId: "mi-equipo.plan"`)
-- [ ] T-G3 · Ventajas/Amenazas del informe de Preparar con `phrases.game_plan(mode="matchup")`: pendiente de decisión del cliente (ver abajo)
+- [x] T-G3 · Plan de juego de F-17 en el informe de Preparar, junto a los duelos (2026-11-17, ver abajo)
 
 ## Estado de CA
 | CA | Estado | Evidencia |
@@ -64,3 +64,6 @@ El informe de Preparar (F-03) arma sus 5 ventajas y 5 amenazas con **duelos cruz
 1. mantener los duelos (actual),
 2. reemplazarlos por los ítems de F-17 (spec), o
 3. mostrar ambos (duelos arriba y la lectura de F-17 en un bloque plegable).
+
+## T-G3 resuelto (2026-11-17): se muestran los dos
+Decisión del usuario: opción 3, con el plan de juego arriba. El informe de Preparar trae `game_plan` (`phrases.game_plan(mode="matchup")`, en el idioma de la petición) y lo muestra primero ("Plan de juego contra <rival>": ventajas y riesgos); los duelos de F-03 quedan debajo en un desplegable "Duelos estadísticos". El PDF/PNG lleva las dos secciones. Evidencia: `a09q_sim.py`, `a09q_browser.py`.
