@@ -31,8 +31,8 @@
 | CA-11 | ✅ | fila del ranking → `#/equipo/<code>/resumen`; fila del plantel → `#/jugador/<id>/resumen` |
 | CA-12 | ✅ | `#search` → `#/explorar/jugadores` |
 | CA-13 | ⬜ | sin conexión: la cáscara sale del service worker (`router.js` y `tabs.js` agregados); no se probó el modo sin red |
-| CA-14 | ⬜ | panel plegable genérico no hecho (el plan de juego guarda su estado por usuario con `panel.collapsed`) |
-| CA-15 | ⬜ | Configuración sin pestañas (formulario único) |
+| CA-14 | ✅ | `components/collapsible.js` (`makeCollapsible`): estado por usuario en `panel.collapsed` (otra sesión lo recuerda), respaldo en `sessionStorage`; lo usan Liga (tabla, ranking, mapa) y el conjunto estándar de Equipo y Jugador (`x01q_browser.py`) |
+| CA-15 | ✅ | Configuración con pestañas por módulo (umbrales, contexto, momentum, preferencias) y dirección `#/configuracion/<módulo>` (recargar o compartir la dirección abre ese módulo) (`x01q_browser.py`) |
 | CA-16 | ✅ | los nulos no se tocaron |
 
 ## Desviaciones
@@ -43,8 +43,13 @@
 - **Preparar** conserva su botón. Partido no tiene botón y se abre desde el catálogo o el análisis.
 - **Jugador:** sin pestañas Distribución e Impacto (el contenido queda en Resumen; ON/OFF sigue en Equipo › Quintetos).
 - **Datos:** sin pestañas Partidos y Exportar separadas.
-- **Configuración** sin pestañas.
+- ~~Configuración sin pestañas~~: resuelto el 2026-11-17 (`#/configuracion/<módulo>`).
 - **Copy** sin `t()` (F-21 pendiente).
 
 ## Docs actualizados
 - ✅ `docs/frontend.md` · ✅ `docs/architecture.md`
+
+## Panel plegable y Configuración (2026-11-17)
+- `makeCollapsible(card, key, {defaultOpen})` reemplaza al helper de `app.js`; el estado se guarda por usuario (`panel.collapsed[key]`) y un clic antes de que lleguen las preferencias manda sobre ellas.
+- Configuración: el módulo activo viaja en la dirección (`#/configuracion/<módulo>`).
+- Evidencia: `x01q_browser.py` 21/21 (Chromium 1280/360 px e inglés).

@@ -550,3 +550,5 @@ Idiomas: `es` (por defecto, locale es-UY), `en` (en-US), `pt` (pt-BR). Módulo `
 - **Última competencia** (T-03 RF-20): la competencia elegida en Liga, Equipo o Jugador se guarda en `ui.last_competition` y Liga abre en ella cuando la dirección no trae `competition`.
 
 **Quintetos: enlaces y comparación (F-10/F-09, 2026-11-17).** Tocar una fila del buscador de quintetos abre Equipo › Quintetos con el detalle de ese quinteto (`?lineup=EQUIPO:pid-…` también lo abre). El detalle tiene "Comparar con" otro quinteto de la tabla, que abre Comparar › Quintetos con los dos. Eliminar una consulta guardada usa la confirmación propia (`saved-queries.confirmDialog`, nunca `confirm()`); el orden de la tabla del buscador viaja en la consulta como `ui.sort` (`createDataTable({initialSort, onSortChange})`).
+
+**Panel plegable y Configuración (X-01, 2026-11-17).** `components/collapsible.js` → `makeCollapsible(card, key, {defaultOpen})`: botón ▾/▸ en el título; el estado se recuerda por usuario en la preferencia `panel.collapsed[<key>]` (y en `sessionStorage`). Configuración abre el módulo de la dirección `#/configuracion/<módulo>` y la actualiza al cambiar de pestaña.

@@ -61,12 +61,12 @@ function _fmtDate(iso) {
   try { const d = new Date(iso); return d.toLocaleDateString("es-UY", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }); } catch { return iso; }
 }
 
-export function renderSettingsForm(el, payload, { onSave, onReset }) {
+export function renderSettingsForm(el, payload, { onSave, onReset, initialSection, onSection }) {
   const { values, spec, sections, is_admin } = payload;
   const readonly = !is_admin;
   const sectionSlugs = sections.map(s => s.slug);
   let activeSection = sectionSlugs[0];
-  try { activeSection = sessionStorage.getItem("sb.config.section") || activeSection; } catch {}
+  try { activeSection = initialSection || sessionStorage.getItem("sb.config.section") || activeSection; } catch {}
   if (!sectionSlugs.includes(activeSection)) activeSection = sectionSlugs[0];
 
   function render() {
@@ -123,7 +123,7 @@ export function renderSettingsForm(el, payload, { onSave, onReset }) {
     </div>`;
 
     el.querySelectorAll(".filter-pill").forEach(btn => {
-      btn.addEventListener("click", () => { activeSection = btn.dataset.section; render(); });
+      btn.addEventListener("click", () => { activeSection = btn.dataset.section; render(); onSection?.(activeSection); });
     });
 
     if (!readonly && activeSpecs.length > 0) {

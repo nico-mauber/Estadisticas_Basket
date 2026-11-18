@@ -28,6 +28,7 @@ import { renderVersus } from "./components/versus-panel.js";
 import { renderInsights } from "./components/insights-panel.js";
 import { renderSimilar } from "./components/similar-panel.js";
 import { renderTrends } from "./components/trends-panel.js";
+import { makeCollapsible } from "./components/collapsible.js";
 import { renderLineupSearch } from "./components/lineup-search.js";
 import { renderCross } from "./components/cross-panel.js";
 import { renderEvents } from "./components/events-panel.js";
@@ -515,6 +516,7 @@ function currentRoute() {
   else if (section === "compare") r.tab = _cmpTab();
   else if (section === "search") r.tab = _searchTab;
   else if (section === "partido") { r.id = _gameId; r.tab = _gameId ? (_gameTab || "analizar") : null; }
+  else if (section === "config") r.tab = _configTab;
   return r;
 }
 
@@ -636,6 +638,7 @@ async function applyRoute({ initial = false } = {}) {
         if (p.id && /^\d+$/.test(p.id)) showGame(p.id, p.tab); else setSection("partido", { sync: false });
         break;
       case "config":
+        _configTab = p.tab || null;   // `#/configuracion/<módulo>` (X-01 CA-15)
         setSection("config", { sync: false });
         renderConfig();
         break;
@@ -1446,36 +1449,9 @@ const LEAGUE_MAPS = [
 
 // Tablas y gráficos desplegables: el título lleva un botón ▾ y el resto de la card se oculta o muestra. El estado
 // se recuerda por título mientras dura la sesión.
+// Panel plegable (X-01 CA-14): ver `components/collapsible.js` (estado por usuario en `panel.collapsed`).
 function _makeCollapsible(card, key, defaultOpen = true) {
-  if (!card || card.dataset.collapsible) return;
-  const title = card.querySelector(".card-title");
-  if (!title) return;
-  card.dataset.collapsible = "1";
-  const header = title.closest(".map-header") || title;
-  const body = document.createElement("div");
-  body.className = "cd-body";
-  while (header.nextSibling) body.appendChild(header.nextSibling);
-  card.appendChild(body);
-  let open = defaultOpen;
-  try {
-    const saved = sessionStorage.getItem(`sb.cd.${key}`);
-    if (saved != null) open = saved === "1";
-  } catch { /* sin almacenamiento */ }
-  const btn = document.createElement("button");
-  btn.type = "button";
-  btn.className = "cd-toggle";
-  btn.setAttribute("aria-label", "Mostrar u ocultar");
-  const apply = () => { body.hidden = !open; btn.textContent = open ? "▾" : "▸"; btn.setAttribute("aria-expanded", String(open)); };
-  btn.addEventListener("click", e => {
-    e.stopPropagation();
-    open = !open;
-    apply();
-    try { sessionStorage.setItem(`sb.cd.${key}`, open ? "1" : "0"); } catch { /* sin almacenamiento */ }
-    if (open) window.dispatchEvent(new Event("resize"));   // los gráficos recalculan su ancho
-  });
-  header.classList.add("cd-header");
-  header.appendChild(btn);
-  apply();
+  makeCollapsible(card, key, { defaultOpen });
 }
 
 // Flecha hacia el lado de la pantalla donde está el mejor rendimiento. El eje Y no está invertido
@@ -2790,7 +2766,7 @@ function _renderPlayerContent(main, data) {
         </div>
         <div id="player-evo-compact"></div>
       </div>
-      <div class="card" data-tabs="resumen">
+      <div class="card" data-tabs="resumen" id="player-standard-card">
         <div class="card-title">Conjunto estándar</div>
         <div id="player-standard-panel"></div>
       </div>
@@ -2804,6 +2780,7 @@ function _renderPlayerContent(main, data) {
       </div>`;
     if (radarOk) drawRadar("chart-player-radar", av, lg, playerName);
     _renderCompactTrends("player");
+    _makeCollapsible(main.querySelector("#player-standard-card"), "jugador-estandar", true);
     _loadPlayerGameLog(data.player_id);
     _mountShotDetailExports(main, playerName, String(data.player_id ?? ""), _playerCompLabel());
 
@@ -3469,6 +3446,7 @@ async function startRoute() {
 
 // ── Config screen (F-13) ─────────────────────────────────────────────────────
 
+let _configTab = null;   // módulo de Configuración abierto (pestaña; X-01 CA-15)
 async function renderConfig() {
   const sec = document.getElementById("sec-config");
   sec.innerHTML = `<div class="card"><div class="card-title">Configuración
@@ -3484,6 +3462,8 @@ async function renderConfig() {
   try {
     const data = await api.settings();
     renderSettingsForm(document.getElementById("config-body"), data, {
+      initialSection: _configTab,
+      onSection: slug => { _configTab = slug; syncRoute(); },
       onSave: async (values) => {
         const result = await api.saveSettings(values);
         toast("Configuración guardada. Los cálculos ya usan los valores nuevos.");
