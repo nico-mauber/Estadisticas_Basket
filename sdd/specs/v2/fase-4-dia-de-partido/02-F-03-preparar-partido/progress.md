@@ -97,6 +97,10 @@ Datos de prueba: copia de la base con un segundo LAG–TAB (el raw de 2849343 co
 ## Deuda / TODO
 - Revisar con datos de QA (pares con varios enfrentamientos, competencias más largas: medir el tiempo en frío).
 - Identidad: el seed tiene "J. Fairell" y "J. Augustin-Fairell" como jugadores distintos (C-08, candidato a unificar).
-- Incremento diferido → A-09: "emparejamiento propuesto por perfil".
+- ~~Incremento diferido → A-09: "emparejamiento propuesto por perfil"~~: hecho el 2026-11-17.
 - Incremento diferido → F-12: abrir Preparar desde el próximo partido.
 - [NEEDS CLARIFICATION] (spec §9): el informe en pantalla muestra todos los quintetos (top 8 + ver todos); el PDF/PNG recorta a 8. Confirmar con el cliente.
+
+## Plan de juego, emparejamiento por perfil y traducción (2026-11-17)
+- F-17 T-G3: plan de juego arriba y duelos plegados debajo; A-09 RF-15: bloque "Emparejamiento propuesto por perfil". Ambos en el PDF/PNG.
+- El informe queda cacheado por idioma (las frases salen en el idioma de la petición) y la pantalla se tradujo completa al inglés y al portugués (52 textos nuevos).

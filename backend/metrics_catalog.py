@@ -73,7 +73,8 @@ GROUPS = [
      ]},
 ]
 
-_ALL_ENTITIES = ("team", "player", "lineup", "onoff", "clutch", "origin", "ptype")
+_ALL_ENTITIES = ("team", "player", "lineup", "onoff", "clutch", "origin", "ptype", "matchup", "pair", "chance", "clock",
+                 "cross_cell", "chain")
 _PLAYER_ONLY = ("player",)
 _TEAM_ONLY = ("team",)
 
@@ -411,19 +412,25 @@ def _entity_id_kwargs(entity_type: str, raw_id: str) -> dict:
             return {"player_id": int(raw_id)}
         except (TypeError, ValueError):
             return {}
-    if entity_type in ("lineup", "onoff"):
+    if entity_type in ("lineup", "onoff", "pair"):
         team_code = raw_id.split(":", 1)[0] if ":" in raw_id else raw_id
         return {"team_code": team_code.upper()}
     if entity_type == "clutch":
         return {"team_code": raw_id.upper()}
-    if entity_type in ("period", "origin", "ptype"):
+    if entity_type in ("period", "origin", "ptype", "chance", "clock", "chain"):
         return {"team_code": raw_id.split(":", 1)[0].upper()}
+    if entity_type == "cross_cell":
+        return {"team_code": raw_id.split("|", 1)[0].upper()}
     return {}
 
 
 def build_payload(entity_type: str, args) -> dict:
     """Orquestación de `GET /api/metrics/<entity_type>` y del bloque `standard` de `/api/team` y
     `/api/player` (plan §4.8, 10 pasos)."""
+    if entity_type == "split":
+        # `split` (T-B14) = el equipo con el contexto de la petición (partido, evento y posesión): mismo bundle filtrado,
+        # misma población. Se resuelve como `team` para no duplicar registro, población ni ficha.
+        entity_type = "team"
     reg = _REGISTRY.get(entity_type)
     if reg is None:
         raise MetricsError("Tipo de entidad desconocido", 400, "parametro_invalido")
@@ -441,7 +448,8 @@ def build_payload(entity_type: str, args) -> dict:
 
     try:
         ctx = context_mod.parse_context(args, **_entity_id_kwargs(entity_type, str(entity_id)),
-                                        event_level=entity_type in ("team", "period"))
+                                        event_level=entity_type in ("team", "period", "player", "split", "cross_cell"),
+                                        possession_level=entity_type in ("team", "player", "split", "cross_cell"))
     except context_mod.ContextError as e:
         # `context.parse_context` envuelve tanto `CompetitionError` (competencia inexistente o en
         # borrador) como su propio `ContextError` (p. ej. `last` inválido) en `ContextError`; se
@@ -465,8 +473,14 @@ def build_payload(entity_type: str, args) -> dict:
         if window_secs not in (None, ""):
             params["window_secs"] = int(window_secs)
 
-    if entity_type in ("origin", "ptype"):
+    if entity_type in ("origin", "ptype", "chance", "clock", "cross_cell"):
         params["side"] = args.get("side") or "ataque"
+    if entity_type == "cross_cell":
+        params["limit"] = args.get("limit") or None
+
+    if entity_type == "matchup":
+        params["game"] = args.get("game") or None
+
 
     req = EntityRequest(entity_type=entity_type, entity_id=entity_id, comp_id=ctx.competition_id,
                         ctx=ctx, base=base, params=params)
@@ -476,12 +490,10 @@ def build_payload(entity_type: str, args) -> dict:
         # Sin resultados puede ser por los filtros o porque la entidad no existe. Se distingue
         # rehaciendo la consulta SIN filtros: si tampoco así aparece, no existe (un código de equipo
         # mal escrito no debe reportarse como "no hay partidos que cumplan estos filtros").
-        filtered = (ctx.last or ctx.venue or ctx.opponent or ctx.rest
-                    or context_mod.has_event_filters(ctx) or entity_type == "period")
+        filtered = (ctx.last or ctx.venue or ctx.opponent or ctx.rest or context_mod.has_event_filters(ctx)
+                    or context_mod.has_possession_filters(ctx) or entity_type == "period")
         if filtered:
-            bare_ctx = dataclasses.replace(
-                ctx, last=None, venue=None, opponent=None, rest=None,
-                quarters=(), score=None, on=(), off=())
+            bare_ctx = context_mod.without_filters(ctx)
             bare_type = "team" if entity_type == "period" else entity_type
             bare_id = str(entity_id).split(":", 1)[0] if entity_type == "period" else entity_id
             bare_reg = _REGISTRY.get(bare_type)
@@ -537,7 +549,7 @@ def build_payload(entity_type: str, args) -> dict:
         }
 
     team_poss = None
-    if entity_type in ("lineup", "pair", "onoff", "split", "clutch", "origin", "ptype"):
+    if entity_type in ("lineup", "pair", "onoff", "split", "clutch", "origin", "ptype", "chance", "clock", "cross_cell", "chain"):
         team_code = meta0.get("team_code")
         if team_code:
             team_poss = sample_mod.team_offensive_possessions(team_code, ctx.competition_id, ctx)
@@ -618,7 +630,14 @@ def _attach_fichas(payload, entity_type, b0, ctx, base, *, prior_fn) -> None:
     import population
     try:
         variant = _population_variant(entity_type, b0)
+        if entity_type in ("matchup", "cross_cell"):
+            # un cruce (o una celda de contextos cruzados) existe solo para un equipo o un par concreto: no hay universo
+            # de la competencia
+            # contra el cual rankearlo (F-07). La ficha se sirve sin puesto ni percentil.
+            payload["population"] = {"size": 0, "criterion": "", "context_label": "", "reason": "contexto_no_comparable"}
+            return
         if ctx.on or ctx.off:
+
             # con/sin jugador: la población de equipos no se puede recalcular con ese filtro (population_mode entity_only)
             payload["population"] = {"size": 0, "criterion": "", "context_label": "", "reason": "contexto_no_comparable"}
             return
@@ -660,7 +679,7 @@ def _population_variant(entity_type, bundle):
     el tramo (cada ventana tiene su propia población); si no, None."""
     if entity_type == "period":
         return (bundle.meta or {}).get("window")
-    if entity_type in ("origin", "ptype"):
+    if entity_type in ("origin", "ptype", "chance", "clock", "chain"):
         return (bundle.meta or {}).get("variant")
     if entity_type == "lineup":
         pids = (bundle.meta or {}).get("player_ids")

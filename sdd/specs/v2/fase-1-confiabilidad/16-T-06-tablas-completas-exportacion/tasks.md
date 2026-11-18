@@ -81,7 +81,7 @@ Dataset: los 13 partidos del seed ("Liga de Ascenso 2026", competencia 1) con la
 - [ ] T-G2 · (diferido → T-04) Bases `por40` y `por100`: verificar que `apply_base` las aplica a las tablas y que la cabecera de exportación las documenta
 - [ ] T-G3 · (diferido → X-01) Reubicar el bloque "Exportar todo" en `#/datos/exportar`
 - [ ] T-G4 · (diferido → F-21) Traducir cabeceras de exportación y etiquetas de la Portada
-- [ ] T-G5 · (diferido → F-05, F-06, F-08) Migrar Comparar, ON/OFF, combinación y ranking de uso a `createDataTable`; registrar `team_roster`, `team_lineups`, `team_onoff` y verificar más de mil filas de quintetos
+- [x] T-G5 · (cerrado 2026-11-17, ver progress) (diferido → F-05, F-06, F-08) Migrar Comparar, ON/OFF, combinación y ranking de uso a `createDataTable`; registrar `team_roster`, `team_lineups`, `team_onoff` y verificar más de mil filas de quintetos
 
 ## Matriz de cobertura (CA → tareas)
 | CA | Tareas |

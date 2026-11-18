@@ -17,14 +17,14 @@ from stats_engine import pos, StatBundle
 ENTITY_SAMPLE = {
     "lineup": "lineup", "pair": "pair", "onoff": "onoff", "matchup": "matchup",
     "split": "split", "clutch": "split", "period": "split", "origin": "split", "ptype": "split",
-    "ptype": "split", "chance": "split", "chain": "split",
+    "ptype": "split", "chance": "split", "chain": "split", "cross_cell": "split",
     "clock": "clock_zone", "zone": "clock_zone", "clutch_lineup": "clutch_lineup",
     "player": "player", "team": "team",
 }
 
 UNIT = {}
 for _e in ("lineup", "pair", "onoff", "matchup", "split", "clutch", "period", "origin",
-           "ptype", "chance", "chain"):
+           "ptype", "chance", "chain", "cross_cell"):
     UNIT[_e] = "posesiones"
 for _e in ("clock", "zone"):
     UNIT[_e] = "intentos"

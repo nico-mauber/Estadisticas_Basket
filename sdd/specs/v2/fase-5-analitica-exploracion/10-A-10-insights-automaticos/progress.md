@@ -1,6 +1,6 @@
 # Progress — A-10: Insights automáticos
 
-> **Estado:** 🔶 Implementado para equipo y jugador (`GET /api/insights`, bloque "Insights" en Equipo › Resumen y en Jugador). Falta el "cambio brusco de rendimiento" que consume Mi equipo (F-12).
+> **Estado:** ✅ Implementado para equipo y jugador (`GET /api/insights`, bloque "Insights" en Equipo › Resumen y en Jugador). El "cambio brusco de rendimiento" (RF-16) lo entregó F-12 en Mi equipo › Alertas.
 > **Fecha:** 2026-11-04
 
 ## Qué se hizo
@@ -22,7 +22,7 @@
 | Nulos | ✅ | no disparan frase |
 | Contexto | ✅ | se recalcula con el contexto y lo indica |
 | Umbrales de Configuración | ✅ | cambian sin reiniciar |
-| Cambio brusco (RF-16) | ⬜ | → F-12 |
+| Cambio brusco (RF-16) | ✅ | `my_team.sudden_changes` (F-12): ventana de la semana vs el resto de la temporada, `|z| ≥ alerts.change_z`, plantillas `cambio_mejora` / `cambio_empeora`; verificado en `f12_sim.py` |
 
 ## Desviaciones
 - **Convive con "Análisis del equipo"** (`team-insights`): este usa umbrales 70/30 con 19 métricas; el de A-10 sigue el criterio del cliente (10/90). Falta decidir si el anterior se retira.

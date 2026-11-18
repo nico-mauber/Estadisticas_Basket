@@ -66,3 +66,6 @@
 - Rendimiento: la primera carga de los quintetos tarda 7–12 s con 13 partidos.
 - La categoría Cierres de las tarjetas queda vacía con el seed: ningún quinteto llega a 3 cierres contados (es el comportamiento de RF-15, pero no se pudo verificar con datos reales).
 - `t()` para el copy (F-21).
+
+## Corrección (2026-11-16)
+- `lineups._lineup_bundles` (tablas `team_lineups`, combinaciones de 3/4, población de quintetos para rankings y calibración) sumaba los conteos del rival con el código del PRIMER partido de cada combinación: en combinaciones de varios partidos faltaban los puntos y rebotes de los otros rivales (DER y Net Rating mal). Ahora suma por partido con su rival. Verificado: 2206 combinaciones (2, 3 y 5 jugadores, todos los equipos) idénticas a `lineup_bundle` (el cálculo de `/api/metrics/lineup`); regresión f06 36/36, eq 35/35, sims 11 en verde.

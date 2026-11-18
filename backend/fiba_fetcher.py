@@ -341,7 +341,13 @@ def _parse_fiba_json(raw: dict, game_id: str) -> dict:
             # C-11); un 0 informado por FIBA queda 0.
             "blk_received":      ti(["BlocksReceived"], default=None),
             "fouls_drawn":       ti(["FoulsOn"], default=None),
+            # F-07: rebotes y pérdidas de equipo (ya incluidos en orb/drb/tov) y parciales oficiales.
+            "team_orb":          ti(["ReboundsTeamOffensive"], default=None),
+            "team_drb":          ti(["ReboundsTeamDefensive"], default=None),
+            "team_tov":          ti(["TurnoversTeam"], default=None),
+            "period_pts":        _period_pts(t),
         }
+
         team_row["fgm"] = team_row["fgm2"] + team_row["fgm3"]
         team_row["fga"] = team_row["fga2"] + team_row["fga3"]
         if not team_row["trb"]:
@@ -519,7 +525,29 @@ def _gt_to_secs(gt) -> int:
         return 0
 
 
+def _period_pts(t: dict):
+    """Parciales oficiales del equipo como JSON {"1": 23, "2": 29, …, "OT": 19}.
+
+    FIBA publica `p1_score`…`pN_score` por cuarto regular y `ot_score` con la suma de todas las
+    prórrogas. Sin ninguna de esas claves devuelve None ("no publicado"), nunca ceros (C-11).
+    """
+    out = {}
+    for k, v in t.items():
+        m = re.fullmatch(r"p(\d+)_score", str(k))
+        if m and v not in (None, ""):
+            try: out[m.group(1)] = int(float(str(v)))
+            except (ValueError, TypeError): pass
+    if not out:
+        return None
+    ot = t.get("ot_score")
+    if ot not in (None, ""):
+        try: out["OT"] = int(float(str(ot)))
+        except (ValueError, TypeError): pass
+    return json.dumps(dict(sorted(out.items(), key=lambda kv: (kv[0] == "OT", int(kv[0]) if kv[0].isdigit() else 0))))
+
+
 def _i(d: dict, keys: list, default: int = 0) -> int:
+
     for k in keys:
         v = d.get(k)
         if v is not None:

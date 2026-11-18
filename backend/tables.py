@@ -11,6 +11,7 @@ las filas en el formato compacto por columnas (Arq. §7.6, plan §3.1).
 `export_xlsx.workbook_bytes` escribe el XLSX; `bulk_workbook` arma la exportación masiva.
 Las rutas finas viven en `app.py`. Ver plan §4.1/§4.2/§4.5/§4.6.
 """
+import dataclasses
 import datetime
 import unicodedata
 from dataclasses import dataclass, field
@@ -84,6 +85,10 @@ class TableDef:
     avg_mode: str = "population"          # population | none
     title_fn: Callable | None = None
     payload_extras: Callable | None = None   # F-10: `{info, filters}` que se suma al payload y a meta.filters
+    pct_mode: str = "population"          # population | none (F-07: tablas de un partido, sin percentil)
+    columns_fn: Callable | None = None    # F-14: columnas visibles por defecto según la petición (la métrica elegida)
+    sample_col: bool | None = None        # None = según el tipo de entidad
+    levels: bool | str = False            # T-03: calcula evento y posesión; "multi" = toda la competencia (sin con/sin)
 
 
 @dataclass
@@ -117,6 +122,10 @@ def register_table(table_id: str, *, entity_type: str, title: str, builder: Call
         avg_mode=kwargs.get("avg_mode", "population"),
         title_fn=kwargs.get("title_fn"),
         payload_extras=kwargs.get("payload_extras"),
+        pct_mode=kwargs.get("pct_mode", "population"),
+        sample_col=kwargs.get("sample_col"),
+        columns_fn=kwargs.get("columns_fn"),
+        levels=kwargs.get("levels", False),
     )
 
 
@@ -160,7 +169,24 @@ def _filters_meta(echo: dict) -> list:
     return out
 
 
+def _game_filters_meta(treq) -> list:
+    """Filtros de una tabla de partido (F-07 CA-12): el partido y, en cruces, el nivel y el lado."""
+    import game_analysis
+    g = game_analysis._load_game(str(treq.params.get("game")))
+    out = []
+    if g is not None:
+        when = f" ({g.date})" if g.date else ""
+        out.append({"label": "Partido", "value": f"{g.home_team} {g.home_score}-{g.away_score} {g.away_team}{when}"})
+    if treq.table_id == "game_matchups":
+        level = treq.params.get("level") or "quinteto"
+        out.append({"label": "Nivel", "value": _MATCHUP_LEVEL_TITLES.get(level, level)})
+        if level == "jugador_quinteto":
+            out.append({"label": "Lado", "value": "Jugadores visitantes" if treq.params.get("side") == "away" else "Jugadores locales"})
+    return out
+
+
 # ── build_table ────────────────────────────────────────────────────────────────
+
 
 def build_table(table_id: str, args: Mapping[str, str]) -> dict:
     """Payload de `GET /api/table/<table_id>` (plan §3.1 / §4.1, pasos 1-16)."""
@@ -178,7 +204,11 @@ def build_table(table_id: str, args: Mapping[str, str]) -> dict:
     # 3. Contexto
     id_kwargs = _id_kwargs(tdef, args)
     try:
-        ctx = context_mod.parse_context(args, **id_kwargs)
+        ctx = context_mod.parse_context(args, **id_kwargs, event_level=bool(tdef.levels))
+        if tdef.levels == "multi" and (ctx.on or ctx.off):
+            # tablas de toda la competencia: con/sin jugador es de UN equipo, se informa como ignorado
+            ctx = dataclasses.replace(ctx, on=(), off=(), ignored=ctx.ignored + tuple(
+                (p, "no_aplica") for p in ("on", "off") if getattr(ctx, p)))
     except context_mod.ContextError as e:
         msg = str(e)
         code = "competencia_inexistente" if "competencia" in msg.lower() else "contexto_invalido"
@@ -225,16 +255,16 @@ def _compute(tdef: TableDef, treq: TableRequest) -> dict:
     ctx = treq.ctx
     base = treq.base
 
-    has_sample = entity_type in _SAMPLE_ENTITIES
+    has_sample = entity_type in _SAMPLE_ENTITIES if tdef.sample_col is None else tdef.sample_col
 
     # 8. Columnas
-    columns = _build_columns(tdef, has_sample)
+    columns = _build_columns(tdef, has_sample, treq)
     metric_cols = [c for c in columns if c["type"] == "metric"]
 
     # 10. Percentiles — preparar población / game-population
     pop = None
     game_pop = None
-    if comp_id is not None:
+    if comp_id is not None and tdef.pct_mode != "none":
         if tdef.row_kind == "entity":
             try:
                 pop = population_mod.population(entity_type, comp_id, ctx)
@@ -248,7 +278,9 @@ def _compute(tdef: TableDef, treq: TableRequest) -> dict:
     out_rows = []
     for row in rows:
         values_map, reasons = _row_values(row, base)
-        pct_map = _row_percentiles(row, metric_cols, values_map, tdef, pop, game_pop, comp_id, min_pop)
+        pct_map = ({c["key"]: None for c in metric_cols} if tdef.pct_mode == "none"
+                   else _row_percentiles(row, metric_cols, values_map, tdef, pop, game_pop, comp_id, min_pop))
+
 
         row_values = []
         row_pct = []
@@ -290,6 +322,8 @@ def _compute(tdef: TableDef, treq: TableRequest) -> dict:
     # 15. meta
     title = tdef.title_fn(treq) if tdef.title_fn else tdef.title
     meta = _meta(tdef, treq, title, echo, comp_label)
+    if tdef.table_id.startswith("game_"):
+        meta["filters"] = _game_filters_meta(treq)
     extras = tdef.payload_extras(treq) if tdef.payload_extras else {}
     if extras.get("filters"):
         meta["filters"] = list(meta["filters"]) + list(extras["filters"])
@@ -314,17 +348,18 @@ def _compute(tdef: TableDef, treq: TableRequest) -> dict:
     return out
 
 
-_SAMPLE_ENTITIES = frozenset({"player", "lineup", "onoff", "clutch", "origin", "ptype"})
+_SAMPLE_ENTITIES = frozenset({"player", "lineup", "onoff", "clutch", "origin", "ptype", "matchup", "pair", "chance", "clock"})
 
 
-def _build_columns(tdef: TableDef, has_sample: bool) -> list:
+def _build_columns(tdef: TableDef, has_sample: bool, treq=None) -> list:
     """`extra_columns` (texto) + `_sample` + todas las claves del catálogo del tipo (orden GROUPS),
     con `default_visible` (plan §4.1 paso 8)."""
+    visible = set(tdef.columns_fn(treq)) if (tdef.columns_fn and treq is not None) else set(tdef.default_columns)
     columns = []
     sticky_done = False
     for (key, label, fmt) in tdef.extra_columns:
         col = {"key": key, "label": label, "type": "text",
-               "default_visible": key in tdef.default_columns}
+               "default_visible": key in visible}
         if fmt.startswith("value:"):
             # Columna numérica fuera del catálogo (p. ej. el impacto ajustado de A-11): el valor sale de `texts` y
             # el cliente lo formatea con `fmt`.
@@ -344,7 +379,7 @@ def _build_columns(tdef: TableDef, has_sample: bool) -> list:
             if tdef.entity_type not in mdef.entities:
                 continue
             columns.append({"key": key, "type": "metric",
-                            "default_visible": key in tdef.default_columns})
+                            "default_visible": key in visible})
     return columns
 
 
@@ -596,7 +631,12 @@ def _section_slug(tdef) -> str:
 def _meta_entity(tdef, treq) -> tuple:
     """`(id, name, file_entity)` para meta y nombre de archivo."""
     et = tdef.entity_type
-    if et in ("lineup", "onoff") or (et == "player" and treq.table_id == "team_roster"):
+    if treq.table_id.startswith("game_"):
+        # tablas de un partido (F-07): la entidad es el partido (y el equipo, si la tabla es de uno)
+        gid = str(treq.params.get("game") or "")
+        team = (treq.params.get("team") or "").upper()
+        return gid, f"Partido {gid}" + (f" · {team}" if team else ""), f"partido-{gid}" + (f"-{team.lower()}" if team else "")
+    if et in ("lineup", "onoff", "pair", "chance", "origin", "ptype", "clock", "zone_clock", "chain", "chain_events", "cross") or (et == "player" and treq.table_id == "team_roster"):
         if treq.params.get("team"):
             code = treq.params["team"].upper()
             return code, code, code   # quintetos, ON/OFF y plantel son de UN equipo (F-06, F-08)
@@ -729,7 +769,16 @@ def _team_season_rows(comp_id, ctx) -> list:
     rows = repository.team_game_rows(comp_id)
     codes = sorted({r["team_code"] for r in rows.values()})
     out = []
+    import context as _ctx
+    filtered = _ctx.has_event_filters(ctx) or _ctx.has_possession_filters(ctx)
     for code in codes:
+        if filtered:   # nivel evento / posesión (T-03): el bundle filtrado del equipo; sin resultados por partido
+            import bundles
+            b = bundles._team_bundle_from_games(code, comp_id, ctx)
+            if b is not None:
+                name = next((r.get("team_name") for r in rows.values() if r["team_code"] == code), code)
+                out.append((code, name, b, []))
+            continue
         req = EntityRequest(entity_type="team", entity_id=code, comp_id=comp_id, ctx=ctx,
                             base="partido")
         per_game = load_game_bundles(req)
@@ -849,12 +898,21 @@ def _build_search_players(treq: TableRequest) -> list:
     rows = repository.player_game_rows(comp_id)
     pids = sorted({identity.canonical_id(r["player_id"]) for r in rows
                    if r.get("player_id") is not None} - {None})
+    import context as _ctx
+    filtered = _ctx.has_event_filters(treq.ctx) or _ctx.has_possession_filters(treq.ctx)
     out = []
     for pid in pids:
         card = identity.player_card(pid)
         if card is None:
             continue
         if team_filter and card["team_code"] != team_filter:
+            continue
+        if filtered:   # nivel evento / posesión (T-03): bundle del jugador dentro de la selección
+            import bundles
+            b = bundles._player_bundle_from_games(pid, comp_id, treq.ctx)
+            out.append(TableRow(id=str(pid), link=f"player:{pid}", texts={
+                "_name": card["display_name"], "_team": card["team_code"], "_position": card.get("position") or ""},
+                bundle=b, sample=_player_sample(b) if b is not None else None, reason_if_null="sin_datos"))
             continue
         req = EntityRequest(entity_type="player", entity_id=pid, comp_id=comp_id, ctx=treq.ctx,
                             base=treq.base)
@@ -947,6 +1005,27 @@ def _lineup_rows(treq: TableRequest, size: int) -> list:
             bundle=b, sample=badge, adj=adj or None,
             extra={"player_ids": pids},
         ))
+    return out
+
+
+def _build_pairs(treq: TableRequest) -> list:
+    """Parejas del plantel (A-08 RF-11): una fila por pareja que compartió cancha, con badge de muestra (`pair`) y el
+    valor ajustado de OER/DER/Net (T-02)."""
+    import lineups
+    import sample as sample_mod
+
+    team_code = (treq.params.get("team") or "").upper()
+    team_poss = sample_mod.team_offensive_possessions(team_code, treq.comp_id, treq.ctx)
+    prior = sample_mod.league_prior(treq.comp_id, treq.ctx)
+    out = []
+    for b in lineups.all_lineups(team_code, treq.comp_id, treq.ctx, size=2):
+        b = dataclasses.replace(b, entity_type="pair")
+        badge = sample_mod.sample_for("pair", [b], team_poss=team_poss)
+        values = sample_mod.adjust_values(compute_standard(b), b, prior)
+        adj = {k: values[k]["adj"] for k in sample_mod.REGRESSED_KEYS if (values.get(k) or {}).get("adj") is not None}
+        out.append(TableRow(id=b.entity_id, link=f"pair:{b.entity_id}", texts={"_players": b.name},
+                            bundle=b, sample=badge, adj=adj or None,
+                            extra={"player_ids": (b.meta or {}).get("player_ids") or []}))
     return out
 
 
@@ -1140,7 +1219,7 @@ register_table(
 
 register_table(
     "league_teams", entity_type="team", title="Ranking de Liga",
-    builder=_build_league_teams,
+    builder=_build_league_teams, levels="multi",
     default_columns=("_name", "games", "oer", "der", "net_rating", "pace", "efg_pct", "ts_pct",
                      "or_pct", "dr_pct", "to_pct", "ft_rate", "fg2_uso", "fg3_uso", "ft_uso", "ast_to", "stl"),
     bulk_scopes=("competition",), row_kind="entity",
@@ -1186,7 +1265,7 @@ register_table(
 
 register_table(
     "search_players", entity_type="player", title="Buscador de jugadores",
-    builder=_build_search_players,
+    builder=_build_search_players, levels="multi",
     default_columns=("_name", "_team", "_position", "games", "minutes", "pts", "trb", "ast",
                      "ts_pct", "efg_pct", "uso_pct", "ast_to"),
     bulk_scopes=("competition", "team"), row_kind="entity",
@@ -1221,6 +1300,16 @@ register_table(
         f"Quintetos — {(treq.params.get('team') or '').upper()}"
         if (treq.params.get('size') or '5') == '5'
         else f"Combinaciones de {treq.params.get('size')} — {(treq.params.get('team') or '').upper()}"),
+)
+
+register_table(
+    "pairs", entity_type="pair", title="Parejas", builder=_build_pairs, required_params=("team",),
+    default_columns=("_players", "games", "minutes", "possessions", "oer", "der", "net_rating", "ts_pct", "efg_pct",
+                     "ast", "plus_minus"),
+    bulk_scopes=("team",), row_kind="entity", extra_columns=(("_players", "Pareja", "text"),),
+    default_sort={"key": "net_rating", "dir": "desc", "use_adjusted": True},
+    totals_mode="none", avg_mode="none",
+    title_fn=lambda treq: f"Parejas — {(treq.params.get('team') or '').upper()}",
 )
 
 register_table(
@@ -1263,4 +1352,179 @@ register_table(
     extra_columns=(("_name", "Jugador", "text"), ("_position", "Pos.", "text")),
     default_sort={"key": "minutes", "dir": "desc", "use_adjusted": False},
     title_fn=lambda treq: f"Plantel — {(treq.params.get('team') or '').upper()}",
+)
+
+
+# ── Tablas de un partido (F-07 RF-25, CA-12) ──────────────────────────────────
+# Box, quintetos y cruces de Analizar partido como tablas completas: mismo orden, columnas
+# visibles y exportación CSV/XLSX con cabecera que el resto de la app. Sin percentiles ni
+# promedio de competencia: un partido no tiene población comparable.
+
+def _game_rows(fn, treq: TableRequest, *args) -> list:
+    import game_analysis
+    try:
+        rows = fn(*args)
+    except game_analysis.GameTableError as e:
+        raise TableError(e.status, str(e), e.code) from None
+    except ValueError as e:
+        raise TableError(400, str(e), "parametro_invalido") from None
+    return [TableRow(id=r["id"], link=r.get("link"), texts=r.get("texts") or {}, bundle=r.get("bundle"),
+                     sample=r.get("sample")) for r in rows]
+
+
+def _build_game_players(treq: TableRequest) -> list:
+    import game_analysis
+    return _game_rows(game_analysis.game_player_rows, treq, str(treq.params.get("game")), treq.params.get("team"))
+
+
+def _build_game_lineups(treq: TableRequest) -> list:
+    import game_analysis
+    return _game_rows(game_analysis.game_lineup_rows, treq, str(treq.params.get("game")), treq.params.get("team"))
+
+
+def _build_game_matchups(treq: TableRequest) -> list:
+    import game_analysis
+    import matchups
+    if game_analysis._load_game(str(treq.params.get("game"))) is None:
+        raise TableError(404, "Partido no encontrado", "no_encontrado")
+    return _game_rows(matchups.game_matchup_rows, treq, str(treq.params.get("game")),
+                      (treq.params.get("level") or "quinteto").strip(), (treq.params.get("side") or "home").strip())
+
+
+def _game_title(prefix):
+    def fn(treq):
+        import game_analysis
+        g = game_analysis._load_game(str(treq.params.get("game")))
+        if g is None:
+            return prefix
+        team = (treq.params.get("team") or "").upper()
+        who = f" — {team}" if team else ""
+        when = f" ({g.date})" if g.date else ""
+        return f"{prefix}{who} — {g.home_code} {g.home_score}-{g.away_score} {g.away_code}{when}"
+    return fn
+
+
+_MATCHUP_LEVEL_TITLES = {"quinteto": "Cruces quinteto vs quinteto", "jugador": "Cruces jugador vs jugador",
+                         "jugador_quinteto": "Cruces jugador vs quinteto"}
+
+register_table(
+    "game_players", entity_type="player", title="Box del partido", builder=_build_game_players,
+    required_params=("game", "team"),
+    default_columns=("_name", "minutes", "pts", "fgm2", "fga2", "fgm3", "fga3", "ftm", "fta", "orb", "drb", "trb",
+                     "ast", "tov", "stl", "blk", "pf", "plus_minus", "ts_pct", "uso_pct"),
+    row_kind="entity", extra_columns=(("_name", "Jugador", "text"),),
+    default_sort=None,   # orden del box: titulares, minutos, "No jugó" y la fila de equipo al final
+    totals_mode="sum", avg_mode="none", pct_mode="none", sample_col=False,
+    title_fn=_game_title("Box"),
+)
+
+register_table(
+    "game_lineups", entity_type="lineup", title="Quintetos del partido", builder=_build_game_lineups,
+    required_params=("game", "team"),
+    default_columns=("_players", "minutes", "possessions", "pts", "pts_against", "plus_minus", "oer", "der",
+                     "net_rating", "efg_pct"),
+    row_kind="entity", extra_columns=(("_players", "Quinteto", "text"),),
+    default_sort={"key": "minutes", "dir": "desc", "use_adjusted": False},
+    totals_mode="none", avg_mode="none", pct_mode="none",
+    title_fn=_game_title("Quintetos"),
+)
+
+register_table(
+    "game_matchups", entity_type="matchup", title="Cruces del partido", builder=_build_game_matchups,
+    required_params=("game",),
+    default_columns=("_own", "_opp", "minutes", "possessions", "pts", "pts_against", "plus_minus", "oer", "der",
+                     "net_rating", "efg_pct", "opp_efg_pct"),
+    row_kind="entity", extra_columns=(("_own", "Propio", "text"), ("_opp", "Rival", "text")),
+    default_sort={"key": "possessions", "dir": "desc", "use_adjusted": False},
+    totals_mode="none", avg_mode="none", pct_mode="none", sample_col=True,
+    title_fn=lambda treq: _game_title(_MATCHUP_LEVEL_TITLES.get(treq.params.get("level") or "quinteto", "Cruces"))(treq),
+)
+
+
+# ── Líderes (F-14 RF-2, RF-15) ────────────────────────────────────────────────
+
+def _build_leaders(treq: TableRequest) -> list:
+    """Todos los jugadores que califican en una métrica (`metric`, mínimo de minutos `min_minutes`), con el puesto y los
+    valores de ranking de la población de T-01 (los mismos que su ficha, por partido)."""
+    import competition_profile as cp
+    import population as population_mod
+    metric = (treq.params.get("metric") or "").strip()
+    d = METRICS.get(metric)
+    if d is None or "player" not in d.entities:
+        raise TableError(400, "Métrica desconocida o que no aplica a jugadores.", "parametro_invalido", {"param": "metric"})
+    raw = (treq.params.get("min_minutes") or "").strip()
+    try:
+        min_minutes = float(raw) if raw else None
+    except ValueError:
+        raise TableError(400, "min_minutes debe ser un número.", "parametro_invalido", {"param": "min_minutes"}) from None
+    if treq.comp_id is None:
+        raise TableError(400, "Elegí una competencia: los líderes se calculan dentro de una.", "parametro_invalido",
+                         {"param": "competition"})
+    res = cp.leaders(metric, treq.comp_id, treq.ctx, min_minutes=min_minutes)
+    members = {m.id: m for m in population_mod.population("player", treq.comp_id, treq.ctx).members}
+    out = []
+    for r in res["rows"]:
+        m = members.get(r["id"])
+        pre = {k: {"value": v, "reason": None if v is not None else "sin_datos"} for k, v in ((m.values if m else {}) or {}).items()}
+        out.append(TableRow(id=str(r["id"]), link=f"player:{r['id']}",
+                            texts={"_rank": r["rank"], "_tie": "=" if r["tied"] else "", "_name": r["name"],
+                                   "_team": r["team_code"]},
+                            bundle=None, sample=r["sample"], extra={"precomputed": pre}, reason_if_null="sin_datos"))
+    return out
+
+
+def _leaders_columns(treq) -> tuple:
+    metric = (treq.params.get("metric") or "").strip()
+    return ("_rank", "_tie", "_name", "_team", "_sample", metric, "minutes", "games")
+
+
+def _leaders_title(treq) -> str:
+    d = METRICS.get((treq.params.get("metric") or "").strip())
+    return f"Líderes — {d.label if d else ''} — {_competition_label(treq.comp_id) or 'competencia'}"
+
+
+register_table(
+    "leaders", entity_type="player", title="Líderes", builder=_build_leaders, required_params=("metric",),
+    default_columns=("_rank", "_tie", "_name", "_team", "_sample", "minutes", "games"),
+    bulk_scopes=(), row_kind="entity",
+    extra_columns=(("_rank", "Puesto", "value:int"), ("_tie", "Empate", "text"), ("_name", "Jugador", "text"),
+                   ("_team", "Equipo", "text")),
+    default_sort={"key": "_rank", "dir": "asc", "use_adjusted": False},
+    totals_mode="none", avg_mode="population", sample_col=True, columns_fn=_leaders_columns, title_fn=_leaders_title,
+)
+
+
+# ── Tramos del partido (F-04 RF-4, RF-11) ─────────────────────────────────────
+
+def _build_period_splits(treq: TableRequest) -> list:
+    """Una fila por tramo (1.º–4.º cuarto, mitades, prórroga, últimos 5 minutos) con el conjunto estándar del equipo en
+    ese tramo y su badge de muestra de split, más la fila "Partido completo" como referencia. Los tramos se superponen
+    (las mitades contienen cuartos), por eso no hay fila de totales."""
+    import bundles as bundles_mod
+    import sample as sample_mod
+    import splits
+    team_code = (treq.params.get("team") or "").upper()
+    # el tramo manda: el filtro `quarter` de la barra no se combina con él (igual que GET /api/periods)
+    ctx = dataclasses.replace(treq.ctx, quarters=())
+    team_poss = sample_mod.team_offensive_possessions(team_code, treq.comp_id, ctx)
+    out = []
+    for w in splits.WINDOWS:
+        b = splits.team_event_bundle(team_code, treq.comp_id, ctx, w)
+        badge = sample_mod.sample_for("period", [b], team_poss=team_poss) if b is not None else None
+        out.append(TableRow(id=f"{team_code}:{w}", link=None, texts={"_window": splits.window_label(w)}, bundle=b,
+                            sample=badge, reason_if_null="sin_partidos"))
+    full = bundles_mod._team_bundle_from_games(team_code, treq.comp_id, ctx)
+    if full is not None:
+        out.append(TableRow(id=f"{team_code}:partido", link=None, texts={"_window": "Partido completo"}, bundle=full))
+    return out
+
+
+register_table(
+    "period_splits", entity_type="team", title="Por tramo del partido", builder=_build_period_splits,
+    required_params=("team",),
+    default_columns=("_window", "_sample", "games", "pts", "pts_against", "plus_minus", "oer", "der", "net_rating",
+                     "efg_pct", "to_pct", "or_pct", "ft_rate"),
+    bulk_scopes=("team",), row_kind="entity", extra_columns=(("_window", "Tramo", "text"),),
+    default_sort=None, totals_mode="none", avg_mode="none", pct_mode="none", sample_col=True,
+    title_fn=lambda treq: f"Por tramo del partido — {(treq.params.get('team') or '').upper()}",
 )

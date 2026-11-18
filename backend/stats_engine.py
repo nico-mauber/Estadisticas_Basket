@@ -1508,6 +1508,12 @@ def compute_standard(bundle: "StatBundle") -> dict:
     else:
         out["player_poss_duration"] = _na()
 
+    # Bundles de un solo lado (posesiones de UN origen, tipo, oportunidad o tramo, A-02…A-05): el rival no ataca en
+    # ellos, así que ritmo, DER y Net no tienen sentido (A-02 CA-10). El filtro de posesión de T-03 arma los dos lados.
+    if (bundle.meta or {}).get("one_side"):
+        for key in ("pace", "der", "net_rating"):
+            out[key] = _na()
+
     missing = set(metrics_catalog_keys()) - set(out)
     for key in missing:
         out[key] = _na()

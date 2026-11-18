@@ -54,7 +54,7 @@ function _isNeutral(col) {
 // `collapsedRows`: la tabla arranca mostrando solo las primeras N filas, con "Ver todos" para extenderla (y
 // "Ver menos" para volver a acortarla); el orden, la exportación y las filas tocables no cambian.
 export function createDataTable(el, {
-  tableId, payload, onRowClick, rowFilter, filterLabels, title, exportFormats, collapsedRows,
+  tableId, payload, onRowClick, rowFilter, filterLabels, title, exportFormats, collapsedRows, initialSort, onSortChange,
 } = {}) {
   const _collapsedRows = Number(collapsedRows) > 0 ? Number(collapsedRows) : 0;
   let collapsed = _collapsedRows > 0;
@@ -64,7 +64,8 @@ export function createDataTable(el, {
 
   // ── Estado (paso 1) ────────────────────────────────────────────────────────
   let visible = _initVisible();
-  let sort = getPref("table.sort", tableId, null) || (_payload?.default_sort ? { key: _payload.default_sort.key, dir: _payload.default_sort.dir } : null);
+  // `initialSort` ({key, dir}, p. ej. el de una consulta guardada) manda sobre el orden recordado del usuario.
+  let sort = initialSort || getPref("table.sort", tableId, null) || (_payload?.default_sort ? { key: _payload.default_sort.key, dir: _payload.default_sort.dir } : null);
   let colorize = getPref("table.colorize", tableId, true);
   let page = 0;
   let showAll = false;
@@ -348,6 +349,7 @@ export function createDataTable(el, {
         }
         page = 0;
         setPref("table.sort", tableId, sort).catch(_prefFail);
+        onSortChange?.(sort);
         render();
       });
     });
@@ -582,19 +584,27 @@ export async function mountTable(el, loader, opts = {}) {
 const _IGNORED_LABELS = {
   quarter: "cuarto", score: "marcador", on: "con jugador", off: "sin jugador",
   venue: "sede", opponent: "rival", rest: "descanso", last: "período",
+  origin: "origen", ptype: "tipo de ataque", clock: "tramo de reloj", clock_start: "reloj", chance: "oportunidad",
 };
 
 // Aviso al pie de la tabla: qué filtros activos NO se aplicaron acá. Sin él, la tabla muestra
 // números de partido completo debajo de una barra que dice "4.º cuarto" (T-03 RF-16).
 function _noteIgnored(el, payload) {
   const ignored = (payload?.context?.ignored || [])
-    .filter(i => i.reason === "no_aplica" || i.reason === "no_implementado");
+    .filter(i => ["no_aplica", "no_implementado", "requiere_posesiones"].includes(i.reason));
   if (!ignored.length) return;
   const names = [...new Set(ignored.map(i => _IGNORED_LABELS[i.param] || i.param))];
   const note = document.createElement("p");
   note.className = "td-muted dt-ignored";
-  note.textContent = names.length === 1
-    ? `Esta tabla no aplica el filtro de ${names[0]}.`
-    : `Esta tabla no aplica los filtros de ${names.slice(0, -1).join(", ")} y ${names[names.length - 1]}.`;
+  // Un nodo de texto por filtro: el traductor (F-21) traduce cada nombre por separado.
+  const head = document.createElement("span");
+  head.textContent = "Esta tabla no aplica estos filtros:";
+  note.appendChild(head);
+  names.forEach((n, i) => {
+    note.appendChild(document.createTextNode(i ? ", " : " "));
+    const s = document.createElement("span");
+    s.textContent = n;
+    note.appendChild(s);
+  });
   el.appendChild(note);
 }

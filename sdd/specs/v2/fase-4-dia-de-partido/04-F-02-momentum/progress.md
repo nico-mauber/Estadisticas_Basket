@@ -1,6 +1,6 @@
 # Progress — F-02: Pestaña Momentum
 
-> **Estado:** 🔶 Implementado y verificado con pbp fabricado, partidos guardados y modo en vivo simulado; falta verificación en navegador y con un partido real en curso
+> **Estado:** ✅ Implementado y verificado en navegador con un partido en curso simulado (2026-11-16); queda la prueba con un partido real en QA
 > **Fecha:** 2026-10-16
 > Reglas: `sdd/04-implement.md`. Spec: [spec.md](spec.md) · Plan: [plan.md](plan.md) · Tasks: [tasks.md](tasks.md)
 
@@ -85,5 +85,8 @@ Pruebas en `momentum_sim.py` (32/32) sobre una copia de la base: escenarios de p
 - ✅ `docs/frontend.md` — pestaña Momentum, `api.momentum()`
 
 ## Deuda / TODO
-- T-F4/T-F5: probar en navegador y con un partido real en curso.
+- T-F5: probar con un partido real en curso (QA).
 - [NEEDS CLARIFICATION] (spec §9): canasta no asistida en la racha de asistencias — implementado con la lectura estricta (corta). Confirmar con el cliente.
+
+## Verificación en navegador (2026-11-16)
+`f01_browser.py` (23/23, Chromium 1280 y 360 px, sin errores de consola): la pestaña Momentum de En vivo muestra parcial abierto (10-0 con "desde 2C 01:19 · 2:54 de juego"), ritmo reciente, últimas posesiones y jugadores calientes/alertas; se actualiza en el mismo ciclo del polling sin perder la pestaña. En Analizar es la 7.ª pestaña (`f07_browser.py` 45/45). En inglés, sin textos sin traducir. Pendiente: verla con un partido real en curso (QA).

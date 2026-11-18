@@ -22,9 +22,11 @@ Todas las rutas bajo `/api/`. Respuestas en JSON. Errores retornan `{"error": "m
 
 > **Selección de competencia y promedios de liga (C-02).** `GET /api/team/<code>` y `GET /api/player/…` aceptan `?competition=<id>|all&last=<n>`. La competencia se resuelve en el backend (parámetro → entidad → configurada F-13 → última de la liga). La respuesta trae UN `league` con el promedio de la competencia seleccionada, no un mapa por competencia.
 >
-> **Filtros de contexto de nivel partido (T-03).** Los mismos endpoints (`/api/team`, `/api/player`, `/api/rankings/…`, `/api/metrics/<tipo>`, `/api/table/<id>`) aceptan además `?venue=local|visitante`, `?opponent=<team_code>` y `?rest=0|1|2|3mas` (días de descanso: 0 = partidos en días consecutivos; se mide sobre todos los partidos publicados del equipo, el primer partido y los que no tienen fecha quedan fuera). Se combinan con "y"; los últimos N se toman después de los demás filtros y la población de los rankings se recalcula con el mismo contexto (con `opponent` el rival sale de la población). El eco `context` trae `applied` (`last`, `venue`, `opponent`, `rest`), `ignored` (`[{param, reason}]`; `quarter`/`score`/`on`/`off` → `no_implementado`, `clock`/`clock_start`/`origin`/`ptype`/`chance` → `requiere_posesiones`, `/api/shot-zones` → `no_aplica`), `games_used`, `games_total`, `games_excluded` (`sin_partido_previo`, `sin_fecha`, `dnp`) y `label`. Un valor inválido responde `400 {error, code: "contexto_invalido", details: {param, value}}`; una entidad sin partidos que cumplan los filtros responde `404 sin_partidos` en `/api/metrics/<tipo>`; si la entidad directamente no existe (código mal escrito), responde `404 no_encontrado` aunque haya filtros activos.
+> **Filtros de contexto de nivel partido (T-03).** Los mismos endpoints (`/api/team`, `/api/player`, `/api/rankings/…`, `/api/metrics/<tipo>`, `/api/table/<id>`) aceptan además `?venue=local|visitante`, `?opponent=<team_code>` y `?rest=0|1|2|3mas` (días de descanso: 0 = partidos en días consecutivos; se mide sobre todos los partidos publicados del equipo, el primer partido y los que no tienen fecha quedan fuera). Se combinan con "y"; los últimos N se toman después de los demás filtros y la población de los rankings se recalcula con el mismo contexto (con `opponent` el rival sale de la población). El eco `context` trae `applied` (`last`, `venue`, `opponent`, `rest`), `ignored` (`[{param, reason}]`: filtros de evento o de posesión que el endpoint no calcula → `no_aplica`), `games_used`, `games_total`, `games_excluded` (`sin_partido_previo`, `sin_fecha`, `dnp`) y `label`. Un valor inválido responde `400 {error, code: "contexto_invalido", details: {param, value}}`; una entidad sin partidos que cumplan los filtros responde `404 sin_partidos` en `/api/metrics/<tipo>`; si la entidad directamente no existe (código mal escrito), responde `404 no_encontrado` aunque haya filtros activos.
 >
-> **Filtros de nivel evento (T-03, solo equipo).** `?quarter=1,2,3,4,pr` (cuartos; `pr` agrupa todas las prórrogas), `?score=ajustado|paliza` (marcador corrido ANTES del evento: ajustado si la diferencia es ≤ `context.close_margin`, 10 por defecto; paliza si es mayor) y `?on=<player_id>[,…]` / `?off=<player_id>[,…]` (jugadores de ese equipo en / fuera de cancha) los aplican `GET /api/metrics/team`, el bloque `standard` de `GET /api/team/<code>` y `GET /api/rankings/team/<métrica>`. Las métricas se calculan sobre los eventos (y los segundos de reloj) que cumplen todos los filtros, solo en partidos con jugada a jugada; el badge de muestra pasa a posesiones (`sample.split.*`) y OER/DER/Net llevan el ajuste a la media con `regression.split.k`. Con `on`/`off` la respuesta trae `context.population_mode = "entity_only"` y `population.reason = "contexto_no_comparable"` (sin percentiles). El eco trae `level: "evento"`, `games_excluded.sin_pbp` / `sin_titulares`. `on`/`off` de un jugador de otro equipo o repetidos en ambos → 400 `contexto_invalido`. Los demás endpoints (jugador, lineup, onoff, clutch, shot-zones, tablas) los informan en `context.ignored` (`no_aplica`; en jugador `no_implementado`).
+> **Filtros de nivel evento (T-03, equipo y jugador).** `?quarter=1,2,3,4,pr` (cuartos; `pr` agrupa todas las prórrogas), `?score=ajustado|paliza` (marcador corrido ANTES del evento: ajustado si la diferencia es ≤ `context.close_margin`, 10 por defecto; paliza si es mayor) y `?on=<player_id>[,…]` / `?off=<player_id>[,…]` (jugadores de ese equipo en / fuera de cancha) los aplican `GET /api/metrics/team`, `GET /api/metrics/player`, el bloque `standard` de `GET /api/team/<code>` y de `GET /api/player/…` y `GET /api/rankings/team|player/<métrica>`. En el jugador cuentan sus eventos dentro de los tramos elegidos y, como minutos, los segundos que estuvo en cancha en ellos; el equipo y el rival con él en cancha salen de los mismos tramos (con/sin jugador se refiere a sus compañeros). Las métricas se calculan sobre los eventos (y los segundos de reloj) que cumplen todos los filtros, solo en partidos con jugada a jugada; el badge de muestra pasa a posesiones (`sample.split.*`) y OER/DER/Net llevan el ajuste a la media con `regression.split.k`. Con `on`/`off` la respuesta trae `context.population_mode = "entity_only"` y `population.reason = "contexto_no_comparable"` (sin percentiles). El eco trae `level: "evento"`, `games_excluded.sin_pbp` / `sin_titulares`. `on`/`off` de un jugador de otro equipo o repetidos en ambos → 400 `contexto_invalido`. Los demás endpoints (lineup, onoff, clutch, shot-zones, tablas) los informan en `context.ignored` (`no_aplica`).
+
+> **Filtros de nivel posesión (T-03 con A-02…A-05, equipo y jugador).** `?origin=<origen>[,…]` (orígenes de A-02: `canasta_rival`, `rebote_defensivo`, `robo`, `perdida_rival`, `saque_banda`, `tiempo_muerto`, `tiro_libre_rival`), `?ptype=transicion|early|media_cancha[,…]` (A-03), `?chance=primera|segunda` (A-04: segunda = tras rebote ofensivo propio, incluye las posteriores), `?clock=temprano|medio|tardio[,…]` y `?clock_start=24|14` (A-05). Los aplican los mismos endpoints que el nivel evento (no `period`). Las métricas se calculan agregando las posesiones completas de A-01 (no el box): las del equipo en ataque y las del rival que cumplen el mismo filtro (el equipo en defensa), así hay OER, DER y Net. `origin`/`ptype` actúan sobre la posesión; `chance`/`clock`/`clock_start` sobre la oportunidad, y con alguno de ellos la unidad pasa a ser la oportunidad (`possessions_counted` = oportunidades propias que cumplen; rebotes por estructura, como la entidad `chance`). Se combinan con los de partido y de evento (cuarto, marcador y con/sin jugador se evalúan con el estado al inicio de la posesión). Elegir todos los valores de una lista equivale a no filtrar. El eco trae `level: "posesion"`, `applied` con cada filtro y la etiqueta ("Tras robo | Saque de banda"). Valores fuera de la lista → 400 `contexto_invalido`. `GET /api/context/options` devuelve las cinco dimensiones con `available: true`, `labels`, `multi` y `unit` (`posesion` u `oportunidad`).
 >
 > **Tablas `team_lineups` y `team_onoff` (F-06).** `GET /api/table/team_lineups?team=<code>[&size=3|4|5]` devuelve una fila por combinación de `size` jugadores (5 por defecto) con el conjunto estándar completo, `_players` (nombres con la grafía de la ficha), `_size`, el badge de muestra de quinteto y `adj` con OER/DER/Net ajustados y su banda; `link` es `lineup:<code>:<pid>-<pid>-…` (ids ascendentes). `GET /api/table/team_onoff?team=<code>[&view=on|off|diff]` devuelve una fila por jugador del plantel: `on` (en cancha), `off` (fuera) o `diff` (ON − OFF clave por clave; si cualquiera de los dos lados es nulo, la diferencia es nula con razón `sin_datos`, nunca 0). El badge de ON/OFF usa el menor de los dos estados. Ambas aceptan el contexto de nivel partido de T-03, `?base=` y las opciones de T-06 (orden, columnas, exportación); los filtros de nivel evento se informan en `context.ignored` con `no_aplica`. `size` o `view` fuera de la lista → 400 `parametro_invalido`.
 >
@@ -36,7 +38,7 @@ Todas las rutas bajo `/api/`. Respuestas en JSON. Errores retornan `{"error": "m
 >
 > **`GET /api/table/team_clutch_lineups?team=<code>`** (F-06) devuelve una fila por quinteto con minutos en el tramo de cierre (últimos `clutch.window_secs` del último período regular más las prórrogas, en partidos con diferencia ≤ `clutch.margin` al entrar al tramo, C-06): `_record` (V-D), `_win_pct`, `_games_counted`, `_pts_for`, `_pts_against`, `_point_diff` (diferencial del quinteto DENTRO del tramo) y el conjunto estándar del tramo. Un partido cuenta para el récord solo si el quinteto jugó al menos `sample.clutch_lineup.min_poss` posesiones del cierre, y el resultado es el del PARTIDO, no el del tramo. El badge se mide en partidos contados (`sample.clutch_lineup.high_games`, 3 por defecto) y el Net Rating trae su ajuste con `regression.clutch_lineup.k`.
 >
-> **`GET /api/periods/<team_code>`** (F-04) devuelve los 8 tramos del partido en una respuesta: `{team_code, window_secs, context, windows: [{window, label, empty, standard, summary, games}]}`. Tramos: `q1`–`q4`, `h1`, `h2`, `pr` (todas las prórrogas) y `last5` (últimos `clutch.window_secs` del último período regular más las prórrogas). Cada `standard` es el payload de `GET /api/metrics/period?id=<equipo>:<tramo>` (conjunto estándar completo, ficha T-01 contra los demás equipos en el mismo tramo y contexto, badge de split, OER/DER/Net ajustados); `summary` trae `record` (G-P-E por los puntos del tramo), `games_with_window`, `pts`, `pts_against`, `point_diff`; `games` es el desglose por partido. Acepta el contexto de T-03 y `?base=`; el filtro `quarter` se ignora (`context.ignored`: `no_aplica`) porque manda el tramo. Un tramo sin partidos con play-by-play viene con `empty: true`. Cada tramo trae además `summary` y `games` ya calculados (el pbp se recorre una sola vez por ventana). Los percentiles de cada tramo se calculan contra los demás equipos EN ESA MISMA VENTANA, no contra el partido completo. 404 `no_encontrado` si el equipo no existe; `/api/metrics/period` con un tramo inválido → 400 `parametro_invalido`.
+> **`GET /api/periods/<team_code>`** (F-04) devuelve los 8 tramos del partido en una respuesta: `{team_code, window_secs, context, windows: [{window, label, empty, standard, summary, games}]}`. Tramos: `q1`–`q4`, `h1`, `h2`, `pr` (todas las prórrogas) y `last5` (últimos `clutch.window_secs` del último período regular más las prórrogas). Cada `standard` es el payload de `GET /api/metrics/period?id=<equipo>:<tramo>` (conjunto estándar completo, ficha T-01 contra los demás equipos en el mismo tramo y contexto, badge de split, OER/DER/Net ajustados); `summary` trae `record` (G-P-E por los puntos del tramo), `games_with_window`, `pts`, `pts_against`, `point_diff`; `games` es el desglose por partido. Acepta el contexto de T-03 y `?base=`; el filtro `quarter` se ignora (`context.ignored`: `no_aplica`) porque manda el tramo. Un tramo sin partidos con play-by-play viene con `empty: true`. Cada tramo trae además `summary` y `games` ya calculados (el pbp se recorre una sola vez por ventana). Los percentiles de cada tramo se calculan contra los demás equipos EN ESA MISMA VENTANA, no contra el partido completo. 404 `no_encontrado` si el equipo no existe; `/api/metrics/period` con un tramo inválido → 400 `parametro_invalido`. **Tabla `period_splits` (T-06):** `GET /api/table/period_splits?team=<code>` da una fila por tramo (mismos valores que cada `standard`) más "Partido completo" (= `/api/metrics/team`), con badge de muestra de split, sin totales (los tramos se superponen) y exportable; en la UI es "Comparar todos los tramos" del bloque Por tramo.
 >
 > **`GET /api/context/options?competition=<id>|all`** devuelve `{competition, competitions, teams: [{code, name}], dimensions: [{name, level, values, available}]}`: las dimensiones disponibles hoy son `last`, `venue`, `opponent`, `rest`, `quarter`, `score`, `on` y `off`; las de evento (`quarter`, `score`, `on`, `off`) también; las de posesión vienen con `available: false`.
 > - El `Ø` es la media **de las entidades** de la competencia (DA-08: cada equipo/jugador una vez, con todos sus partidos), no ponderada por cantidad de partidos.
@@ -352,6 +354,8 @@ Tiros sin coordenadas (`x=0, y=0`, partido sin array `shot` en FIBA) caen en `to
 
 Mapa de tiro enriquecido con percentil y muestra por zona (C-03). Reemplaza los endpoints legacy `/api/shots/…` para el frontend.
 
+**Contexto (T-03, A-05 RF-12):** acepta el contexto de nivel partido (`last`, `venue`, `opponent`, `rest`: recortan los partidos de la entidad) y `clock=temprano|medio|tardio[,…]` / `clock_start=24|14` (cada tiro se ubica en el tramo del reloj de posesión de su oportunidad, A-01 + A-05; los tiros sin tramo quedan fuera con filtro de reloj). Sin `competition` usa todas las competencias. Los percentiles se calculan contra la población con el mismo contexto (sin los últimos N; con `opponent`, sin el rival). Los filtros de evento y `origin`/`ptype`/`chance` no recortan el mapa y van en `context.ignored` (`no_aplica`). La respuesta trae `context` (eco de T-03).
+
 **Query params:**
 | Param | Requerido | Valores | Default |
 |-------|-----------|---------|---------|
@@ -453,6 +457,8 @@ Todos los jugadores de la base con sus promedios, para el buscador avanzado (una
 ---
 
 ## GET `/api/clutch/<team_code>`
+
+> **T-03:** `/api/clutch/<team>`, `/api/lineup/<team>` y `/api/onoff/<team>/<jugador>` aplican el contexto de nivel partido (`last`, `venue`, `opponent`, `rest`; sin `competition` = todas) y devuelven `context` (eco); los filtros de evento y de posesión van en `context.ignored` (`no_aplica`).
 
 Cierres del equipo (Feature 05 **v2**, C-06): rendimiento en la **ventana de cierre** (último período REGULAR con reloj ≤ `window_secs` + todas las prórrogas) **de partidos apretados** — solo cuentan los partidos con diferencia ≤ `margin` al entrar a la ventana. Devuelve un **agregado** ("mini-partido" del equipo, todos sus cierres sumados) **más un desglose por partido**. Ver `sdd/specs/05-clutch/spec.md §10` y `sdd/specs/v2/fase-1-confiabilidad/05-C-06-umbral-cierres/`.
 
@@ -669,40 +675,58 @@ Conciliación de posesiones reconstruidas vs fórmula del glosario para una comp
 
 ## GET `/api/game/<game_id>` — NUEVO (F-07)
 
-Detalle completo de un partido: encabezado, box oficial, parciales, línea de tiempo, jugadores con conjunto estándar, quintetos, conciliación. Cacheado por `cache.memo("game", ...)`.
+Detalle completo de un partido: encabezado, box oficial, parciales, línea de tiempo, jugadores con conjunto estándar, quintetos y conciliación. Cacheado por `cache.memo("game", ...)`.
 
 **Query:** `?base=total|partido|por40|por100` (default `total`).
 
-**Response 200:**
+**Response 200** (forma real; los valores de métricas son `{value, reason}`):
 ```json
 {
-  "game": { "game_id": "12345", "home_code": "CNF", "away_code": "PEN",
-            "home_name": "CNF", "away_name": "PEN", "date": "2026-03-15",
-            "competition": { "id": 1, "label": "Liga de Ascenso 2026" },
-            "home_score": 82, "away_score": 75 },
-  "box": { "home": { "pts": 82, "fgm": 28, "fga": 58, "fg_pct": 48.3, "..." : "..." },
-           "away": { "..." : "..." } },
-  "partials": { "periods": [{ "key": "Q1", "label": "1er cuarto",
-                  "home_pts": 22, "away_pts": 18, "ratings": { "home": { "off": 1.1, "..." : "..." }, "away": { "..." : "..." } } }],
-                "overtimes": 0 },
-  "timeline": { "plays": [{ "elapsed": 45, "period": 1, "clock": "9:15",
-                  "team": "CNF", "pts": 2, "home_score": 2, "away_score": 0,
-                  "is_timeout": false }],
-                "runs": [{ "team": "CNF", "pts": 10, "start_elapsed": 120, "end_elapsed": 280 }],
-                "lead_changes": 5, "ties": 3, "biggest_lead": { "home": 12, "away": 8 } },
-  "players": { "home": [{ "player_id": 7, "name": "Juan Pérez", "position": "PG",
-                  "played": true, "minutes": "25:30", "standard": { "pts": 15, "..." : "..." } }],
-               "away": [ "..." ] },
-  "lineups": { "home": [{ "players": [7, 12, 15, 18, 21], "names": ["...", "..."],
-                  "minutes": "8:30", "possessions": 22, "badge": "estrella",
-                  "standard": { "off_rating": 112.5, "..." : "..." } }],
-               "away": [ "..." ] },
-  "reconciliation": { "score_final": true, "players_sum": false, "period_sum": true,
-                      "timeline_final": true, "details": { "..." : "..." } }
+  "game": { "game_id": "2849343", "date": "2026-06-10", "competition_id": 1, "competition_label": "Liga de Ascenso 2026",
+            "home_code": "LAG", "home_team": "LAGOMAR", "away_code": "TAB", "away_team": "TABARE",
+            "home_score": 82, "away_score": 73, "minutes": 40, "overtimes": 0,
+            "has_pbp": true, "has_coords": true, "needs_reprocess": false },
+  "box": { "home": { "team_code": "LAG", "team_name": "LAGOMAR", "official": { "pts": 82, "fgm2": 20, "...": "..." },
+                     "team_extra": { "orb": 3, "drb": 2, "tov": 0 } },
+           "away": { "...": "..." },
+           "checks": { "ok": true, "items": [
+             { "check": "score_final", "label": "Puntos de cada equipo = marcador final", "ok": true },
+             { "check": "players_sum", "label": "Suma de jugadores (+ rebotes y pérdidas de equipo) = total del equipo",
+               "ok": true, "diffs": {}, "unverified": [] },
+             { "check": "period_sum", "label": "Suma de parciales = puntos", "ok": true },
+             { "check": "timeline_final", "label": "La línea de tiempo termina en el marcador final", "ok": true } ] } },
+  "standard": { "home": { "oer": { "value": 1.05, "reason": null }, "...": "..." }, "away": { "...": "..." } },
+  "players": [ { "player_id": 68, "player_name": "F. Medina", "side": "home", "starter": true, "dnp": false,
+                 "plus_minus": 9, "minutes": 31.2, "metrics": { "pts": { "value": 14, "reason": null }, "...": "..." } } ],
+  "partials": [ { "period": "1", "label": "1C", "home": 18, "away": 22,
+                  "ratings": { "home": { "oer": { "value": 1.1, "reason": null }, "...": "..." }, "away": { "...": "..." } } } ],
+  "partials_source": "oficial",
+  "timeline": { "points": [ "..." ], "periods": [ "..." ], "timeouts": [ "..." ], "runs": [ "..." ], "run_min_points": 8,
+                "duration": 2400, "final": { "home": 82, "away": 73 }, "lead_changes": 1, "ties": 7,
+                "biggest_lead": { "home": { "pts": 17 }, "away": { "pts": 5 } } },
+  "lineups": { "home": [ { "id": "LAG:61-65-66-68-71", "name": "…", "minutes": 8.7, "possessions": 16.4,
+                           "sample": { "level": "media" }, "metrics": { "...": "..." } } ], "away": [ "..." ] },
+  "base": "total"
 }
 ```
 
+- **Parciales:** `partials_source = "oficial"` cuando el box de FIBA trae los puntos por cuarto (`team_game_stats.period_pts`, ingesta 6); `"pbp"` cuando se reconstruyen del marcador del jugada a jugada; `null` sin ninguno. FIBA publica una sola cifra para todas las prórrogas (`ot_score`): con una prórroga va directa; con varias se reparten según el jugada a jugada y, sin él, se muestra una única columna `PR`. Los `ratings` por período salen siempre del jugada a jugada (`null` con razón `sin_pbp` si no hay).
+- **Conciliación:** `players_sum` suma a los jugadores los rebotes y pérdidas de equipo (`box.<lado>.team_extra`). Un partido importado antes de la ingesta 6 no los tiene: esos conteos quedan en `unverified` en lugar de contarse como falla.
+- `needs_reprocess` = `ingest.needs_reprocess` (versión de ingesta anterior a la vigente).
+
 **Errores:** `404 no_encontrado`; `400 parametro_invalido` (base inválida).
+
+**Tablas T-06 del partido (F-07 RF-25).** Box, quintetos y cruces también se sirven como tablas completas por `GET /api/table/<id>` (orden, columnas, exportación CSV/XLSX con cabecera):
+
+| Tabla | Parámetros | Filas |
+|---|---|---|
+| `game_players` | `game`, `team` | Jugadores del equipo (titulares ★ primero, por minutos; "· No jugó" al final con métricas nulas `dnp`) y la fila "Equipo (sin jugador)" con rebotes y pérdidas de equipo; el total = box oficial |
+| `game_lineups` | `game`, `team` | Quintetos del equipo en el partido con badge de muestra |
+| `game_matchups` | `game`, `level=quinteto\|jugador\|jugador_quinteto`, `side=home\|away` | Cruces del partido (lo que hizo cada lado mientras coincidieron en cancha), badge de muestra |
+
+Sin percentiles ni promedio de competencia (un partido no tiene población). `meta.entity` es el partido y `meta.filters` informa el partido (y el nivel/lado de los cruces). Errores: 404 `no_encontrado` (partido), 400 `parametro_invalido` (equipo que no jugó, nivel o lado inválidos).
+
+**Entidad `matchup`.** `GET /api/metrics/matchup?id=<EQUIPO:ids|RIVAL:ids>&game=<id>` devuelve el conjunto estándar de un cruce (mismos grupos y claves que un quinteto). El `id` es el de la fila de cruces; el nivel se deduce de la cantidad de ids (5 vs 5, 1 vs 1, 1 vs 5). Sin `game` suma todos los enfrentamientos de la competencia del contexto. La ficha va sin puesto ni percentil (`population.reason = contexto_no_comparable`). Id mal formado → 400 `parametro_invalido`.
 
 ---
 
@@ -792,7 +816,7 @@ Errores: 400 `parametro_invalido` ("Elegí la fecha del partido.", "La hora debe
 
 Vinculación: al importar o reprocesar un partido (`ingest.persist_game`) se vincula el partido del calendario con el mismo local y visitante y fecha a ±1 día (el más cercano; empate → menor id). `DELETE /api/games` desvincula antes de borrar. Un partido vinculado deja de ser «próximo».
 
-**`GET /api/game-plan` (F-17, tocado):** `reference=rival_proximo` resuelve el rival del próximo partido del calendario (`reference.type: "rival_proximo"`, `fixture_id`, `rival_code`); sin próximo partido → 404 `sin_proximo_partido` (antes 400 `referencia_no_disponible`).
+**`GET /api/game-plan` (F-17, tocado):** `reference=rival_proximo` resuelve el rival del próximo partido del calendario (`reference.type: "rival_proximo"`, `fixture_id`, `rival_code`); sin próximo partido → 404 `sin_proximo_partido` (antes 400 `referencia_no_disponible`). Si el próximo rival todavía no tiene partidos en la competencia → 404 `no_encontrado` ("El próximo rival todavía no tiene partidos en esta competencia…"); el panel vuelve a la referencia de la competencia. En `GET /api/my-team` el bloque `game_plan` hace lo mismo y agrega `rival_reason: "rival_sin_partidos"` en vez de fallar.
 
 **Configuración:** `alerts.lookback_days` (1–90, 7) y `alerts.change_z` (0,5–5, 1,5) pasan a activas; nuevas `my_team.last_games` (5), `my_team.top_lineups` (3) y `my_team.max_followed` (12), sección Preferencias.
 
@@ -829,9 +853,13 @@ Response 200: `assist_matrix`, `rankings`, `pairs`, `teammate_impact`, `context`
 - `player`: `best_pairs`, `assists_to`, `assisted_by` y `boosts`.
 Errores: 400 `parametro_invalido`, 400 `competencia_inexistente`, 404 `no_encontrado` y 404 `sin_pbp`.
 
+**Tabla y entidad de parejas.** `GET /api/table/pairs?team=<code>` (T-06): una fila por pareja con el conjunto estándar, badge de muestra (`pair`), ajustado de OER/DER/Net, percentiles contra todas las parejas de la competencia; orden por Net ajustado; entra en la exportación masiva del equipo. `GET /api/metrics/pair?id=<equipo>:<pid>-<pid>` (T-05): mismos grupos y claves que un quinteto, ficha con población = parejas de la competencia. Un id que no tenga exactamente dos jugadores → 400 `parametro_invalido`.
+
 ## GET `/api/events-production` — NUEVO (A-07)
 
 Consecuencia en puntos de cada evento de un equipo o un jugador. Auth: `login_required`. Query: `entity=team|player`, `id` (código de equipo o `player_id`, que sigue las fusiones de C-08) y el contexto de T-03 (el contexto de nivel evento no se aplica).
+
+**Entidad `chain` (A-07 RF-21, 2026-11-17).** `GET /api/metrics/chain?id=<equipo>:<cadena>` con cadena ∈ `asistencia`, `rebote_ofensivo`, `rebote_defensivo`, `robo`, `perdida`: conjunto estándar completo de las posesiones de la cadena (las mismas que mide el panel: canastas asistidas; oportunidades tras rebote ofensivo propio, con rebotes por estructura; posesiones que nacen de rebote defensivo o de robo; la posesión del RIVAL que sigue a cada pérdida propia), de un solo lado (`pace`, `der`, `net_rating` → `no_aplica`), con la población de los equipos en la misma cadena (ficha de T-01) y `GET /api/rankings/chain/<métrica>?id=<equipo>:<cadena>`. `GET /api/rankings/<tipo>` acepta además `origin`, `ptype`, `chance` y `clock` con `id=<equipo>:<clave>` (y `side`). La respuesta de `/api/events-production` trae `link_fallback`: asistencias vinculadas solo por proximidad en partidos importados antes del vínculo de FIBA (ingesta < 5); el panel avisa que hay que reprocesarlos.
 
 Response 200: `entity {type, id, name, team}`, `blocks`, `excluded {incomplete}`, `link_fallback` (siempre 0: el vínculo sale del motor de posesiones), `context` y, solo en equipo, `reconcile`. Cada bloque lleva `events` y `sample` (badge de T-02 con los eventos como unidad):
 - `assists`: `points` (puntos de las posesiones que terminan en canasta asistida, con el tiro libre del and-one), `points_per_assist`, `kinds {doble, triple, mas1}` (`count`, `share`, `points`; `mas1` = canasta asistida con tiro libre adicional), `top_receiver` y, en equipo, `top_pair` y `reconcile {pbp, linked, unlinked, incomplete, ok}`.
@@ -841,11 +869,17 @@ Response 200: `entity {type, id, name, team}`, `blocks`, `excluded {incomplete}`
 - `turnovers`: posesión rival que sigue a cada pérdida; `outcomes` (doble, triple, falta, sin_castigo, sin_posesion_siguiente, posesion_incompleta), `points_conceded`, `cost_per_turnover`, `punished`, y `team_turnovers` en equipo.
 Las tasas son cocientes de totales y, sin denominador, nulas con `sin_intentos`. `reconcile.pts_from_tov` compara los puntos tras pérdida calculados con `pts_from_tov` del rival en el box y lista los partidos que difieren con su causa (`posesion_incompleta` o `criterio_fiba`; `no_registrado` si el box no lo tiene). Errores: 400 `parametro_invalido`, 400 `competencia_inexistente`, 404 `no_encontrado` y 404 `sin_pbp`.
 
+**Tabla `events_production` (T-06).** `GET /api/table/events_production?team=<code>&chain=asistencia|rebote_ofensivo|rebote_defensivo|robo|perdida&section=desenlaces|jugadores` + contexto: una fila por desenlace o por jugador de esa cadena con `Eventos`, `% del total`, `Puntos siguientes`, `Puntos por evento`, `% con puntos` y badge de muestra (unidad eventos). Mismos registros que el panel (Σ filas = eventos y puntos del bloque). Cadena o sección inválidas → 400; equipo sin pbp → 404 `sin_pbp`.
+
 ## GET `/api/cross` — NUEVO (A-06)
 
-Matriz de dos dimensiones de un equipo sobre una métrica. Auth: `login_required`. Query: `team` (obligatorio), `dim_x` (filas) y `dim_y` (columnas), distintas, entre `cuarto`, `clutch`, `tramo`, `origen`, `tipo`, `oportunidad`, `quinteto`, `jugador`, `finalizador`, `sede` y `rival`; `metric` (`ppp` por defecto, `efg_pct`, `ts_pct`, `ppt`, `to_pct`, `or_pct`, `ft_rate`, `volume`); `side` (`ataque` o `defensa`: en defensa se agrupan las posesiones del rival contra el equipo); `limit` (3 a 30, por defecto 8: cuántos quintetos, jugadores o finalizadores se muestran antes de agrupar el resto en «Otros»); `color` (`competencia` o `matriz`) y el contexto de T-03 (los filtros de nivel evento se informan en `context.ignored`; los de nivel partido sí se aplican).
+Matriz de dos dimensiones de un equipo sobre una métrica. Auth: `login_required`. Query: `team` (obligatorio), `dim_x` (filas) y `dim_y` (columnas), distintas, entre `cuarto`, `clutch`, `tramo`, `origen`, `tipo`, `oportunidad`, `quinteto`, `jugador`, `finalizador`, `sede` y `rival`; `metric` (`ppp` por defecto, `efg_pct`, `ts_pct`, `ppt`, `to_pct`, `or_pct`, `ft_rate`, `volume`); `side` (`ataque` o `defensa`: en defensa se agrupan las posesiones del rival contra el equipo); `limit` (3 a 30, por defecto 8: cuántos quintetos, jugadores o finalizadores se muestran antes de agrupar el resto en «Otros»); `color` (`competencia` o `matriz`) y el contexto de T-03 completo (2026-11-17): nivel partido, evento (cuarto, marcador y con/sin jugador con el estado al inicio de la posesión) y posesión (`origin`, `ptype`; con `chance`/`clock`/`clock_start` la unidad pasa a ser la oportunidad). La tabla `cross_cells` acepta el mismo contexto.
+
+**Detalle de celda (A-06 RF-16):** `GET /api/metrics/cross_cell?id=<equipo>|<dim_x>|<x>|<dim_y>|<y>&side=ataque|defensa&limit=<n>` + contexto devuelve el conjunto estándar de T-05 de las posesiones (u oportunidades) de esa celda (mismas reglas de ejes y «Otros» que la matriz), con nulos con razón; es de un solo lado (`pace`, `der`, `net_rating` → `no_aplica`) y sin población (`population.reason = contexto_no_comparable`). `possessions_counted` = `n` de la celda. Id mal formado → 400.
 
 Response 200: `team`, `side`, `metric`, `metric_label`, `direction`, `unit` (`posesiones`, o `oportunidades` si una dimensión es `oportunidad`), `dims {x, y}` (cada una con `key`, `label` y `values[]`), `cells[i][j]` (fila `i` de `dim_x`, columna `j` de `dim_y`), `row_totals[]`, `col_totals[]`, `grand_total`, `check`, `pct_basis`, `excluded {incomplete}`, `presets[]` (los seis cruces del cliente) y `context`. Cada celda trae `n`, `value`, `reason` (`sin_intentos` o `no_aplica`, nunca 0), `adj` (PPP ajustado por regresión a la media, solo por posesión), `sample` (badge de T-02, entidad «split»), `ranked`, `pct` (percentil), `counts` y `metrics` (las ocho métricas de la celda). Un valor sin base queda nulo con su razón. `check`: `ok`, `cells`, `total`, `expected` y `points_cells`; las dimensiones que reparten cada posesión en una sola celda cierran con el total; «jugador en cancha» (`overlapped`) cuenta cada posesión por cada jugador y cierra contra esa multiplicidad. `pct_basis`: `competencia` (misma celda de los demás equipos, solo celdas con muestra suficiente, cuando las dos dimensiones son comunes a todos los equipos) o `matriz` (entre las celdas válidas). Errores: 400 `parametro_invalido` («Elegí dos dimensiones distintas.», dimensión, métrica, lado, límite o color inválidos), 400 `competencia_inexistente`, 404 `no_encontrado` y 404 `sin_pbp`.
+
+**Tabla `cross_cells` (T-06).** `GET /api/table/cross_cells?team=&dim_x=&dim_y=&side=&limit=` + contexto: una fila por celda con datos de la misma matriz (`Fila`, `Columna`, posesiones u oportunidades, puntos y PPP, eFG%, TS%, PPT, TO%, OR%, FT Rate de la celda) con badge de muestra; ordenable y exportable. Mismos errores que `GET /api/cross`.
 
 ## GET `/api/table/lineup_search` — NUEVO (F-10)
 
@@ -866,6 +900,8 @@ Response 200: `reference {id, name, team_code, position_group, games, sample, va
 ## GET `/api/trends` — NUEVO (F-18)
 
 Evolución partido a partido de un equipo o un jugador. Query: `entity=team|player`, `id`, `metrics` (de una a tres métricas distintas del conjunto estándar que apliquen a la entidad; por defecto `oer,der`), `ma` (3, 5 o 10; por defecto `trends.default_ma`), `last_n` (por defecto `trends.last_n`), `base` (`partido`, `total`, `por40`, `por100`) y el contexto de T-03.
+
+**Quinteto (2026-11-17).** `entity=lineup&id=<EQUIPO>:<pid>-<pid>-<pid>[-<pid>[-<pid>]]` (3 a 5 jugadores): una fila por partido con jugada a jugada del equipo; `played: false` (razón `sin_quinteto`) si los jugadores no compartieron cancha o el partido no tiene titulares. Los valores y la diferencia (`+/-`) son los del quinteto con los jugadores en cancha; el Ø es el de la población de quintetos del mismo tamaño. Id mal formado → 400.
 
 Response 200: `games[]` (por partido: `game_id`, `date`, `opponent`, `home_away`, `team_pts`, `opp_pts`, `result` V/D, `diff`, `played`, `values`, `reasons`), `series[]` (`metric`, `label`, `fmt`, `direction`, `values`, `ma`, `trend`), `milestones[]` (`venue`, `streak_break {result, length}`, `absent[]`), `reference` (Ø de la competencia por métrica; vacío si no hay población comparable), `presets`, `ma`, `last_n`, `alpha` y `context`. Los valores por partido son los de la ficha (`compute_standard` sobre el partido); un partido sin valor queda en `null` con su razón (`dnp`, `sin_intentos`, …) y nunca se rellena con 0. `ma`: promedio de los últimos *k* valores válidos hasta ese partido; sin *k* valores no hay punto. `trend`: compara los últimos `last_n` partidos de la selección con el resto: `last`, `rest` (cociente de totales de cada grupo), `delta`, `delta_rel`, `direction` (`mejora` | `empeora` según la dirección de la métrica), `p_value` y `significant` (prueba de Welch sobre los valores por partido, contra `trends.alpha`); con menos de 3 partidos con valor en algún grupo, `reason: "muestra_insuficiente"`. Hitos: racha cortada de al menos `trends.streak_min` y, en equipos, ausencias de los `trends.key_players` jugadores con más minutos. Errores: 400 `parametro_invalido`, 404 `no_encontrado`.
 
@@ -890,6 +926,8 @@ Líderes de jugadores de una competencia concreta (con `competition=all` respond
 - Sin `metric`: `{cards[], top_n, min_minutes, metrics[]}` con una tarjeta por métrica clave (PTS, REB, AS, ROB, TAP, eFG%, TS%, FG3%, FT%, OER, USO%, AS/PER, TO%, +/-) y el top de `leaders.top_n` jugadores.
 - Con `metric`: esa métrica con `rows[]` (`rank` en competición estándar y `tied`, `id`, `name`, `team_code`, `value`, `minutes`, `games`, `sample`), `qualified`, `excluded_null` (jugadores sin dato, nunca tratados como 0), `avg` y `population`. En las métricas de "menos es mejor" el líder es el valor más bajo; en las neutrales se ordena de mayor a menor (`direction_label`: "Mayor valor").
 - `min_minutes`: `{requested, effective, raised, default, floor}`. La población y los valores son los de T-01 (el primer puesto coincide con el `leader` de la ficha y `avg` con el de la ficha). Los conteos están en base por partido.
+
+**Tabla `leaders` (F-14, T-06).** `GET /api/table/leaders?metric=<clave>&min_minutes=&competition=`: todos los jugadores que califican en la métrica, mismo orden, puesto (`_rank`, `_tie` "=" en empates) y valores que `GET /api/leaders?all=1` (valores de ranking de la población de T-01, por partido), con todas las métricas del jugador como columnas opcionales; la métrica elegida, minutos y partidos visibles por defecto (`columns_fn`). Métrica inválida o ausente → 400 `parametro_invalido`; sin competencia → 400.
 
 ## GET `/api/competition-profile` — NUEVO (F-14)
 
@@ -926,6 +964,10 @@ Segunda oportunidad. Auth: `login_required`. Parámetros como `GET /api/origins`
 
 Response 200 (equipo): `summary {possessions, second_chances, oreb_in_box, incomplete, reconciled}`, `ppp_first`, `ppp_second`, `ppp_diff`, `pts_per_oreb`, `conversion`, `outcomes[]` (`putback`, `reinicio`, `kickout_triple`, `falta_recibida`, `perdida`, `sin_puntos`: `count`, `share`, `pts`, `ppp`, `sample`), `modes[]` (intentos y convertidos por modo del tiro), `sources[]` (origen del rebote según el tiro fallado: triple, media distancia, cercano, tiro libre), `rebound_zone` (`null` / `no_registrado`), `chains`, `secs_to_shot {mean, distribution[], possessions, without_shot}`. Con `side=ataque`: `players {rows[], team_row, totals}` (captura y finalización por separado; "Rebote de equipo" aparte), `cost` (coste del rebote ofensivo, aproximación) y `reconcile {calc, official, diff, games[], games_mismatch[], excluded[]}` contra `team_game_stats.second_chance_pts` (solo partidos con ingesta actual). Con `side=defensa`: `or_pct_conceded` (OR% concedido), `ppp_second` concedido, `long_rebound` (`no_registrado`) y los mismos desenlaces y segundos del rival. Con `player`: `capture {captured, pts, conversion, own_putbacks}`, `finish {finished, pts, ppp_personal}` y `outcomes[]` de lo que finaliza. Ventanas configurables `oreb.putback_secs` (3) y `oreb.kickout_secs` (6).
 
+**Entidad `chance` y tabla `team_second_chance` (A-04, T-05/T-06).**
+- `GET /api/metrics/chance?id=<equipo>:primera|segunda&side=ataque|defensa`: conjunto estándar completo de las primeras o de las segundas oportunidades (n ≥ 2). Cada oportunidad se mide con los eventos de su tramo; el rebote ofensivo que abre la siguiente cuenta como RO de la oportunidad que termina y el rebote defensivo rival cierra la última si terminó en fallo, así PPP, OER y OR% quedan definidos. `possessions_counted` = cantidad de oportunidades. Ficha con población = equipos en la misma oportunidad y lado. Oportunidad o lado inválidos → 400 `parametro_invalido`.
+- `GET /api/table/team_second_chance?team=<code>&side=&section=desenlaces|origen|jugadores`: una fila por desenlace, por origen del rebote o por jugador que capturó el rebote ofensivo (más "Rebote de equipo"), con el conjunto estándar de esas segundas oportunidades, `% de las 2.ª oport.` y badge de muestra; totales = todas las segundas oportunidades. `jugadores` solo en ataque (400 si no). Entra en la exportación masiva del equipo.
+
 ## GET `/api/possession-clock` — NUEVO (A-05)
 
 Tramo de reloj de posesión y composición de puntos. Auth: `login_required`. Query: `team=<code>` (obligatorio), `side=ataque|defensa` (default `ataque`), `game=<game_id>` (un solo partido; ignora el resto del contexto) y contexto T-03.
@@ -938,9 +980,16 @@ Cada bloque `r24` / `r14` (`r14.tardio` = `{value: null, reason: "no_aplica"}`):
 
 **Segunda entrega (2026-10).** Con `side=ataque` o `defensa` el payload suma `matrix` (zona × tramo: `zones[]` con `bands.{temprano,medio,tardio,sin_reloj}` = `attempts`, `made`, `fg_pct`, `efg_pct`, `ppt`, `sample`; `totals` por tramo; `has_coordinates`), `decision` (siete preguntas: `q1_perdidas`, `q2_eficiencia` con el promedio de la competencia por tramo y el diferencial, `q3_zona_tramo`, `q4_seleccion`, `q5_decide`, `q6_costo_tardio`, `q7_rival`) y, solo con `side=ataque`, `players` (`rows[]` por jugador con `by_band` = `shots`, `efg_pct`, `ppt`, `ts_pct`, `finished`, `uso_pct`, `ppp_personal`, `sample`; `team_row` "Equipo / sin jugador"; `totals`). Con `game=` el promedio de la competencia no aplica (`q2_eficiencia.league = false`).
 
+**Quinteto y percentil de la matriz (2026-11-17, RF-9/RF-11).** `lineup=<id>-<id>-<id>-<id>-<id>` (cinco `player_id`, en cualquier orden; siguen las fusiones) recorta el panel a las posesiones que ese quinteto empezó en cancha (en `defensa`, el quinteto que defiende): cada oportunidad y cada tiro cuentan para el quinteto en cancha al inicio de su posesión. Con quinteto, `points_mix` es `null` (el box oficial es del equipo), `reconcile_source: "motor"` y no hay población en la matriz. El payload suma `lineup {key, names}` y `lineups {rows: [{key, possessions, names}] (los 15 con más posesiones), without_lineup, total}`. Σ de los quintetos + posesiones sin quinteto de 5 = el equipo (CA-11). Cada celda de `matrix` suma `percentile` (PPT contra los demás equipos de la competencia en la MISMA celda, solo celdas con `sample.clock_zone.min` intentos), `avg_ppt` y `percentile_reason` (`muestra_baja`, `poblacion_insuficiente`, `sin_universo`, `sin_intentos`); `matrix.league` indica si hubo población. Quinteto mal formado → 400 `parametro_invalido`.
+
 `GET /api/possession-clock?player=<player_id>` (sin `team`): los mismos datos de UN jugador: `by_band` (reloj de 24 s), `bands[].chances` (oportunidades del equipo en el tramo), `summary`, `clock_source`, `context`. 400 si se pasan `player` y `team`; 404 `no_encontrado` si la ficha no existe; 404 `sin_pbp` sin partidos con jugada a jugada.
 
 Errores: 400 `parametro_invalido` ("Indicá un equipo.", "El lado debe ser ataque o defensa."), 400 `contexto_invalido`, 404 `no_encontrado`, 404 `sin_pbp`. Cortes configurables: `clock.early_max` (8) y `clock.mid_max` (16); `clock.reset_secs` (14).
+
+**Entidad `clock` y tablas (A-05, T-05/T-06).**
+- `GET /api/metrics/clock?id=<equipo>:temprano|medio|tardio&side=`: conjunto estándar de las oportunidades decididas en ese tramo (ambos relojes; misma caja por oportunidad que la entidad `chance`), ficha con población = equipos en el mismo tramo y lado.
+- `GET /api/table/team_clock?team=&side=`: una fila por tramo y reloj (temprano/medio/tardío con 24 s, temprano/medio con 14 s) y "Sin tramo", con el conjunto estándar, `% de las oportunidades` y badge; totales = todas las oportunidades.
+- `GET /api/table/zone_clock_matrix?team=&side=`: una fila por zona con intentos y eFG% en cada tramo y sin reloj (mismos datos que `matrix`).
 
 ## GET `/api/game/<game_id>/matchups` — NUEVO (F-07)
 
@@ -1081,6 +1130,8 @@ Lo que está cambiando el partido ahora (no el acumulado). Misma fuente, caché 
 ## GET `/api/prepare` — NUEVO (F-03)
 
 Informe de scouting de un rival (Preparar partido), en una sola respuesta. Cacheado por `(team, rival, competencia, last)` y versión de datos/configuración; < 10 s en frío.
+
+**Plan de juego y emparejamiento por perfil (2026-11-17).** La respuesta suma `game_plan` (`{advantages, risks, reason, sample_warning}`: las frases de F-17 en modo `matchup` contra el rival, en el idioma de la petición; el informe se cachea por idioma) y `profile_matchups` (`{rows: [{threat: {player_id, name, mpg, uso_pct}, candidates: [{player_id, name, similarity, mpg, uso_pct, sample, closest}], reason}], note, method}`): para las 3 amenazas de mayor USO% del rival, los 3 jugadores propios de perfil más parecido según A-09. Es una estimación, no un marcaje individual.
 
 **Query:** `team`, `rival` (códigos, requeridos), `competition` (opcional; default: la del partido más reciente de `team`), `last` (opcional: últimos N partidos **del rival**; aplica a todo el informe salvo el historial).
 
@@ -1413,7 +1464,7 @@ Población vacía o `competition=all` → 200 con `rows: []` y `population.reaso
 
 Cada fila agrega `in_population`, `rank: {clave: {rank, total, tied}}` y `pct: {clave: p}` (11 claves). Los
 valores `oer…stl` pasan a cociente de totales (pooled) de la población; `to_pct` = PER/POS (DA-04). Con
-`include=summary`: `{teams: [...], avg: {clave: v}, leaders: {clave: {id,name,value}}, population: {...}}`. Sin
+`include=summary`: `{teams: [...], avg: {clave: v}, leaders: {clave: {id,name,value}}, population: {...}, context: {...}}`. Los filtros de nivel evento y posesión de T-03 (`quarter`, `score`, `origin`, …) recortan los valores de la población (y la tabla `league_teams`); la clasificación (récord, puntos) es siempre del partido completo; `on`/`off` van en `context.ignored`. `GET /api/leaders` y `GET /api/competition-profile` aplican el mismo contexto. Las tablas `league_teams` y `search_players` aceptan los niveles evento y posesión (`TableDef.levels`); `GET /api/metrics/split?id=<equipo>` es el equipo con el contexto de la petición (alias de `team`). Sin
 `include`, la lista conserva su forma anterior más las claves nuevas por fila.
 
 ---

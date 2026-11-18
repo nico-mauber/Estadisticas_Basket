@@ -1,6 +1,6 @@
 # Progress — F-01: Partido en vivo
 
-> **Estado:** 🔶 Implementado y verificado con partido simulado; falta verificación en navegador y con un partido real en curso
+> **Estado:** ✅ Implementado y verificado en navegador con un partido en curso simulado (2026-11-16); queda la prueba con un partido real en QA
 > **Fecha:** 2026-10-16
 > Reglas: `sdd/04-implement.md`. Spec: [spec.md](spec.md) · Plan: [plan.md](plan.md) · Tasks: [tasks.md](tasks.md)
 
@@ -67,7 +67,7 @@ Simulación: raw archivado de 2849343 servido con id falso `9999999` (recortado 
 - Mismo resultado de cadenas por base (`game_possessions`) y en memoria (`build_from_events`): Q1–Q3 `turnover_cost` 8, `assist_points` 52
 - Partido completo: `turnover_cost` 26 vs `pts_from_tov` FIBA 24; `oreb_points` coherente con `second_chance_pts`
 - `node --check` en app.js, api.js, live-view.js, game-view.js, sw.js: ✅
-- Consola del navegador: pendiente
+- Consola del navegador: ✅ sin errores (Chromium, 1280 y 360 px, 2026-11-16)
 
 ## Desviaciones respecto a docs/ o plan
 - **Sin router X-01:** no existe `views/partido.js`; el modo en vivo es `components/live-view.js` llamado desde `showLiveGame()` en app.js. No hay ruta `#/partido/<id>/vivo`.
@@ -87,7 +87,17 @@ Simulación: raw archivado de 2849343 servido con id falso `9999999` (recortado 
 - ✅ `docs/deployment.md` — nota DA-28 (1 worker síncrono; `render.yaml` sin cambios)
 
 ## Deuda / TODO
-- T-F4/T-F5: probar en navegador y con un partido real en curso.
+- T-F5: probar con un partido real en curso (QA).
 - DA-28: decidir `--threads` en Render (requiere revisar thread-safety de cachés y SQLite).
 - Sin estado "el partido todavía no comenzó" distinto de 404 cuando FIBA aún no publica `data.json` (spec §9, NEEDS CLARIFICATION).
 - A-07 extiende `chains.py` para el análisis histórico.
+
+## Verificación en navegador (2026-11-16)
+Chromium a 1280 y 360 px (`f01_browser.py`, 23/23, sin errores de consola) con un partido en curso simulado: servidor de prueba que sirve el JSON archivado de 2849343 como el partido 9999999, recortado a un evento que el test va moviendo; `live.poll_secs = 10`, `live.cache_ttl_secs = 5`.
+- Entrada por **Seguir en vivo** con la URL de FIBA: badge EN VIVO, reloj y marcador; eficiencia y four factors con Δ contra la temporada, distribución de puntos y jugadores en cancha; sin scroll horizontal en 360 px.
+- CA-1 (flujo): el reloj y el marcador avanzan con el polling sin recargar la página (1C 00:30 → 3C 08:25, 17-19 → 46-34).
+- CA-3: FIBA cae → badge DESACTUALIZADO y "Datos desactualizados desde {hora}". Navegador sin conexión → "Sin conexión…" conservando la última vista; al volver, EN VIVO.
+- Salir de la sección corta el polling (sin descargas durante 22 s).
+- CA-4/CA-5: con el evento de fin, banner "Partido finalizado", vista Analizar (8 pestañas) y el partido en `GET /api/games` sin importar; el polling se detiene.
+- F-21: la vista en vivo y Momentum en inglés sin textos sin traducir (hora en el formato del idioma).
+- Pendiente: probarlo con un partido real en curso en QA (CA-1 del cliente).

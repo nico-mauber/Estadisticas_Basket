@@ -10,6 +10,7 @@ import { exportMenu } from "./export-menu.js";
 import { sampleBadge } from "./sample-badge.js";
 import { metricLabel } from "../core/catalog.js";
 import { DEC1, DEC2, PCT, isNull, fmtMetric, nullDisplay } from "../core/format.js";
+import { renderTrends } from "./trends-panel.js";
 
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
@@ -110,6 +111,7 @@ export async function renderLineupsBlock(el, teamCode, opts = {}) {
   if (_lastTeam !== teamCode) { _openDetailId = null; _lastTeam = teamCode; }
   const token = ++_token;
   const { params = {}, base = "partido" } = opts;
+  if (opts.openLineup) _openDetailId = opts.openLineup;   // enlace profundo `?lineup=` (F-10)
   let size = 5;
   let view = "on";
 
@@ -204,6 +206,20 @@ export async function renderLineupsBlock(el, teamCode, opts = {}) {
     detailHost.hidden = false;
     detailHost.innerHTML = _detailHTML(p, row);
     el.classList.add("lb-detail-open");
+    // Evolución del quinteto partido a partido (F-18): solo los partidos en que jugaron los jugadores elegidos juntos.
+    const lid = _lineupTrendId(row.link);
+    // Comparar (F-09 RF-?): este quinteto contra otro de la tabla; abre Comparar › Quintetos con los dos cargados.
+    const cmpSel = detailHost.querySelector(".lb-cmp-sel");
+    if (cmpSel) {
+      const pi = p.columns.findIndex(c => c.key === "_players");
+      cmpSel.insertAdjacentHTML("beforeend", p.rows.filter(r => r.id !== rowId).map(r =>
+        `<option class="notranslate" value="${esc(r.id)}">${esc(String(r.values[pi] || r.id))}</option>`).join(""));
+      detailHost.querySelector(".lb-cmp-go").addEventListener("click", () => {
+        if (cmpSel.value) opts.onCompare?.(rowId, cmpSel.value);
+      });
+    }
+    const th = detailHost.querySelector(".lb-trends");
+    if (lid && th) renderTrends(th, "lineup", lid, { params, base, entityName: row.values[p.columns.findIndex(c => c.key === "_players")] });
     detailHost.querySelector(".lb-back").addEventListener("click", () => {
       _openDetailId = null;
       detailHost.hidden = true;
@@ -288,6 +304,12 @@ export async function renderLineupsBlock(el, teamCode, opts = {}) {
 }
 
 // Detalle de un quinteto: se abre al tocar una fila o una tarjeta y se cierra con "Volver".
+// `lineup:EQUIPO:pid-pid-…` (link de la tabla `team_lineups`) → id de la entidad `EQUIPO:pid-pid-…`.
+function _lineupTrendId(link) {
+  const m = /^lineup:(.+)$/.exec(String(link || ""));
+  return m ? m[1] : null;
+}
+
 function _detailHTML(payload, row) {
   const idx = k => payload.columns.findIndex(c => c.key === k);
   const names = String(row.values[idx("_players")] || "").split(" · ");
@@ -308,10 +330,14 @@ function _detailHTML(payload, row) {
       <button type="button" class="btn btn-ghost btn-sm lb-back">← Volver</button>
     </div>
     <div class="lb-detail-badge">${sampleBadge(row.sample)}</div>
+    <div class="lb-cmp"><label class="gp-lbl">Comparar con
+      <select class="map-select lb-cmp-sel"><option value="">— otro quinteto —</option></select></label>
+      <button type="button" class="btn btn-sm lb-cmp-go">Comparar</button></div>
     ${DETAIL_BLOCKS.map(b => `<div class="lb-detail-block">
       <div class="card-title">${b.label}</div>
       <div class="stat-grid">${b.keys.map(cell).join("")}</div>
     </div>`).join("")}
+    <div class="lb-trends"></div>
   </div>`;
 }
 

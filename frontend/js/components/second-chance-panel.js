@@ -4,6 +4,8 @@
 // con el box oficial. Defensa: OR% concedido, PPP concedido y segundos del rival hasta tirar. El lado va en `?sside=`.
 import { api } from "../api.js";
 import { fmtNumber, PCT, PCT0, DEC1, DEC2, nullDisplay, isNull } from "../core/format.js";
+import { mountTable } from "./data-table.js";
+import { loadCatalog } from "../core/catalog.js";
 
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
@@ -142,7 +144,35 @@ export async function renderSecondChancePanel(el, id, opts = {}) {
         `${d.summary.second_chances} oportunidades · diferencial ${val(d.ppp_diff, signed)}`)}
       ${stat("Puntos por rebote ofensivo", val(d.pts_per_oreb, DEC2))}${stat("Conversión", val(d.conversion, PCT0), "% de rebotes ofensivos que terminan en puntos")}</div>`
     : "";
-  shell(ctx + head + (side === "defensa" ? _defense(d) : _attack(d)));
+  shell(ctx + head + (side === "defensa" ? _defense(d) : _attack(d)) + _tableShell(side));
+  _mountSecondChanceTable(el, id, side, opts.params || {});
+}
+
+// Tabla completa (T-06 `team_second_chance`): conjunto estándar de las segundas oportunidades por desenlace, por origen
+// del rebote o por jugador que lo capturó (solo ataque); exportable.
+const SECTION_LABELS = [["desenlaces", "Por desenlace"], ["origen", "Por origen del rebote"], ["jugadores", "Por jugador"]];
+let _section = "desenlaces";
+
+function _tableShell(side) {
+  const secs = SECTION_LABELS.filter(([k]) => side === "ataque" || k !== "jugadores");
+  if (!secs.some(([k]) => k === _section)) _section = "desenlaces";
+  return `<div class="sc-table"><h4 class="tp-h">Tabla completa</h4>
+    <div class="pb-chips" role="group" aria-label="Sección">${secs.map(([k, label]) =>
+      `<button type="button" class="filter-pill sc-sec${k === _section ? " active" : ""}" data-sec="${k}">${label}</button>`).join("")}</div>
+    <div id="sc-table-dt"></div></div>`;
+}
+
+function _mountSecondChanceTable(el, team, side, params) {
+  const host = el.querySelector("#sc-table-dt");
+  if (!host) return;
+  mountTable(host, async () => { await loadCatalog(); return api.table("team_second_chance", { team, side, section: _section, ...params }); },
+    { tableId: "team_second_chance" });
+  el.querySelectorAll(".sc-sec").forEach(b => b.addEventListener("click", () => {
+    if (b.dataset.sec === _section) return;
+    _section = b.dataset.sec;
+    el.querySelectorAll(".sc-sec").forEach(x => x.classList.toggle("active", x.dataset.sec === _section));
+    _mountSecondChanceTable(el, team, side, params);
+  }, { once: true }));
 }
 
 export function destroySecondChancePanel() { _token++; }

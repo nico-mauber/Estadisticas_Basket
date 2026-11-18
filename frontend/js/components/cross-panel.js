@@ -4,6 +4,9 @@ import { api } from "../api.js";
 import { percentileBg } from "../core/colors.js";
 import { fmtNumber, PCT } from "../core/format.js";
 import { exportMenu } from "./export-menu.js";
+import { mountTable } from "./data-table.js";
+import { loadCatalog } from "../core/catalog.js";
+import { renderStandardPanel } from "./standard-panel.js";
 
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
@@ -93,7 +96,7 @@ export async function renderCross(el, opts = {}) {
       <div class="cx-n">${c.n}${low ? ' <span class="cx-badge">BAJA</span>' : ""}${c.pct != null && c.ranked ? ` · p${c.pct}` : ""}</div></td>`;
   };
   const totalCell = c => `<td class="cx-total">${c.n ? `<div class="cx-val">${c.value == null ? "—" : _fmt(m, c.value)}</div><div class="cx-n">${c.n}</div>` : "—"}</td>`;
-  const head = `<tr><th class="cx-corner">${esc(d.dims.x.label)} ╲ ${esc(d.dims.y.label)}</th>${ys.map(y => `<th>${esc(y.label)}</th>`).join("")}<th class="cx-total-h">Total</th></tr>`;
+  const head = `<tr><th class="cx-corner"><span>${esc(d.dims.x.label)}</span> ╲ <span>${esc(d.dims.y.label)}</span></th>${ys.map(y => `<th>${esc(y.label)}</th>`).join("")}<th class="cx-total-h">Total</th></tr>`;
   const body = xs.map((x, i) => `<tr><th class="cx-row-h">${esc(x.label)}</th>${d.cells[i].map((c, j) => cellHTML(c, i, j)).join("")}${totalCell(d.row_totals[i])}</tr>`).join("");
   const foot = `<tr class="cx-foot"><th>Total</th>${d.col_totals.map(totalCell).join("")}${totalCell(d.grand_total)}</tr>`;
   const ck = d.check;
@@ -104,10 +107,11 @@ export async function renderCross(el, opts = {}) {
   out.innerHTML = `<div class="card cx-card">
       <div class="cx-head"><span class="td-muted">${esc(d.team)} · ${st.side === "ataque" ? "Ataque" : "Defensa"} · ${esc(d.metric_label)} · ${d.unit}</span><span id="cx-export"></span></div>
       <div class="cx-scroll"><table class="cx-table" id="cx-table"><thead>${head}</thead><tbody>${body}</tbody><tfoot>${foot}</tfoot></table></div>
-      <p class="td-muted cx-legend">${esc(basis)}. Gris: menos de ${d.grand_total.sample ? d.grand_total.sample.min : "?"} ${d.unit} (muestra baja), sin color.</p>
+      <p class="td-muted cx-legend"><span>${esc(basis)}.</span> <span>Gris: menos de ${d.grand_total.sample ? d.grand_total.sample.min : "?"} ${d.unit} (muestra baja), sin color.</span></p>
       <p class="cx-check ${ck.ok ? "td-muted" : "below-avg"}">${ck.ok ? esc(note) : "El cuadre no cierra: revisá posesiones incompletas."}${d.excluded.incomplete ? ` Quedaron fuera ${d.excluded.incomplete} posesiones incompletas.` : ""}</p>
       <p class="td-muted">${esc(d.context.label)} · ${d.context.games_used} de ${d.context.games_total} partidos.</p>
-    </div><div id="cx-detail"></div>`;
+    </div><div id="cx-detail"></div>
+    <details class="card cx-cells-wrap"><summary>Ver todas las celdas como tabla</summary><div id="cx-cells-dt"></div></details>`;
 
   // detalle de celda: las ocho métricas y los conteos
   const detail = out.querySelector("#cx-detail");
@@ -115,13 +119,41 @@ export async function renderCross(el, opts = {}) {
     const rows = CROSS_METRICS.map(([k, l]) => { const v = c.metrics[k]; return `<tr><td>${l}</td><td class="num">${v.value == null ? `<span title="${esc(REASONS[v.reason] || v.reason || "")}">—</span>` : _fmt(k, v.value)}</td></tr>`; }).join("");
     detail.innerHTML = `<div class="card"><div class="card-title">${esc(c.x ? xs.find(v => v.key === c.x).label : "")} · ${esc(c.y ? ys.find(v => v.key === c.y).label : "")}</div>
       <p class="td-muted">${c.n} ${d.unit} · ${c.counts.pts} puntos · ${c.counts.fga2 + c.counts.fga3} tiros de campo · ${c.counts.fta} libres · ${c.counts.tov} pérdidas</p>
-      <table class="ld-table cx-detail-table"><tbody>${rows}</tbody></table></div>`;
+      <table class="ld-table cx-detail-table"><tbody>${rows}</tbody></table>
+      <details class="cx-std"><summary>Conjunto estándar de la celda</summary><div class="cx-std-host"></div></details></div>`;
+    // Conjunto estándar completo de la celda (A-06 RF-16): entidad `cross_cell`, un solo lado (ritmo, DER y Net no aplican).
+    const std = detail.querySelector(".cx-std");
+    std.addEventListener("toggle", async () => {
+      if (!std.open || std.dataset.loaded) return;
+      std.dataset.loaded = "1";
+      const host = std.querySelector(".cx-std-host");
+      renderStandardPanel(host, null);
+      try {
+        await loadCatalog();
+        const payload = await api.metrics("cross_cell", { ...(opts.params || {}), id: `${d.team}|${d.dims.x.key}|${c.x}|${d.dims.y.key}|${c.y}`,
+                                                          side: st.side, limit: st.limit, base: "total" });
+        renderStandardPanel(host, payload, { compact: true, base: "total" });
+      } catch (e) {
+        renderStandardPanel(host, { error: e.message || "No se pudo calcular el conjunto estándar de la celda." });
+      }
+    });
   };
   out.querySelectorAll(".cx-cell[data-i]").forEach(td => td.addEventListener("click", () => {
     out.querySelectorAll(".cx-cell.sel").forEach(x => x.classList.remove("sel"));
     td.classList.add("sel");
     showDetail(d.cells[+td.dataset.i][+td.dataset.j]);
   }));
+
+  // Todas las celdas como tabla completa (T-06 `cross_cells`): ordenable y exportable; se pide al abrir el desplegable.
+  const cw = out.querySelector(".cx-cells-wrap");
+  cw.addEventListener("toggle", () => {
+    if (!cw.open || cw.dataset.loaded) return;
+    cw.dataset.loaded = "1";
+    mountTable(out.querySelector("#cx-cells-dt"), async () => {
+      await loadCatalog();
+      return api.table("cross_cells", { ...(opts.params || {}), team: st.team, dim_x: st.dimX, dim_y: st.dimY, side: st.side, limit: st.limit });
+    }, { tableId: "cross_cells" });
+  });
 
   exportMenu(out.querySelector("#cx-export"), {
     getNode: () => out.querySelector("#cx-table"),

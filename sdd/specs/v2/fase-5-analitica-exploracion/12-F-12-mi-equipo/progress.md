@@ -43,3 +43,6 @@ Scripts en el scratchpad (no se commitean): `f12_sim.py` 55/55 (copia de la DB),
 - El enlace a Preparar es `#/preparar?team=&rival=&fixture=` (la arquitectura decía `#/partido/preparar`, que no existe en el router actual).
 - `rival_proximo` en `/api/game-plan` responde 404 `sin_proximo_partido` (F-17 respondía 400 `referencia_no_disponible`).
 - Copy sin `t()` (F-21).
+
+## Corrección posterior (2026-11-16)
+- Si el rival del próximo partido todavía no tiene partidos en la competencia, `GET /api/game-plan?reference=rival_proximo` responde 404 `no_encontrado` con un mensaje claro (el panel vuelve a la competencia) y el bloque `game_plan` de `GET /api/my-team` usa la competencia con `rival_reason: "rival_sin_partidos"` en vez de fallar. `f12_sim.py` 55/55 (el chequeo de RF-13 ahora toma el próximo rival según la fecha real).

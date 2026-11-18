@@ -1,6 +1,6 @@
 # Progress — F-18: Tendencias y evolución
 
-> **Estado:** 🔶 Implementado para equipo (Game log) y jugador (Tendencias). Falta el quinteto, la exportación a PDF y CSV, y reemplazar los dos gráficos fijos de evolución.
+> **Estado:** ✅ Implementado para equipo (Game log) y jugador (Tendencias), con exportación CSV/XLSX/PNG/PDF. Quinteto y reemplazo de los gráficos fijos de Resumen (2026-11-17).
 > **Fecha:** 2026-11-04
 
 ## Qué se hizo
@@ -23,7 +23,16 @@
 | Exportar como imagen | 🔶 | PNG sí; PDF y CSV de la serie no |
 
 ## Desviaciones
-- No reemplaza los dos gráficos de evolución fijos (Resumen de Equipo y Jugador): el nuevo componente está en Game log y en Tendencias.
-- Sin quinteto.
+- ~~No reemplaza los gráficos fijos~~: resuelto el 2026-11-17 (modo compacto en Resumen).
+- ~~Sin quinteto~~: resuelto el 2026-11-17.
 - El indicador usa el cociente de totales de cada grupo para los valores y el delta, y la prueba de Welch sobre los valores por partido.
 - Copy sin `t()` (F-21).
+
+## Exportación (2026-11-16)
+- Menú Exportar en lugar de "Descargar imagen": CSV/XLSX con la serie partido a partido (fecha, rival, L/V, resultado, diferencia, valor y media móvil de cada métrica) y la cabecera de contexto; PNG/PDF con los dos gráficos como imagen y la misma cabecera. `f18_browser2.py` 16/16 en Chromium (equipo y jugador, 1280 y 360 px).
+
+## Quinteto y gráficos fijos (2026-11-17)
+- `/api/trends?entity=lineup&id=EQUIPO:ids`: serie por partido del quinteto (con los jugadores juntos en cancha), +/- del quinteto y Ø de quintetos del mismo tamaño; se abre desde el detalle de un quinteto (Equipo › Quintetos).
+- Resumen de Equipo y Jugador: la tarjeta "Evolución por partido" es el mismo componente en modo compacto (OER y DER; puntos y TS%) con "Ver tendencias"; `drawEvolution`/`drawPlayerEvolution` ya no se usan. El componente quedó sin ids fijos (varias instancias a la vez).
+- Evidencia: `f18q_sim.py` 7/7 (Σ pts por partido = pts del quinteto = 28; equipo sin cambios); `f18q_browser.py` 16/16 y `f18_browser2.py` 16/16 (Chromium 1280/360 px e inglés).
+

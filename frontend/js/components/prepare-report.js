@@ -146,16 +146,18 @@ function _renderReport() {
   report.innerHTML = `
     <div class="card pr-header">
       <div class="pr-title">${esc(s.team.name)} <span class="pr-vs">vs</span> ${esc(s.rival.name)}</div>
-      <div class="pr-meta">${esc(s.competition.label || "")} · ${esc(_rivalGamesLabel(s))} · Generado ${esc(_fmtDateTime(s.generated_at))}</div>
+      <div class="pr-meta"><span>${esc(s.competition.label || "")}</span> · <span>${esc(_rivalGamesLabel(s))}</span> · <span>Generado</span> <span class="notranslate">${esc(_fmtDateTime(s.generated_at))}</span></div>
       <div class="pr-actions">
         <button class="btn btn-ghost btn-sm" data-export="pdf">PDF A4</button>
         <button class="btn btn-ghost btn-sm" data-export="png">Imagen PNG</button>
         <button class="btn btn-ghost btn-sm" data-export="csv">CSV</button>
       </div>
     </div>
-    <div class="card"><div class="card-title">Ventajas y amenazas</div>${_advThrHTML(d)}</div>
-    <div class="card"><div class="card-title">Quintetos más usados de ${esc(s.rival.name)}</div>${_lineupsHTML(d)}</div>
-    <div class="card"><div class="card-title">Amenazas ofensivas de ${esc(s.rival.name)}</div>${_threatsHTML(d)}</div>
+    <div class="card"><div class="card-title">Plan de juego contra <span class="notranslate">${esc(s.rival.name)}</span></div>${_gamePlanHTML(d)}
+      <details class="pr-duels"><summary>Duelos estadísticos (ventajas y amenazas por métrica)</summary>${_advThrHTML(d)}</details></div>
+    <div class="card"><div class="card-title">Quintetos más usados de <span class="notranslate">${esc(s.rival.name)}</span></div>${_lineupsHTML(d)}</div>
+    <div class="card"><div class="card-title">Amenazas ofensivas de <span class="notranslate">${esc(s.rival.name)}</span></div>${_threatsHTML(d)}</div>
+    <div class="card"><div class="card-title">Emparejamiento propuesto por perfil</div>${_profileHTML(d)}</div>
     <div class="card"><div class="card-title">Historial entre ambos</div>${_h2hHTML(d)}</div>
     <div class="card" id="pr-mu-card"><div class="card-title">Coincidencia en cancha</div><div id="pr-mu"></div></div>`;
 
@@ -173,12 +175,42 @@ function _itemHTML(i, kind, s) {
     <div class="pr-item-head"><span class="pr-arrow">${i.direction === "up" ? "▲" : "▼"}</span>
       <strong>${esc(i.title)}</strong><span class="pr-strength">${esc(i.strength)}</span></div>
     <div class="pr-item-vals">
-      <span>${esc(s.team.code)} ${esc(i.own_label)} <b>${fmtBy(i.own_fmt, i.own)}</b> <small>P${i.own_pct}</small></span>
-      <span>${esc(s.rival.code)} ${esc(i.ref_label)} <b>${fmtBy(i.ref_fmt, i.ref)}</b> <small>P${i.ref_pct}</small></span>
+      <span><span class="notranslate">${esc(s.team.code)}</span> <span>${esc(i.own_label)}</span> <b>${fmtBy(i.own_fmt, i.own)}</b> <small>P${i.own_pct}</small></span>
+      <span><span class="notranslate">${esc(s.rival.code)}</span> <span>${esc(i.ref_label)}</span> <b>${fmtBy(i.ref_fmt, i.ref)}</b> <small>P${i.ref_pct}</small></span>
       <span class="pr-edge">${i.edge > 0 ? "+" : ""}${i.edge}</span>
     </div>
     <div class="pr-item-text">${esc(i.text)}</div>
   </div>`;
+}
+
+// Plan de juego de F-17 (frases contra el rival). Los duelos de F-03 quedan debajo, plegados (F-17 T-G3: se muestran los dos).
+function _gamePlanHTML(d) {
+  const gp = d.game_plan;
+  if (!gp || (!gp.advantages.length && !gp.risks.length)) {
+    return `<p class="empty">${esc(gp?.message || "Sin diferencias marcadas contra este rival.")}</p>`;
+  }
+  const li = (i, cls) => `<li class="pr-gp-${cls}"><span class="pr-arrow">${esc(i.icon)}</span> ${esc(i.text)}</li>`;
+  return `<div class="pr-cols">
+      <div><h4 class="pr-col-h pr-adv-h">Ventajas</h4><ul class="pr-gp">${gp.advantages.map(i => li(i, "adv")).join("") || "<li>—</li>"}</ul></div>
+      <div><h4 class="pr-col-h pr-thr-h">Riesgos</h4><ul class="pr-gp">${gp.risks.map(i => li(i, "thr")).join("") || "<li>—</li>"}</ul></div>
+    </div>${gp.sample_warning ? '<p class="lv-hint">Muestra baja: tomá el plan con cautela.</p>' : ""}`;
+}
+
+// Emparejamiento propuesto por perfil (A-09 RF-15): para cada amenaza del rival, los jugadores propios de perfil más parecido.
+function _profileHTML(d) {
+  const pm = d.profile_matchups;
+  if (!pm || !pm.rows.length) return '<p class="empty">Sin amenazas ofensivas con muestra suficiente.</p>';
+  const pct = v => (isNull(v?.value ?? v) ? "—" : PCT(v?.value ?? v));
+  const rows = pm.rows.map(r => {
+    const t = r.threat;
+    const cands = r.candidates.length
+      ? r.candidates.map(c => `<li><span class="notranslate">${esc(c.name)}</span> · ${DEC1(c.similarity)} · ${isNull(c.mpg) ? "—" : DEC1(c.mpg)} min · <span>USO ${pct(c.uso_pct)}</span></li>`).join("")
+      : '<li class="td-muted">Sin jugadores propios comparables.</li>';
+    return `<div class="pr-pm-row"><div class="pr-pm-threat"><strong class="notranslate">${esc(t.name)}</strong>
+        <span class="td-muted">${DEC1(t.mpg)} min · USO ${pct(t.uso_pct)}</span></div><ul class="pr-pm-cands">${cands}</ul></div>`;
+  }).join("");
+  return `<p class="lv-banner">${esc(pm.note)}</p>${rows}
+    <p class="lv-hint">Para cada amenaza: jugadores propios de perfil más parecido (similitud 0–100), con sus minutos por partido y su USO%. Sirve para elegir quién la emula en el entrenamiento o tenerlo en cuenta en el emparejamiento.</p>`;
 }
 
 function _advThrHTML(d) {
@@ -226,7 +258,7 @@ function _threatsHTML(d) {
   const zones = t.zones;
   const hasShots = (zones?.summary?.total_shots || 0) > 0;
   const best = t.best_zone
-    ? `<p class="pr-best">Zona más productiva: <b>${esc(ZONE_LABELS[t.best_zone.zone] || t.best_zone.zone)}</b> — ${DEC2(t.best_zone.ppt)} pts por tiro (${t.best_zone.attempts} intentos)</p>`
+    ? `<p class="pr-best"><span>Zona más productiva:</span> <b>${esc(ZONE_LABELS[t.best_zone.zone] || t.best_zone.zone)}</b> <span>— ${DEC2(t.best_zone.ppt)} pts por tiro (${t.best_zone.attempts} intentos)</span></p>`
     : "";
   const chart = hasShots
     ? `${best}<div id="pr-shotchart" class="pr-shotchart">${shotChart(zones)}</div>`
@@ -433,6 +465,10 @@ function _summaryNode({ png }) {
       <div class="prx-head"><div class="prx-title">${esc(s.team.name)} vs ${esc(s.rival.name)}</div>
         <div class="prx-meta">Preparar partido · ${esc(s.competition.label || "")} · ${esc(_rivalGamesLabel(s))} · ${esc(_fmtDateTime(s.generated_at))}</div></div>
       ${d.sample_warning ? '<p class="prx-warn">Muestra baja: comparación orientativa.</p>' : ""}
+      <h3>Plan de juego</h3>
+      <div class="prx-cols"><div><h3>Ventajas</h3>${(d.game_plan?.advantages || []).map(i => `<div class="prx-item prx-adv"><em>${esc(i.text)}</em></div>`).join("") || "—"}</div>
+        <div><h3>Riesgos</h3>${(d.game_plan?.risks || []).map(i => `<div class="prx-item prx-thr"><em>${esc(i.text)}</em></div>`).join("") || "—"}</div></div>
+      <h3>Duelos estadísticos</h3>
       <div class="prx-cols"><div><h3>Ventajas</h3>${d.advantages.map(i => item(i, "adv")).join("") || "—"}</div>
         <div><h3>Amenazas del rival</h3>${d.threats.map(i => item(i, "thr")).join("") || "—"}</div></div>
       <h3>Quintetos más usados de ${esc(s.rival.name)}</h3>
@@ -451,6 +487,11 @@ function _summaryNode({ png }) {
         triples ${pct(pts.by_shot.three_pts?.value, pts.total)} · libres ${pct(pts.by_shot.ft_pts?.value, pts.total)}.
         Segunda oportunidad ${pct(pts.by_origin.second_chance_pts?.value, pts.total)} · contraataque ${pct(pts.by_origin.fast_break_pts?.value, pts.total)} ·
         tras pérdida ${pct(pts.by_origin.pts_from_tov?.value, pts.total)}.</p>` : ""}
+      ${(d.profile_matchups?.rows || []).length ? `<h3>Emparejamiento propuesto por perfil</h3><p class="prx-warn">${esc(d.profile_matchups.note)}</p>
+        <table class="prx-table"><thead><tr><th>Amenaza</th><th>Jugadores propios de perfil parecido (similitud · min · USO%)</th></tr></thead><tbody>
+        ${d.profile_matchups.rows.map(r => `<tr><td>${esc(r.threat.name)}</td><td>${r.candidates.map(c =>
+          `${esc(c.name)} (${DEC1(c.similarity)} · ${isNull(c.mpg) ? "—" : DEC1(c.mpg)} · ${isNull(c.uso_pct?.value ?? c.uso_pct) ? "—" : PCT(c.uso_pct?.value ?? c.uso_pct)})`).join(" · ") || "—"}</td></tr>`).join("")}
+        </tbody></table>` : ""}
       <h3>Historial</h3>
       ${d.h2h.games.length ? `<p>${esc(s.team.name)} ${d.h2h.record.wins_a} – ${d.h2h.record.wins_b} ${esc(s.rival.name)}: ${d.h2h.games.slice(0, 6).map(g =>
         `${_fmtDate(g.date)} ${g.score_a}–${g.score_b} (${g.venue})`).join(" · ")}</p>` : "<p>Sin historial entre estos equipos.</p>"}

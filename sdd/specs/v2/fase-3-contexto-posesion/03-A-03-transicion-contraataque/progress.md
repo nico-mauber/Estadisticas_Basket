@@ -1,6 +1,6 @@
 # Progress — A-03: Transición y contraataque
 
-> **Estado:** 🔶 Implementado en Equipo (ataque y defensa) y Jugador, con entidad `ptype` (T-05) y tabla `team_ptypes` (T-06); falta el filtro de contexto `ptype` sobre otras vistas
+> **Estado:** 🔶 Implementado en Equipo (ataque y defensa) y Jugador, con entidad `ptype` (T-05) y tabla `team_ptypes` (T-06); filtro de contexto `ptype` de T-03 en Equipo y Jugador
 
 ## Estado de tareas
 - [x] Enriquecedor `enrich_ptype` (tipo, motivo, finalización, iniciador y finalizador), registrado después de `origin`
@@ -33,7 +33,7 @@ Seed local (Liga de Ascenso, 13 partidos): `test_client` y Chromium 1280 y 360 p
 | CA-13 | ✅ | `pass_out` = `null` / `no_registrado` con la nota |
 | CA-14 | ✅ | defensa usa las posesiones del rival del mismo partido |
 | CA-15 / CA-16 | ✅ | ALB: 24 pérdidas, 13 seguidas de transición rival, 8 con puntos; balance 9 de 74 tiros fallados |
-| CA-17 | ❌ | filtro `ptype` pendiente |
+| CA-17 | ✅ | filtro `ptype` de T-03 (2026-11-17, `t03p_sim.py`) |
 | CA-18 | ✅ | `/api/metrics/ptype?id=ALB:transicion` devuelve las 89 claves, población de 13 equipos |
 | CA-19 | ✅ | sin posesiones: `null` / `sin_intentos`; equipo inexistente 404 `no_encontrado` |
 | CA-20 | ✅ | badge "baja" y fila en gris bajo `sample.split.min` |
@@ -49,3 +49,6 @@ Seed local (Liga de Ascenso, 13 partidos): `test_client` y Chromium 1280 y 360 p
 
 ## Docs pendientes
 Ninguno.
+
+## Filtro `ptype` (2026-11-17)
+- Filtro de contexto `ptype` de T-03 (2026-11-17): `GET /api/metrics/team|player?ptype=…` y los bloques estándar de Equipo y Jugador lo aplican (ver T-03 progress, `t03p_sim.py`); la barra de contexto lo ofrece en el subpanel Posesión.

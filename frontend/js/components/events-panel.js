@@ -1,8 +1,11 @@
 // Producción desde eventos (A-07): la consecuencia en puntos de cada asistencia, rebote ofensivo, rebote defensivo, robo y pérdida
 // de un equipo o un jugador (pestaña Eventos). Cinco cards con desenlaces, puntos y tasas; los valores sin base van como "—" con su razón.
+import { mountTable } from "./data-table.js";
+import { loadCatalog } from "../core/catalog.js";
 import { api } from "../api.js";
 import { PCT, fmtNumber, nullDisplay } from "../core/format.js";
 import { sampleBadge } from "./sample-badge.js";
+import { renderStandardPanel } from "./standard-panel.js";
 
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 let _token = 0;
@@ -76,6 +79,84 @@ export async function renderEvents(el, kind, id, opts = {}) {
   el.innerHTML = `<div class="card"><div class="card-title">Producción desde eventos · ${esc(d.entity.name)}</div>
       <p class="td-muted">${esc(d.context.label)} · ${d.context.games_used} de ${d.context.games_total} partidos. Cada evento se mide por la posesión que sigue.${
         d.excluded.incomplete ? ` Quedaron fuera ${d.excluded.incomplete} posesiones incompletas.` : ""}</p>
-      ${tm && d.reconcile.pts_from_tov.differing.length ? `<p class="td-muted">Puntos tras pérdida frente al box oficial: difieren ${d.reconcile.pts_from_tov.differing.length} de ${d.reconcile.pts_from_tov.games} partidos.</p>` : ""}</div>
-    <div class="ev-grid">${cards.join("")}</div>`;
+      ${tm && d.reconcile.pts_from_tov.differing.length ? `<p class="td-muted">Puntos tras pérdida frente al box oficial: difieren ${d.reconcile.pts_from_tov.differing.length} de ${d.reconcile.pts_from_tov.games} partidos.</p>` : ""}
+      ${d.link_fallback ? `<p class="td-muted below-avg">${d.link_fallback} ${d.link_fallback === 1 ? "asistencia se vinculó" : "asistencias se vincularon"} por proximidad: sus partidos se importaron sin el vínculo de FIBA. Reprocesalos (Datos › Calidad) para el vínculo exacto.</p>` : ""}</div>
+    <div class="ev-grid">${cards.join("")}</div>
+    ${tm ? _chainShell() + _tableShell() : ""}`;
+  if (tm) {
+    _mountChainStandard(el, id, opts.params || {});
+    _mountEventsTable(el, id, opts.params || {});
+  }
+}
+
+// Conjunto estándar por cadena (A-07 RF-21, T-05 entidad `chain`) con la ficha de T-01 (ranking contra los equipos de la
+// competencia en la misma cadena). Pérdidas = lo que hizo el rival en la posesión siguiente.
+let _stdChain = "asistencia";
+
+function _chainShell() {
+  return `<details class="card ev-std"><summary class="card-title">Conjunto estándar por cadena</summary>
+    <div class="pb-chips" role="group" aria-label="Cadena">${CHAIN_OPTS.map(([k, l]) =>
+      `<button type="button" class="filter-pill ev-std-chain${k === _stdChain ? " active" : ""}" data-k="${k}">${l}</button>`).join("")}</div>
+    <p class="td-muted ev-std-note"></p><div id="ev-std-host"></div></details>`;
+}
+
+function _mountChainStandard(el, team, params) {
+  const wrap = el.querySelector(".ev-std");
+  if (!wrap) return;
+  const host = wrap.querySelector("#ev-std-host");
+  const note = wrap.querySelector(".ev-std-note");
+  let tok = 0;
+  const load = async () => {
+    const t = ++tok;
+    note.textContent = _stdChain === "perdida"
+      ? "Posesiones del rival que siguen a cada pérdida: lo que la pérdida costó."
+      : _stdChain === "rebote_ofensivo" ? "Oportunidades tras rebote ofensivo propio." : "Posesiones propias de la cadena.";
+    renderStandardPanel(host, null);
+    try {
+      await loadCatalog();
+      const payload = await api.metrics("chain", { ...params, id: `${team}:${_stdChain}`, base: "total" });
+      if (t === tok) renderStandardPanel(host, payload, { compact: true, base: "total" });
+    } catch (e) {
+      if (t === tok) renderStandardPanel(host, { error: e.message || "No se pudo calcular el conjunto estándar de la cadena." });
+    }
+  };
+  wrap.addEventListener("toggle", () => { if (wrap.open && !wrap.dataset.loaded) { wrap.dataset.loaded = "1"; load(); } });
+  wrap.querySelectorAll(".ev-std-chain").forEach(b => b.addEventListener("click", () => {
+    if (b.classList.contains("active")) return;
+    _stdChain = b.dataset.k;
+    wrap.querySelectorAll(".ev-std-chain").forEach(x => x.classList.toggle("active", x === b));
+    if (wrap.open) load();
+  }));
+}
+
+// Tabla completa (T-06 `events_production`): por cadena, una fila por desenlace o por jugador; exportable.
+const CHAIN_OPTS = [["asistencia", "Asistencias"], ["rebote_ofensivo", "Rebotes ofensivos"], ["rebote_defensivo", "Rebotes defensivos"],
+                    ["robo", "Robos"], ["perdida", "Pérdidas"]];
+let _chain = "asistencia", _evSection = "desenlaces";
+
+function _tableShell() {
+  return `<div class="card"><div class="card-title">Tabla completa</div>
+    <div class="pb-chips" role="group" aria-label="Cadena">${CHAIN_OPTS.map(([k, l]) =>
+      `<button type="button" class="filter-pill ev-chain${k === _chain ? " active" : ""}" data-k="${k}">${l}</button>`).join("")}</div>
+    <div class="pb-chips" role="group" aria-label="Sección">${[["desenlaces", "Por desenlace"], ["jugadores", "Por jugador"]].map(([k, l]) =>
+      `<button type="button" class="filter-pill ev-sec${k === _evSection ? " active" : ""}" data-k="${k}">${l}</button>`).join("")}</div>
+    <div id="ev-table-dt"></div></div>`;
+}
+
+function _mountEventsTable(el, team, params) {
+  const host = el.querySelector("#ev-table-dt");
+  if (!host) return;
+  const load = () => mountTable(host, async () => {
+    await loadCatalog();
+    return api.table("events_production", { team, chain: _chain, section: _evSection, ...params });
+  }, { tableId: "events_production" });
+  const bind = (sel, set) => el.querySelectorAll(sel).forEach(b => b.addEventListener("click", () => {
+    if (b.classList.contains("active")) return;
+    set(b.dataset.k);
+    el.querySelectorAll(sel).forEach(x => x.classList.toggle("active", x === b));
+    load();
+  }));
+  bind(".ev-chain", k => { _chain = k; });
+  bind(".ev-sec", k => { _evSection = k; });
+  load();
 }

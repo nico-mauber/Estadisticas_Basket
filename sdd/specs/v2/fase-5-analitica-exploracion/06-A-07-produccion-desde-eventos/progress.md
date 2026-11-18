@@ -1,6 +1,6 @@
 # Progress — A-07: Producción desde eventos
 
-> **Estado:** 🔶 Implementado para equipo y jugador (pestaña Eventos, `GET /api/events-production`). Faltan la entidad `chain` de T-05, la tabla `events_production`, las fichas de T-01 y el vínculo de respaldo.
+> **Estado:** ✅ Implementado para equipo y jugador (pestaña Eventos, `GET /api/events-production`) con la tabla `events_production` de T-06. Faltan la entidad `chain` de T-05 con el conjunto estándar y las fichas de T-01.
 > **Fecha:** 2026-11-05
 
 ## Qué se hizo
@@ -22,9 +22,9 @@
 | CA-9 | ✅ | `last=1` usa un partido |
 | CA-10 | ✅ | jugador sin robos: conteo 0 y tasas «—» con razón |
 | CA-11 | ✅ | badge por bloque con los eventos como unidad |
-| CA-12, CA-13 | ⬜ | ficha T-01 por tasa y entidad `chain` de T-05 |
-| CA-14 | ⬜ | tabla `events_production` y su exportación |
-| CA-15 | ⬜ | no hay vínculo de respaldo: `link_fallback` es 0 |
+| CA-12, CA-13 | ✅ | `GET /api/metrics/chain?id=ALB:asistencia` (y las otras cuatro): mismas claves que `/api/metrics/team`, puntos y posesiones = los bloques del panel, población de 10–14 equipos por cadena con puesto; `GET /api/rankings/chain/ppp` con el equipo resaltado (`a07q_sim.py`) |
+| CA-14 | ✅ | tabla `events_production` con exportación (2026-11-16) |
+| CA-15 | ✅ | con un partido marcado como ingesta 4 (sin `previous_action`): `link_fallback = 17` y aviso de reprocesar; los puntos del bloque no cambian (85) (`a07q_sim.py`) |
 | CA-16 | 🔶 | control con `pts_from_tov` implementado; en la base de ejemplo no hay diferencias |
 | CA-17 | ✅ | 0,13 s en frío y 0,00 s en caliente |
 
@@ -33,3 +33,13 @@
 - Los filtros de nivel evento de T-03 no se aplican.
 - Sin tabla, entidad `chain` ni ranking.
 - Copy sin `t()` (F-21).
+
+## Tabla `events_production` (2026-11-16)
+- `GET /api/table/events_production?team=&chain=&section=desenlaces|jugadores`: en Equipo › Eventos como "Tabla completa" con selector de cadena y sección, exportable. `a07_table.py` 12/12 (Σ eventos y puntos de las filas = bloque del panel en las 5 cadenas × 2 secciones); Chromium 1280/360 px e inglés (`tables_browser.py` 17/17).
+- Desvío: las columnas son las de la cadena (eventos, %, puntos siguientes, puntos por evento, % con puntos), no el conjunto estándar de T-05: un evento no es una entidad con caja propia. Solo en Equipo (en Jugador el panel ya muestra sus cadenas).
+
+## Entidad `chain`, ficha T-01 y vínculo de respaldo (2026-11-17)
+- `chain` (T-05): conjunto estándar por cadena, de un solo lado; población por cadena y rankings (`/api/rankings/chain/<métrica>`). En Equipo › Eventos, desplegable "Conjunto estándar por cadena" (Pérdidas = lo que hizo el rival en la posesión siguiente).
+- `link_fallback`: asistencias de partidos importados antes de la ingesta 5, vinculadas solo por proximidad; aviso en el panel.
+- Evidencia: `a07q_sim.py` 27/27; `a07q_browser.py` 9/9 (Chromium 1280/360 px e inglés).
+

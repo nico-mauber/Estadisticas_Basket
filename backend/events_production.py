@@ -77,6 +77,11 @@ def _collect(team, comp_id, ctx):
         all_poss = 0
         all_pts = 0
         pts_tov_games = []
+        fallback = 0
+        import assists as assists_mod
+        from database import Game
+        old = {gm.game_id for gm in Game.query.filter(Game.game_id.in_([g["game_id"] for g in games])).all()
+               if (gm.ingest_version or 1) < assists_mod.LINK_INGEST_VERSION}
         for g in games:
             for e in g["events"]:
                 if e.get("team_code") != team:
@@ -111,6 +116,9 @@ def _collect(team, comp_id, ctx):
                 all_pts += p.pts
                 if p.assister_id is not None and any(s.get("made") for s in p.shots):
                     recs["assists"].append({"assister": _canon(p.assister_id), "receiver": _canon(p.finisher_id), "kind": _fg_kind(p), "pts": p.pts, "game": g["game_id"]})
+                    if g["game_id"] in old:
+                        # partido importado sin `previous_action`: la asistencia se vinculó solo por proximidad (CA-15)
+                        fallback += 1
                 for ch in p.chances:
                     if ch.n >= 2:
                         cat = {"putback": "putback", "falta_recibida": "falta", "perdida": "perdida", "sin_puntos": "sin_puntos"}.get(ch.outcome)
@@ -138,7 +146,8 @@ def _collect(team, comp_id, ctx):
             box = getattr(row, "pts_from_tov", None) if row is not None else None
             pts_tov_games.append({"game_id": g["game_id"], "computed": conceded, "box": box, "gap": gap})
         return {"recs": recs, "pbp": dict(pbp), "incomplete": dict(incomplete), "poss": all_poss, "pts": all_pts,
-                "games_used": len(games), "games_total": total, "excluded": excluded, "pts_tov": pts_tov_games}
+                "games_used": len(games), "games_total": total, "excluded": excluded, "pts_tov": pts_tov_games,
+                "link_fallback": fallback}
     return cache.memo("events:collect", (team, comp_id, context_key(ctx)), build)
 
 
@@ -284,10 +293,212 @@ def _build(entity, ident, comp_id, ctx):
         "turnovers": _turnovers(r["turnovers"], pid, g, d["pbp"], d["incomplete"], tm),
     }
     out = {"entity": {"type": entity, "id": str(ident), "name": name, "team": team}, "blocks": blocks,
-           "excluded": {"incomplete": d["incomplete"].get("any", 0)}, "link_fallback": 0,
+           "excluded": {"incomplete": d["incomplete"].get("any", 0)}, "link_fallback": d.get("link_fallback", 0),
            "context": context_mod.context_echo(ctx, games_used=g, games_total=d["games_total"], games_excluded=d["excluded"], ignored=[],
                                                competition_label=repository.competition_labels().get(comp_id) if comp_id is not None else None)}
     if tm:
         out["reconcile"] = {k: blocks[k]["reconcile"] for k in ("assists", "oreb", "steals", "turnovers")}
         out["reconcile"]["pts_from_tov"] = _tov_control(d["pts_tov"])
     return out
+
+
+# ── Tabla `events_production` (T-06, A-07 RF-22) ─────────────────────────────
+# Mismos registros que el panel: por cadena (asistencia, rebote ofensivo, rebote defensivo, robo, pérdida) una fila por
+# desenlace o por jugador, con eventos, % del total, puntos de la posesión siguiente y puntos por evento.
+
+CHAINS = {"asistencia": "assists", "rebote_ofensivo": "oreb", "rebote_defensivo": "dreb", "robo": "steals", "perdida": "turnovers"}
+CHAIN_LABELS = {"asistencia": "Asistencias", "rebote_ofensivo": "Rebotes ofensivos", "rebote_defensivo": "Rebotes defensivos",
+                "robo": "Robos", "perdida": "Pérdidas"}
+OUTCOME_LABELS = {
+    "assists": {"doble": "Termina en doble", "triple": "Termina en triple", "mas1": "Termina en 2+1"},
+    "oreb": {"putback": "Putback", "doble": "Doble", "triple": "Triple", "falta": "Falta recibida", "perdida": "Pérdida",
+             "sin_puntos": "Finalización sin puntos"},
+    "dreb": {"transicion": "Abre contraataque", "posicional": "Ataque posicional"},
+    "steals": {"doble": "Doble", "triple": "Triple", "falta": "Falta recibida", "perdida": "Pérdida posterior",
+               "sin_conversion": "Sin conversión"},
+    "turnovers": {"doble": "Doble recibido", "triple": "Triple recibido", "falta": "Falta recibida por el rival",
+                  "sin_castigo": "Sin castigo", "sin_posesion_siguiente": "Sin posesión siguiente (fin de período)",
+                  "posesion_incompleta": "Posesión siguiente incompleta"},
+}
+_PLAYER_KEY = {"assists": "assister", "oreb": "player", "dreb": "player", "steals": "player", "turnovers": "player"}
+
+
+def _cat(block, r):
+    if block == "assists":
+        return r["kind"]
+    if block == "dreb":
+        return "transicion" if r["trans"] else "posicional"
+    return r["cat"]
+
+
+def table_rows(treq):
+    import tables
+    team = (treq.params.get("team") or "").upper()
+    chain = treq.params.get("chain") or "asistencia"
+    section = treq.params.get("section") or "desenlaces"
+    if chain not in CHAINS:
+        raise tables.TableError(400, "Cadena inválida: usá " + ", ".join(CHAINS) + ".", "parametro_invalido", {"param": "chain"})
+    if section not in ("desenlaces", "jugadores"):
+        raise tables.TableError(400, "Sección inválida: usá desenlaces o jugadores.", "parametro_invalido", {"param": "section"})
+    if not repository.team_pbp_games(team, treq.comp_id):
+        raise tables.TableError(404, "Este equipo no tiene play-by-play importado. Reimportá sus partidos.", "sin_pbp")
+    block = CHAINS[chain]
+    d = _collect(team, treq.comp_id, treq.ctx)
+    recs, games = d["recs"][block], d["games_used"]
+    total = len(recs)
+    if section == "desenlaces":
+        groups = [(k, label, [r for r in recs if _cat(block, r) == k]) for k, label in OUTCOME_LABELS[block].items()]
+    else:
+        by = {}
+        for r in recs:
+            by.setdefault(r[_PLAYER_KEY[block]], []).append(r)
+        groups = sorted(((str(pid), _name(pid) or f"jugador {pid}", rs) for pid, rs in by.items() if pid is not None),
+                        key=lambda g: (-len(g[2]), g[1]))
+        if None in by:
+            groups.append(("equipo", "Del equipo (sin jugador)", by[None]))
+    rows = []
+    for key, label, rs in groups:
+        n, pts = len(rs), sum(r["pts"] for r in rs)
+        scored = sum(1 for r in rs if r["pts"] > 0)
+        rows.append(tables.TableRow(
+            id=f"{team}:{chain}:{section}:{key}",
+            link=f"player:{key}" if section == "jugadores" and key.isdigit() else None,
+            texts={"_name": label, "_events": n, "_share": round(n / total, 4) if total else None, "_pts": pts,
+                   "_pts_per": round(pts / n, 4) if n else None, "_scored": round(scored / n, 4) if n else None},
+            bundle=None, sample=_badge(n, games), reason_if_null="no_aplica"))
+    return rows
+
+
+def _register_table():
+    import tables
+    tables.register_table(
+        "events_production", entity_type="chain_events", title="Producción desde eventos", builder=table_rows,
+        required_params=("team",),
+        default_columns=("_name", "_sample", "_events", "_share", "_pts", "_pts_per", "_scored"),
+        bulk_scopes=(), row_kind="entity",
+        extra_columns=(("_name", "Grupo", "text"), ("_events", "Eventos", "value:int"), ("_share", "% del total", "value:pct"),
+                       ("_pts", "Puntos siguientes", "value:int"), ("_pts_per", "Puntos por evento", "value:dec2"),
+                       ("_scored", "% con puntos", "value:pct")),
+        default_sort=None, totals_mode="none", avg_mode="none", pct_mode="none", sample_col=True,
+        title_fn=lambda treq: (f"{CHAIN_LABELS.get(treq.params.get('chain') or 'asistencia', 'Eventos')} "
+                               f"{'por jugador' if treq.params.get('section') == 'jugadores' else 'por desenlace'} — "
+                               f"{(treq.params.get('team') or '').upper()}"),
+    )
+
+
+_register_table()
+
+
+# ── Entidad `chain` (T-05, A-07 RF-21) ───────────────────────────────────────
+# Cada cadena como un split de posesiones con el conjunto estándar completo (id `<equipo>:<cadena>`). Las posesiones de cada
+# cadena son las mismas que miden los bloques del panel (horizonte de una posesión):
+#   asistencia       → posesiones propias que terminan en canasta asistida
+#   rebote_ofensivo  → oportunidades tras rebote ofensivo propio (n ≥ 2; rebotes por estructura, como la entidad `chance`)
+#   rebote_defensivo → posesiones propias que nacen de un rebote defensivo
+#   robo             → posesiones propias que nacen de un robo
+#   perdida          → la posesión del RIVAL que sigue a cada pérdida propia (mismo período): lo que la pérdida costó
+# Es de un solo lado (el que ataca en esas posesiones): ritmo, DER y Net van `no_aplica`.
+
+def _chain_units(team, comp_id, ctx, chain):
+    """[(caja de quien ataca, caja de quien defiende, segundos, game_id)] de la cadena."""
+    import poss_filter
+    games, total, excluded = origin_mod._games_for(team, comp_id, ctx)
+    units = []
+    for g in games:
+        plist = possessions.game_possessions(g["game_id"])
+        order = idx = None
+        for i, p in enumerate(plist):
+            if p.team != team or p.incomplete:
+                continue
+            if chain == "asistencia":
+                if p.assister_id is None or not any(s.get("made") for s in p.shots):
+                    continue
+                a, d = poss_filter._poss_box(p)
+                units.append((a, d, p.duration or 0, g["game_id"]))
+            elif chain in ("rebote_defensivo", "robo"):
+                if p.origin != chain:
+                    continue
+                a, d = poss_filter._poss_box(p)
+                units.append((a, d, p.duration or 0, g["game_id"]))
+            elif chain == "rebote_ofensivo":
+                if len(p.chances) < 2:
+                    continue
+                if order is None:
+                    order = sorted(g.get("events") or [], key=lambda e: e.get("action_number") or 0)
+                    idx = {e.get("action_number"): k for k, e in enumerate(order)}
+                for ch, a, d, secs, _ev in poss_filter._chance_spans(p, order, idx):
+                    if ch.n >= 2:
+                        units.append((a, d, secs, g["game_id"]))
+            elif chain == "perdida":
+                if p.end_type != "perdida":
+                    continue
+                nxt = plist[i + 1] if i + 1 < len(plist) else None
+                if nxt is None or nxt.team == team or nxt.period != p.period or nxt.incomplete:
+                    continue
+                a, d = poss_filter._poss_box(nxt)
+                units.append((a, d, nxt.duration or 0, g["game_id"]))
+    return units, total, excluded
+
+
+def chain_bundle(team, chain, comp_id, ctx):
+    from stats_engine import StatBundle
+
+    def build():
+        import poss_filter
+        units, total, excluded = _chain_units(team, comp_id, ctx, chain)
+        if not units:
+            return None
+        own, opp = poss_filter._empty(), poss_filter._empty()
+        for a, d, _s, _g in units:
+            poss_filter._add(own, a)
+            poss_filter._add(opp, d)
+        own["blk_received"], opp["blk_received"] = opp.get("blk", 0), own.get("blk", 0)
+        own["plus_minus"] = opp["plus_minus"] = None
+        seconds = sum(u[2] for u in units)
+        rows = [r for r in repository.team_game_rows(comp_id).values() if r["team_code"] == team]
+        name = next((r.get("team_name") for r in rows if r.get("team_name")), team)
+        meta = {"team_code": team, "team_name": name, "split": True, "poss_exact": True, "one_side": True, "chain": chain,
+                "variant": chain, "perspective": "rival" if chain == "perdida" else "propio",
+                "unit": "oportunidad" if chain == "rebote_ofensivo" else "posesion",
+                "games_total": total, "games_excluded": excluded}
+        return StatBundle(entity_type="split", entity_id=f"{team}:{chain}", name=name,
+                          own=own, opp=opp, team=None, games=len({u[3] for u in units}), minutes=seconds / 60,
+                          team_minutes=None, seconds=seconds, on_court=None, shots=None, possessions_counted=len(units),
+                          null_reasons={}, meta=meta)
+    return repository.memo(("chain_bundle", team, chain, comp_id, context_key(ctx)), build)
+
+
+def _parse_chain_id(entity_id):
+    import metrics_catalog
+    team, _, chain = str(entity_id).partition(":")
+    if chain not in CHAINS:
+        raise metrics_catalog.MetricsError(
+            "La cadena debe ser asistencia, rebote_ofensivo, rebote_defensivo, robo o perdida.", 400, "parametro_invalido")
+    return team.strip().upper(), chain
+
+
+def _chain_loader(req):
+    team, chain = _parse_chain_id(req.entity_id)
+    b = chain_bundle(team, chain, req.comp_id, req.ctx)
+    return [b] if b is not None else []
+
+
+def all_chain_bundles(comp_id, ctx, variant=None):
+    """Población del tipo `chain`: todos los equipos en la MISMA cadena (`variant` = cadena)."""
+    if variant not in CHAINS:
+        return []
+    out = []
+    for code in sorted({r["team_code"] for r in repository.team_game_rows(comp_id).values()}):
+        b = chain_bundle(code, variant, comp_id, ctx)
+        if b is not None:
+            out.append(b)
+    return out
+
+
+def _register_entity():
+    import metrics_catalog
+    metrics_catalog.register_entity("chain", _chain_loader, enumerator=all_chain_bundles)
+
+
+_register_entity()
+

@@ -5,6 +5,8 @@
 import { api } from "../api.js";
 import { fmtNumber, fmtSigned, PCT, DEC1, DEC2 } from "../core/format.js";
 import { sampleBadge } from "./sample-badge.js";
+import { mountTable } from "./data-table.js";
+import { loadCatalog } from "../core/catalog.js";
 
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 let _tokenL = 0, _tokenP = 0;
@@ -60,7 +62,7 @@ export async function renderLeaders(el, opts = {}) {
   } else {
     body = `<div class="card"><div class="card-title">${esc(d.metric.label)} <span class="td-muted ld-dir">${esc(d.metric.direction_label)}</span></div>
       <p class="td-muted">${d.qualified} jugadores califican${d.excluded_null ? ` · ${d.excluded_null} sin dato en la métrica (no se cuentan como 0)` : ""} · Ø ${fmt(d.metric.fmt, d.avg)}</p>
-      ${d.rows.length ? `<div class="vs-table-wrap"><table class="ld-table"><thead><tr><th>Puesto</th><th>Jugador</th><th>Valor</th><th>Min</th><th>PJ</th></tr></thead><tbody>${_rows(d.rows, d.metric)}</tbody></table></div>` : '<p class="empty">Ningún jugador alcanza el mínimo.</p>'}</div>`;
+      ${d.rows.length ? '<div id="ld-table-dt"></div>' : '<p class="empty">Ningún jugador alcanza el mínimo.</p>'}</div>`;
   }
   el.innerHTML = `<div class="card"><div class="card-title">Líderes — ${esc(d.context?.label || "")}</div>${controls}</div>${body}`;
   const change = patch => opts.onChange?.({ metric, minMinutes, ...patch });
@@ -68,6 +70,14 @@ export async function renderLeaders(el, opts = {}) {
   el.querySelector("#ld-min").addEventListener("change", e => change({ minMinutes: e.target.value === "" ? "" : Number(e.target.value) }));
   el.querySelectorAll(".ld-more").forEach(a => a.addEventListener("click", ev => { ev.preventDefault(); change({ metric: a.dataset.metric }); }));
   el.querySelectorAll(".ld-player").forEach(a => a.addEventListener("click", ev => { ev.preventDefault(); opts.onOpenPlayer?.(a.dataset.pid); }));
+  // Modo métrica: todos los que califican como tabla completa (T-06 `leaders`): orden, columnas y exportación (CA-13).
+  const host = el.querySelector("#ld-table-dt");
+  if (host) {
+    mountTable(host, async () => {
+      await loadCatalog();
+      return api.table("leaders", { ...opts.params, metric, min_minutes: minMinutes === "" ? null : minMinutes, base: "partido" });
+    }, { tableId: "leaders", onRowClick: row => opts.onOpenPlayer?.(row.id) });
+  }
 }
 
 function _profileTable(title, rows, hint = "") {

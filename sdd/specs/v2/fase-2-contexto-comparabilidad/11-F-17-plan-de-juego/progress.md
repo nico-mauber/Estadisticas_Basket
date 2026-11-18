@@ -1,6 +1,6 @@
 # Progress — F-17: Plan de juego
 
-> **Estado:** 🔶 Implementado en Equipo (motor de frases, `GET /api/game-plan`, panel con referencias competencia, rival y período anterior). Quedan la presencia en Mi equipo y la referencia "rival del próximo partido" (→ F-12), el bloque del informe (→ F-03) y la integración con la pestaña Resumen de X-01.
+> **Estado:** ✅ Implementado en Equipo y en Mi equipo, con la referencia "rival del próximo partido" (estos dos los entregó F-12). Queda a confirmar con el cliente el bloque del informe de Preparar (T-G3, ver abajo).
 > **Fecha:** 2026-11-03
 
 ## Estado de tareas
@@ -23,7 +23,9 @@
 - [x] T-E1 · errores, sin conexión y motivos sin ítems
 - [x] T-E2 · `sw.js` v51 con `game-plan.js`
 - [x] T-F1 … T-F19 · verificación con `f17_sim.py` (61 chequeos) y `f17_browser.py` (58 chequeos, 1280 y 360 px)
-- [ ] T-G1 … T-G3 · incrementos diferidos (→ F-12, → F-03)
+- [x] T-G1 · referencia `rival_proximo` (F-12)
+- [x] T-G2 · panel en Mi equipo (F-12, `panelId: "mi-equipo.plan"`)
+- [x] T-G3 · Plan de juego de F-17 en el informe de Preparar, junto a los duelos (2026-11-17, ver abajo)
 
 ## Estado de CA
 | CA | Estado | Evidencia |
@@ -56,3 +58,12 @@
 
 ## Docs actualizados
 - ✅ `docs/api.md` · ✅ `docs/frontend.md` · ✅ `docs/architecture.md` · ✅ `docs/metrics.md`
+
+## T-G3: decisión pendiente con el cliente (2026-11-16)
+El informe de Preparar (F-03) arma sus 5 ventajas y 5 amenazas con **duelos cruzados**: nuestro ataque contra su defensa (eFG% propio vs eFG% que concede el rival, TO% propio vs TO% que fuerza, etc.) y nuestra defensa contra su ataque. El plan de juego de F-17 en modo `matchup` compara **la misma métrica** entre los dos equipos (eFG% propio vs eFG% del rival). Los duelos responden mejor "dónde los atacamos y dónde nos atacan"; el spec de F-03 (RF-4/RF-5) pide reutilizar F-17. Cambiarlo altera un informe que el cliente ya usa, así que queda para que el cliente elija:
+1. mantener los duelos (actual),
+2. reemplazarlos por los ítems de F-17 (spec), o
+3. mostrar ambos (duelos arriba y la lectura de F-17 en un bloque plegable).
+
+## T-G3 resuelto (2026-11-17): se muestran los dos
+Decisión del usuario: opción 3, con el plan de juego arriba. El informe de Preparar trae `game_plan` (`phrases.game_plan(mode="matchup")`, en el idioma de la petición) y lo muestra primero ("Plan de juego contra <rival>": ventajas y riesgos); los duelos de F-03 quedan debajo en un desplegable "Duelos estadísticos". El PDF/PNG lleva las dos secciones. Evidencia: `a09q_sim.py`, `a09q_browser.py`.

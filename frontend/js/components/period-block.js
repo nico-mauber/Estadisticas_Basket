@@ -5,6 +5,8 @@
 import { api } from "../api.js";
 import { renderStandardPanel } from "./standard-panel.js";
 import { exportMenu } from "./export-menu.js";
+import { mountTable } from "./data-table.js";
+import { loadCatalog } from "../core/catalog.js";
 import { tableToData } from "./exporters.js";
 import { fmtNumber, DEC1, DEC2, isNull } from "../core/format.js";
 
@@ -91,6 +93,7 @@ export async function renderPeriodBlock(el, teamCode, opts = {}) {
     <div class="pb-panel"></div>
     <details class="pb-games-wrap"><summary>Ver partido a partido</summary>
       <div class="pb-export"></div><div class="pb-games-host"></div></details>
+    <details class="pb-compare-wrap"><summary>Comparar todos los tramos</summary><div class="pb-compare-host"></div></details>
   </div>`;
 
   const chips = el.querySelectorAll(".pb-chip");
@@ -127,6 +130,18 @@ export async function renderPeriodBlock(el, teamCode, opts = {}) {
 
   chips.forEach(c => c.addEventListener("click", () => { if (!c.disabled) select(c.dataset.w); }));
   select(current);
+
+  // Tabla completa de tramos (T-06 `period_splits`): una fila por tramo y el partido completo, exportable. Se pide al
+  // abrir el desplegable (recorre el jugada a jugada de nuevo).
+  const cmp = el.querySelector(".pb-compare-wrap");
+  cmp.addEventListener("toggle", () => {
+    if (!cmp.open || cmp.dataset.loaded) return;
+    cmp.dataset.loaded = "1";
+    mountTable(el.querySelector(".pb-compare-host"), async () => {
+      await loadCatalog();
+      return api.table("period_splits", { team: teamCode, ...params, base });
+    }, { tableId: "period_splits" });
+  });
 }
 
 export function destroyPeriodBlock() { _token++; }

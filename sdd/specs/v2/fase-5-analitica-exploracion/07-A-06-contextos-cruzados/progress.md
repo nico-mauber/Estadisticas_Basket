@@ -1,6 +1,6 @@
 # Progress — A-06: Motor de contextos cruzados
 
-> **Estado:** 🔶 Implementado en Explorar › Contextos (`GET /api/cross`). Faltan la tabla `cross_cells` con el conjunto estándar, el detalle de celda con el conjunto de T-05 completo, los filtros de nivel evento y la prueba del cuadre contra el cierre real de Cierres.
+> **Estado:** ✅ Implementado en Explorar › Contextos (`GET /api/cross`) con la tabla `cross_cells` de T-06. Detalle de celda con el conjunto de T-05 completo (`cross_cell`), filtros de nivel evento y posesión y cuadre contra Cierres (2026-11-17).
 > **Fecha:** 2026-11-04
 
 ## Qué se hizo
@@ -24,9 +24,9 @@
 | CA-11 | ✅ | `excluded.incomplete` informa las incompletas |
 | CA-12, CA-13 | ✅ | los seis cruces cierran; cambiar métrica, ejes o cruce no recarga la pantalla |
 | CA-14 | ✅ | `last=1` usa un partido; la dirección reproduce la vista |
-| CA-15 | 🔶 | el detalle muestra las ocho métricas de A-06 y los conteos, no el conjunto estándar de T-05 completo |
-| CA-16 | 🔶 | CSV de la matriz con filtros, lado, dimensiones, métrica y base de color; sin la tabla de celdas |
-| CA-17 | 🔶 | clutch usa la definición de Cierres (ventana y margen); no se comparó partido a partido |
+| CA-15 | ✅ | `GET /api/metrics/cross_cell`: mismas claves que `/api/metrics/team` (sin huecos); posesiones y puntos = la celda; ritmo/DER/Net `no_aplica`; desplegable "Conjunto estándar de la celda" en el detalle (`a06q_sim.py`, `a06q_browser.py`) |
+| CA-16 | ✅ | CSV de la matriz con filtros, lado, dimensiones, métrica y base de color; tabla `cross_cells` (2026-11-16) con el mismo contexto |
+| CA-17 | ✅ | ALB: los partidos con posesiones «Cierre» = los partidos calificados de `/api/clutch/ALB` (2849337) (`a06q_sim.py`) |
 | CA-18 | ✅ | 0,34 s en frío y 0,02 s en caliente con 13 partidos |
 
 ## Desviaciones
@@ -34,3 +34,13 @@
 - Sin la tabla T-06 `cross_cells`.
 - El cruce 4 usa «finalizador» como dimensión (propuesta del spec), no «jugador en cancha».
 - Copy sin `t()` (F-21).
+
+## Tabla `cross_cells` (2026-11-16)
+- T-B7 ✅ `GET /api/table/cross_cells`: una fila por celda con datos; `a06_table.py` 18/18 (filas = celdas con datos, Σ = cuadre de la matriz, métricas por celda iguales, también con oportunidades y con jugador en cancha superpuesto). En la UI, "Ver todas las celdas como tabla" debajo de la matriz, exportable; Chromium 1280/360 px e inglés (`tables_browser.py`), con los textos del panel traducidos.
+- Desvío: las columnas son las métricas del cruce, no el conjunto estándar de T-05 (las celdas solo acumulan tiros, libres, pérdidas y rebotes).
+
+## Detalle de celda, filtros y CA-17 (2026-11-17)
+- Entidad `cross_cell` (id `equipo|dim_x|x|dim_y|y`, `side`, `limit`): conjunto estándar de las posesiones u oportunidades de la celda (cajas del motor A-01; por oportunidad, con los rebotes por estructura de A-04); un solo lado; sin población. En pantalla, desplegable "Conjunto estándar de la celda" bajo el detalle.
+- La matriz y la tabla `cross_cells` aplican el contexto completo de T-03: cuarto, marcador, con/sin jugador (estado al inicio de la posesión), origen y tipo; con oportunidad, tramo o reloj la unidad pasa a oportunidades.
+- Evidencia: `a06q_sim.py` 17/17 (quarter=4: 43 posesiones y cuadre; origin=robo = 14 = posesiones del equipo con el filtro; chance=segunda en oportunidades; celda con n y puntos iguales a la matriz; celdas «Otros» suman la fila; CA-17). `a06q_browser.py` 12/12 (Chromium 1280/360 px e inglés).
+

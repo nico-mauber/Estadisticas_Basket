@@ -98,6 +98,8 @@ Stats de box score por equipo por partido. Incluye stats del rival pre-calculada
 | `fast_break_pts` | INTEGER | Puntos de contraataque (PCA) |
 | `blk_received` | INTEGER | Tapones recibidos por el equipo (`tot_sBlocksReceived`, T-05). `NULL` = no importado todavía |
 | `fouls_drawn` | INTEGER | Faltas recibidas por el equipo (`tot_sFoulsOn`, T-05). `NULL` = no importado todavía |
+| `team_orb` / `team_drb` / `team_tov` | INTEGER | Rebotes ofensivos/defensivos y pérdidas "de equipo", sin jugador (`tot_sReboundsTeamOffensive`, `tot_sReboundsTeamDefensive`, `tot_sTurnoversTeam`, F-07). Ya están incluidos en `orb`/`drb`/`tov`: Σ jugadores + estos = total. `NULL` = partido previo a la ingesta 6 |
+| `period_pts` | TEXT | Parciales oficiales en JSON `{"1": 23, "2": 29, "3": 26, "4": 16, "OT": 19}` (`p<N>_score`; `OT` = `ot_score`, suma de todas las prórrogas; F-07). `NULL` = no publicado o partido previo a la ingesta 6 |
 
 **Restricción única:** `(game_id, team_code)`
 

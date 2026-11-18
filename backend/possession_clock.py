@@ -329,8 +329,44 @@ def _players_table(chs, done_shots):
                        for b in BANDS}}
 
 
-def _matrix(done_shots):
-    """Matriz zona × tramo (ambos relojes): intentos, FG%, eFG% y PPT por celda; Σ de cada tramo = tiros del tramo."""
+def _cell_counts(done_shots):
+    """{(zona, tramo): {attempts, made, made3, pts}} de una lista de tiros (ambos relojes)."""
+    cells = defaultdict(lambda: {"attempts": 0, "made": 0, "made3": 0, "pts": 0})
+    for s in done_shots:
+        c = cells[(s.get("zone") or "sin_zona", s["band"] or "sin_reloj")]
+        c["attempts"] += 1
+        c["made"] += 1 if s["made"] else 0
+        c["made3"] += 1 if (s.get("three") and s["made"]) else 0
+        c["pts"] += s["pts"]
+    return cells
+
+
+def _league_matrix(comp_id, ctx, side):
+    """PPT de cada equipo en cada celda zona × tramo (población de la matriz, RF-11/RF-14): {(zona, tramo): {equipo: ppt}}.
+    Solo las celdas con la muestra mínima de `sample.clock_zone.min` (las de muestra baja no se colorean ni rankean)."""
+    if comp_id is None:
+        return None
+    import dataclasses
+
+    def build():
+        cx = dataclasses.replace(ctx, on=(), off=())
+        mn = config.get("sample.clock_zone.min")
+        out = defaultdict(dict)
+        for code in sorted({r["team_code"] for r in repository.team_game_rows(comp_id).values()}):
+            mine, *_ = transition_mod._selection(code, comp_id, cx, side)
+            shots = [s for p in mine if not p.incomplete for s in p.shots]
+            for key, c in _cell_counts(shots).items():
+                if c["attempts"] >= mn:
+                    out[key][code] = c["pts"] / c["attempts"]
+        return dict(out)
+    return cache.memo("poss:clock_matrix_league", (comp_id, context_mod.context_key(ctx), side), build)
+
+
+def _matrix(done_shots, league=None, team_code=None):
+    """Matriz zona × tramo (ambos relojes): intentos, FG%, eFG% y PPT por celda; Σ de cada tramo = tiros del tramo.
+    Con `league` (población por celda) cada celda con muestra suficiente lleva el percentil de su PPT contra los demás
+    equipos en la MISMA celda y el promedio de la celda (RF-11, RF-14)."""
+    import population
     import shot_zones
     zones = list(shot_zones.ZONE_KEYS_11) + ["sin_zona"]
     cells = {z: {b: {"attempts": 0, "made": 0, "made3": 0, "pts": 0} for b in MATRIX_BANDS} for z in zones}
@@ -346,13 +382,25 @@ def _matrix(done_shots):
         for b in MATRIX_BANDS:
             c = cells[z][b]
             n = c["attempts"]
-            row["bands"][b] = {"attempts": n, "made": c["made"], "fg_pct": _m(_div(c["made"], n)),
-                               "efg_pct": _m(_div(c["made"] + 0.5 * c["made3"], n)), "ppt": _m(_div(c["pts"], n)),
-                               "sample": sample.sample_level("zone", n=n, unit="intentos")}
+            smp = sample.sample_level("zone", n=n, unit="intentos")
+            cell = {"attempts": n, "made": c["made"], "fg_pct": _m(_div(c["made"], n)),
+                    "efg_pct": _m(_div(c["made"] + 0.5 * c["made3"], n)), "ppt": _m(_div(c["pts"], n)),
+                    "sample": smp, "percentile": None, "avg_ppt": None,
+                    "percentile_reason": "sin_intentos" if not n else ("sin_universo" if league is None else None)}
+            if league is not None and n:
+                others = [v for code, v in (league.get((z, b)) or {}).items() if code != team_code]
+                cell["avg_ppt"] = _div(sum(others), len(others)) if others else None
+                if smp.get("level") == "baja":
+                    cell["percentile_reason"] = "muestra_baja"
+                elif len(others) < config.get("population.min_size"):
+                    cell["percentile_reason"] = "poblacion_insuficiente"
+                else:
+                    cell["percentile"] = population.percentile(c["pts"] / n, others, "higher")
+            row["bands"][b] = cell
         out.append(row)
     return {"zones": out, "bands": list(MATRIX_BANDS),
             "totals": {b: sum(cells[z][b]["attempts"] for z in zones) for b in MATRIX_BANDS},
-            "has_coordinates": any(s.get("zone") for s in done_shots)}
+            "has_coordinates": any(s.get("zone") for s in done_shots), "league": league is not None}
 
 
 def _band_means(team_code, comp_id, ctx, side):
@@ -439,8 +487,30 @@ def _decision(rows, players, league):
     }
 
 
-def _build(team_code, comp_id, ctx, side, game_id):
+def _lineup_of(p, side):
+    """Quinteto del equipo analizado al inicio de la posesión ("id-id-id-id-id", ids canónicos) o None (RF-9). En ataque
+    es el quinteto propio; en defensa, el del equipo que defiende (la posesión es del rival)."""
+    ids = p.own_on_court if side == "ataque" else p.opp_on_court
+    if not ids or len(ids) != 5:
+        return None
+    return "-".join(str(i) for i in sorted(identity.canonical_id(i) or i for i in ids))
+
+
+def _lineups(complete, side, limit=15):
+    """Quintetos con más posesiones del lado (para el selector) y cuántas no tienen quinteto de 5 identificado."""
+    cnt = Counter(_lineup_of(p, side) for p in complete)
+    none = cnt.pop(None, 0)
+    rows = [{"key": k, "possessions": n, "names": [_pname(int(i)) for i in k.split("-")]}
+            for k, n in sorted(cnt.items(), key=lambda kv: (-kv[1], kv[0]))[:limit]]
+    return {"rows": rows, "without_lineup": none, "total": len(cnt)}
+
+
+def _build(team_code, comp_id, ctx, side, game_id, lineup=None):
     mine, used, total, excluded, per_game = _selection(team_code, comp_id, ctx, side, game_id)
+    lineups_info = _lineups([p for p in mine if not p.incomplete], side)
+    if lineup:
+        # RF-9: cada oportunidad y cada tiro se atribuyen al quinteto en cancha al inicio de su posesión
+        mine = [p for p in mine if _lineup_of(p, side) == lineup]
     complete = [p for p in mine if not p.incomplete]
     cuts = _cuts()
     all_shots = [s for p in mine for s in p.shots]
@@ -468,7 +538,7 @@ def _build(team_code, comp_id, ctx, side, game_id):
     no_clock = sum(1 for s in done_shots if s["band"] is None)
     in_inc = sum(len(p.shots) for p in mine if p.incomplete)
     box = _box_rows(per_game, team_code, side)
-    fga_team = _sum(box, "fga2") + _sum(box, "fga3")
+    fga_team = _sum(box, "fga2") + _sum(box, "fga3") if not lineup else team["fga"]
     no_clock_ch = sum(1 for _, ch in chs if ch.band is None and (ch.box or {}).get("dec"))
     players_tbl = _players_table(chs, done_shots) if side == "ataque" else None
     return {
@@ -482,10 +552,13 @@ def _build(team_code, comp_id, ctx, side, game_id):
                       "ok": in24 + in14 + no_clock + in_inc == fga_team,
                       "chances_24": sum(1 for _, ch in chs if ch.shot_clock_start >= 24),
                       "chances_14": sum(1 for _, ch in chs if ch.shot_clock_start < 24)},
-        "points_mix": points_mix(box),
-        "matrix": _matrix(done_shots),
+        "points_mix": points_mix(box) if not lineup else None,
+        "matrix": _matrix(done_shots, _league_matrix(comp_id, ctx, side) if not game_id and not lineup else None, team_code),
+        "lineup": ({"key": lineup, "names": [_pname(int(i)) for i in lineup.split("-")]} if lineup else None),
+        "lineups": lineups_info,
         "players": players_tbl,
         "decision": _decision(rows, players_tbl, _league_bands(comp_id, ctx, side) if not game_id else None),
+        "reconcile_source": "motor" if lineup else "box",
         "summary": {"possessions": len(complete), "incomplete": len(mine) - len(complete), "shots": team["fga"]},
         "games_used": used, "games_total": total, "games_excluded": excluded,
     }
@@ -519,11 +592,147 @@ def player_clock(player_id, comp_id, ctx):
     return out
 
 
-def clock_report(team_code, comp_id, ctx, *, side="ataque", game_id=None):
-    key = (team_code, comp_id, context_mod.context_key(ctx), side, game_id)
-    out = dict(cache.memo("poss:clock", key, lambda: _build(team_code, comp_id, ctx, side, game_id)))
+def clock_report(team_code, comp_id, ctx, *, side="ataque", game_id=None, lineup=None):
+    key = (team_code, comp_id, context_mod.context_key(ctx), side, game_id, lineup)
+    out = dict(cache.memo("poss:clock", key, lambda: _build(team_code, comp_id, ctx, side, game_id, lineup)))
     out["context"] = transition_mod._echo(ctx, out.pop("games_used"), out.pop("games_total"), out.pop("games_excluded"))
     if game_id:
         out["game_id"] = game_id
         out["context"]["label"] = f"Partido {game_id}"
     return out
+
+
+# ── Entidad `clock` (T-05) y tablas `team_clock` / `zone_clock_matrix` (T-06) ──
+# Una oportunidad pertenece al tramo de su evento de decisión (tiro, pérdida o libres). La caja de cada oportunidad es la
+# misma que usa la entidad `chance` de A-04 (`second_chance._chance_items`: rebotes asignados por estructura).
+
+CLOCK_ROWS = (("temprano", "Temprano (24 s)", "temprano", True), ("medio", "Medio (24 s)", "medio", True),
+              ("tardio", "Tardío (24 s)", "tardio", True), ("temprano_14", "Temprano (14 s)", "temprano", False),
+              ("medio_14", "Medio (14 s)", "medio", False), ("sin_tramo", "Sin tramo (reloj no derivable)", None, None))
+
+
+def clock_bundle(team_code, band, comp_id, ctx, side="ataque"):
+    """`StatBundle` de las oportunidades del equipo decididas en el tramo `band` (ambos relojes); `None` sin ninguna."""
+    import second_chance
+
+    def build():
+        items, _u, total, excluded = second_chance._chance_items(team_code, comp_id, ctx, side)
+        group = [i for i in items if i[1].band == band]
+        if not group:
+            return None
+        return second_chance._group_bundle(team_code, group, f"{team_code}:{band}", f"{team_code} · {BAND_LABELS[band]}",
+                                           {"clock": band, "side": side, "variant": f"{band}:{side}",
+                                            "games_total": total, "games_excluded": excluded})
+    k = ("clock_bundle", team_code, band, comp_id, context_mod.context_key(ctx), side)
+    return repository.memo(k, build)
+
+
+def _clock_loader(req):
+    import metrics_catalog
+    team_code, _, band = str(req.entity_id).partition(":")
+    if band not in BANDS:
+        raise metrics_catalog.MetricsError("Tramo inválido. Usá temprano, medio o tardio.", 400, "parametro_invalido")
+    side = (req.params or {}).get("side") or "ataque"
+    if side not in ("ataque", "defensa"):
+        raise metrics_catalog.MetricsError("El lado debe ser ataque o defensa.", 400, "parametro_invalido")
+    b = clock_bundle(team_code.upper(), band, req.comp_id, req.ctx, side)
+    return [b] if b is not None else []
+
+
+def all_clock_bundles(comp_id, ctx, variant=None):
+    """Población del tipo `clock`: todos los equipos en el mismo tramo y lado (`variant` = `tramo:lado`)."""
+    if not variant or ":" not in str(variant):
+        return []
+    band, side = str(variant).split(":", 1)
+    if band not in BANDS or side not in ("ataque", "defensa"):
+        return []
+    out = []
+    for code in sorted({r["team_code"] for r in repository.team_game_rows(comp_id).values()}):
+        b = clock_bundle(code, band, comp_id, ctx, side)
+        if b is not None:
+            out.append(b)
+    return out
+
+
+def table_rows(treq):
+    """Builder de `team_clock`: una fila por tramo y reloj (24 s / 14 s) más las oportunidades sin tramo, con el conjunto
+    estándar de esas oportunidades."""
+    import second_chance
+    import tables
+    team_code = (treq.params.get("team") or "").upper()
+    side = treq.params.get("side") or "ataque"
+    if side not in ("ataque", "defensa"):
+        raise tables.TableError(400, "El lado debe ser ataque o defensa.", "parametro_invalido", {"param": "side"})
+    items, _u, _t, _e = second_chance._chance_items(team_code, treq.comp_id, treq.ctx, side)
+    total = len(items)
+    rows = []
+    for key, label, band, is24 in CLOCK_ROWS:
+        if band is None:
+            grp = [i for i in items if i[1].band is None]
+        else:
+            grp = [i for i in items if i[1].band == band and (i[1].shot_clock_start >= 24) == is24]
+        b = (second_chance._group_bundle(team_code, grp, f"{team_code}:{key}", label, {"clock": key, "side": side})
+             if grp else None)
+        share = "—" if not total else f"{len(grp) / total * 100:.1f}".replace(".", ",") + " %"
+        rows.append(tables.TableRow(id=f"{team_code}:{key}", link=None, texts={"_band": label, "_share": share}, bundle=b,
+                                    sample=sample.sample_level("split", n=len(grp), unit="posesiones", team_poss=total),
+                                    reason_if_null="sin_intentos"))
+    return rows
+
+
+def matrix_rows(treq):
+    """Builder de `zone_clock_matrix`: una fila por zona de tiro con intentos y eFG% en cada tramo (ambos relojes)."""
+    import tables
+    team_code = (treq.params.get("team") or "").upper()
+    side = treq.params.get("side") or "ataque"
+    if side not in ("ataque", "defensa"):
+        raise tables.TableError(400, "El lado debe ser ataque o defensa.", "parametro_invalido", {"param": "side"})
+    rep = clock_report(team_code, treq.comp_id, treq.ctx, side=side)
+    rows = []
+    for z in rep["matrix"]["zones"]:
+        texts = {"_zone": z["label"]}
+        n_total = 0
+        for b in MATRIX_BANDS:
+            c = z["bands"][b]
+            texts[f"_{b}_n"] = c["attempts"]
+            texts[f"_{b}_efg"] = c["efg_pct"]["value"]
+            n_total += c["attempts"]
+        if not n_total:
+            continue
+        texts["_total"] = n_total
+        rows.append(tables.TableRow(id=f"{team_code}:{z['key']}", link=None, texts=texts, bundle=None, sample=None))
+    return rows
+
+
+def _register_tables():
+    import metrics_catalog
+    import tables
+    metrics_catalog.register_entity("clock", _clock_loader, enumerator=all_clock_bundles)
+    side_title = lambda treq: " del rival" if treq.params.get("side") == "defensa" else ""
+    tables.register_table(
+        "team_clock", entity_type="clock", title="Tramo del reloj de posesión", builder=table_rows,
+        required_params=("team",),
+        default_columns=("_band", "_sample", "possessions_counted", "_share", "pts", "ppp", "efg_pct", "ts_pct", "to_pct",
+                         "ft_rate"),
+        bulk_scopes=("team",), row_kind="entity",
+        extra_columns=(("_band", "Tramo", "text"), ("_share", "% de las oportunidades", "text")),
+        default_sort=None, totals_mode="sum", avg_mode="none", pct_mode="none", sample_col=True,
+        title_fn=lambda treq: f"Tramo del reloj de posesión{side_title(treq)} — {(treq.params.get('team') or '').upper()}",
+    )
+    band_cols = []
+    for b in MATRIX_BANDS:
+        lab = {**BAND_LABELS, "sin_reloj": "Sin reloj"}.get(b, b)
+        band_cols += [(f"_{b}_n", f"{lab}: intentos", "value:int"), (f"_{b}_efg", f"{lab}: eFG%", "value:pct")]
+    tables.register_table(
+        "zone_clock_matrix", entity_type="zone_clock", title="Zona × tramo del reloj", builder=matrix_rows,
+        required_params=("team",),
+        default_columns=("_zone", "_total") + tuple(c[0] for c in band_cols),
+        bulk_scopes=("team",), row_kind="entity",
+        extra_columns=(("_zone", "Zona", "text"), ("_total", "Intentos", "value:int")) + tuple(band_cols),
+        default_sort={"key": "_total", "dir": "desc", "use_adjusted": False},
+        totals_mode="none", avg_mode="none", pct_mode="none", sample_col=False,
+        title_fn=lambda treq: f"Zona × tramo del reloj{side_title(treq)} — {(treq.params.get('team') or '').upper()}",
+    )
+
+
+_register_tables()
